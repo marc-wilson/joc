@@ -12,11 +12,12 @@ test('a prompt makes the session work and titles it from the first line', () => 
     state: 'working',
     activity: 'Thinking',
     title: 'Fix the login loop',
+    name: undefined,
   });
 });
 
-test('a custom session title wins over the prompt', () => {
-  assert.equal(event('UserPromptSubmit', { prompt: 'x', session_title: 'Auth' })?.title, 'Auth');
+test('a custom session name is reported as the name', () => {
+  assert.equal(event('UserPromptSubmit', { prompt: 'x', session_title: 'Auth' })?.name, 'Auth');
 });
 
 test('tool calls describe what they touch', () => {
@@ -75,4 +76,79 @@ test('GitHub remotes parse to owner/name', () => {
     'harbor-labs/atlas-web',
   );
   assert.equal(parseGitHubRepo('https://gitlab.com/harbor-labs/atlas-web.git'), undefined);
+});
+
+test('transcript lines become conversation items', async () => {
+  const { parseLines } = await import('./transcript.ts');
+  const t = '2026-10-18T10:00:00.000Z';
+  const lines = [
+    JSON.stringify({
+      type: 'user',
+      uuid: 'u1',
+      timestamp: t,
+      message: { content: 'Fix the login loop' },
+    }),
+    JSON.stringify({
+      type: 'user',
+      uuid: 'u2',
+      timestamp: t,
+      isMeta: true,
+      message: { content: 'caveat' },
+    }),
+    JSON.stringify({
+      type: 'user',
+      uuid: 'u3',
+      timestamp: t,
+      message: { content: '<command-name>/review</command-name><command-args>auth</command-args>' },
+    }),
+    JSON.stringify({
+      type: 'user',
+      uuid: 'u4',
+      timestamp: t,
+      message: { content: '<local-command-stdout>x' },
+    }),
+    JSON.stringify({
+      type: 'assistant',
+      uuid: 'a1',
+      timestamp: t,
+      message: { content: [{ type: 'thinking' }] },
+    }),
+    JSON.stringify({
+      type: 'assistant',
+      uuid: 'a2',
+      timestamp: t,
+      message: { content: [{ type: 'text', text: 'Reproduced it.' }] },
+    }),
+    JSON.stringify({
+      type: 'assistant',
+      uuid: 'a3',
+      timestamp: t,
+      message: {
+        content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'pnpm test' } }],
+      },
+    }),
+    JSON.stringify({
+      type: 'user',
+      uuid: 'u5',
+      timestamp: t,
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: 'boom' }],
+      },
+    }),
+    JSON.stringify({ type: 'ai-title', aiTitle: 'Login loop fix' }),
+    'not json',
+  ];
+  const { items, aiTitle } = parseLines(lines, '/work');
+  assert.equal(aiTitle, 'Login loop fix');
+  assert.deepEqual(
+    items.map((i) => [i.kind, 'text' in i ? i.text : 'summary' in i ? i.summary : '']),
+    [
+      ['user', 'Fix the login loop'],
+      ['user', 'auth'],
+      ['claude', 'Reproduced it.'],
+      ['tool_call', 'pnpm test'],
+      ['tool_result', 'boom'],
+    ],
+  );
+  assert.equal(items[1]?.kind === 'user' && items[1].command, 'review');
 });

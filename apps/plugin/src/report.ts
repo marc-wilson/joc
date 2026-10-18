@@ -20,7 +20,7 @@ export interface HookInput {
 }
 
 /** The part of a report decided by the hook event alone. */
-export type EventFields = Pick<SessionReport, 'state' | 'activity' | 'title' | 'model'>;
+export type EventFields = Pick<SessionReport, 'state' | 'activity' | 'title' | 'name' | 'model'>;
 
 /** First non-empty line, whitespace collapsed, cut to `max` characters. */
 export function firstLine(text: string | undefined, max = 120): string | undefined {
@@ -42,16 +42,27 @@ function modelName(model: unknown): string | undefined {
   return undefined;
 }
 
-/** One line for what a tool call is doing: "Edit src/auth.ts", "pnpm test". */
-export function describeTool(input: HookInput): string {
-  const name = input.tool_name ?? 'Tool';
+/** A readable tool name: "mcp__claude-in-chrome__navigate" → "claude-in-chrome · navigate". */
+export function toolLabel(name: string | undefined): string {
+  const mcp = name?.match(/^mcp__(.+?)__(.+)$/);
+  return mcp ? `${mcp[1]} · ${mcp[2]}` : (name ?? 'Tool');
+}
+
+/** What a tool call touches, without the tool's name: "src/auth.ts", "pnpm test". */
+export function toolTarget(input: HookInput): string {
   const args = input.tool_input ?? {};
   const str = (key: string) => (typeof args[key] === 'string' ? (args[key] as string) : undefined);
   const path = str('file_path') ?? str('notebook_path');
-  if (name === 'Bash') return firstLine(str('command')) ?? name;
-  if (path) return `${name} ${relative(input.cwd, path) || path}`;
-  const detail = str('pattern') ?? str('url') ?? str('query') ?? str('description');
-  return detail ? `${name} ${firstLine(detail, 100)}` : name;
+  if (input.tool_name === 'Bash') return firstLine(str('command')) ?? '';
+  if (path) return relative(input.cwd, path) || path;
+  return firstLine(str('pattern') ?? str('url') ?? str('query') ?? str('description'), 100) ?? '';
+}
+
+/** One line for what a tool call is doing: "Edit src/auth.ts", "pnpm test". */
+export function describeTool(input: HookInput): string {
+  const target = toolTarget(input);
+  if (input.tool_name === 'Bash' && target) return target;
+  return target ? `${toolLabel(input.tool_name)} ${target}` : toolLabel(input.tool_name);
 }
 
 /** Maps a hook event to the session's state, or undefined when the event changes nothing. */
@@ -63,14 +74,15 @@ export function eventFields(input: HookInput): EventFields | undefined {
       return {
         state: 'idle',
         activity: input.source === 'resume' ? 'Resumed' : 'Waiting for your first message',
-        title: input.session_title,
+        name: input.session_title,
         model: modelName(input.model),
       };
     case 'UserPromptSubmit':
       return {
         state: 'working',
         activity: 'Thinking',
-        title: input.session_title ?? firstLine(input.prompt, 80),
+        title: firstLine(input.prompt, 80),
+        name: input.session_title,
       };
     case 'PreToolUse':
       return { state: 'working', activity: describeTool(input) };
