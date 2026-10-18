@@ -21,6 +21,12 @@ const markdown: Components = {
       />
     );
   },
+  // Links in a session's messages always open outside the dashboard.
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  ),
   h1: ({ children }) => <h3>{children}</h3>,
   h2: ({ children }) => <h3>{children}</h3>,
 };
