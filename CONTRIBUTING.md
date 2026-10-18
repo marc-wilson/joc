@@ -21,7 +21,9 @@ pnpm install
 cp apps/server/.env.example apps/server/.env
 ```
 
-Set `MONGODB_URI` in `apps/server/.env` (`PORT` is optional, default `3000`). `.env` is
+Set `MONGODB_URI` in `apps/server/.env` (`PORT` is optional, default `3000`). Leave
+`JOC_TOKEN` empty for local dev so the API stays open; set it to try the sign-in screen, and
+give the plugin the same value as `JOC_TOKEN`. `.env` is
 git-ignored; never commit it.
 
 `pnpm install` also installs the `commit-msg` git hook (see [Commits](#commits)).
