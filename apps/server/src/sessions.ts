@@ -15,7 +15,7 @@ interface SessionDoc {
   model?: string;
   createdAt: Date;
   updatedAt: Date;
-  /** `at` of the last report applied. */
+  /** `at` of the last report with a state applied. */
   reportedAt: number;
 }
 
@@ -73,7 +73,15 @@ export async function applyReport({
         {
           $set: {
             ...set,
-            reportedAt: at,
+            // A report without a state (a sync) keeps the stored one, `idle` for a new session.
+            // It doesn't move `reportedAt` either, so a state report that fired before it but
+            // lands after it still applies.
+            ...(fields.state
+              ? { reportedAt: at }
+              : {
+                  state: { $ifNull: ['$state', 'idle'] },
+                  reportedAt: { $ifNull: ['$reportedAt', 0] },
+                }),
             updatedAt: now,
             createdAt: { $ifNull: ['$createdAt', now] },
             // A session keeps the title from its first prompt.
