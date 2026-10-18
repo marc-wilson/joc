@@ -70,7 +70,7 @@ export function collectChanges(cwd: string): Changes | undefined {
 }
 
 function hashFile(sessionId: string): string {
-  const dir = join(process.env.CLAUDE_PLUGIN_DATA ?? join(tmpdir(), 'joc-plugin'), 'changes');
+  const dir = join(process.env.CLAUDE_PLUGIN_DATA || join(tmpdir(), 'joc-plugin'), 'changes');
   mkdirSync(dir, { recursive: true });
   return join(dir, `${sessionId.replace(/[^\w-]/g, '_')}.hash`);
 }

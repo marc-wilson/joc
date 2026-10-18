@@ -1,13 +1,15 @@
 import {
   closeSync,
+  existsSync,
   fstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   readSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ConversationItem } from '@joc/protocol';
 import { firstLine, toolLabel, toolTarget } from './report.ts';
@@ -21,9 +23,10 @@ const MAX_READ_BYTES = 1024 * 1024;
 const cut = (text: string, max: number) =>
   text.length > max ? `${text.slice(0, max - 1)}…` : text;
 
-// Where each session's read position is kept between hook runs.
+// Where each session's read position is kept between hook runs. A sync passes an empty
+// CLAUDE_PLUGIN_DATA when it can't tell the plugin's data folder.
 function offsetFile(sessionId: string): string {
-  const dir = join(process.env.CLAUDE_PLUGIN_DATA ?? join(tmpdir(), 'joc-plugin'), 'offsets');
+  const dir = join(process.env.CLAUDE_PLUGIN_DATA || join(tmpdir(), 'joc-plugin'), 'offsets');
   mkdirSync(dir, { recursive: true });
   return join(dir, `${sessionId.replace(/[^\w-]/g, '_')}.offset`);
 }
@@ -68,6 +71,26 @@ export function readNewLines(sessionId: string, transcriptPath: string): NewLine
   } finally {
     closeSync(fd);
   }
+}
+
+/**
+ * Where Claude Code keeps a session's transcript, for a sync, which isn't given the path:
+ * `<config>/projects/<project>/<session id>.jsonl`. The project folder is usually the working
+ * directory with every other character turned into `-`; any other project folder is searched.
+ */
+export function findTranscript(sessionId: string, cwd: string): string | undefined {
+  if (!/^[\w-]+$/.test(sessionId)) return undefined;
+  const projects = join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects');
+  const name = `${sessionId}.jsonl`;
+  const likely = join(projects, cwd.replace(/[^a-zA-Z0-9]/g, '-'), name);
+  if (existsSync(likely)) return likely;
+  try {
+    for (const dir of readdirSync(projects)) {
+      const path = join(projects, dir, name);
+      if (existsSync(path)) return path;
+    }
+  } catch {}
+  return undefined;
 }
 
 interface Entry {
