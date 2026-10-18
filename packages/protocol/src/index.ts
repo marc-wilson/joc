@@ -29,12 +29,15 @@ export type Session = z.infer<typeof Session>;
  * What the plugin sends on each hook event. Fields left out keep their last value; `title` is
  * only taken from the first report that has one. A report older than the last one applied is
  * dropped.
+ *
+ * A report without `state` (the plugin's periodic sync) refreshes the other fields and keeps the
+ * state; a session first seen that way is `idle`. It never makes a later state report stale.
  */
 export const SessionReport = z.object({
   sessionId: z.string().min(1),
   /** When the hook fired, ms since epoch. Hooks run async, so reports can arrive out of order. */
   at: z.number().int().positive(),
-  state: SessionState,
+  state: SessionState.optional(),
   repo: z.string().min(1),
   branch: z.string().optional(),
   /** Fallback title, from the first prompt. Kept from the first report that has one. */
