@@ -17,6 +17,7 @@ const PATHS = {
   plus: 'M8 3.5v9M3.5 8h9',
   stop: 'M5 5h6v6H5z',
   sparkle: 'M8 2.5v3M8 10.5v3M2.5 8h3M10.5 8h3',
+  lock: 'M4.5 7.5h7v5.5h-7zM6 7.5V5.5a2 2 0 014 0v2',
   inbox: 'M2.5 9.5l1.5-6h8l1.5 6v3h-11zM2.5 9.5h3.5l.5 1.5h3l.5-1.5h3.5',
 } as const;
 

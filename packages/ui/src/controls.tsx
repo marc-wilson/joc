@@ -58,6 +58,11 @@ export interface TextInputProps {
   mono?: boolean;
   disabled?: boolean;
   id?: string;
+  /** Read the value from the surrounding form's `FormData` under this name. */
+  name?: string;
+  type?: 'text' | 'password';
+  autoComplete?: string;
+  autoFocus?: boolean;
 }
 
 export function TextInput({
@@ -71,6 +76,10 @@ export function TextInput({
   mono,
   disabled,
   id,
+  name,
+  type = 'text',
+  autoComplete,
+  autoFocus,
 }: TextInputProps) {
   const inputId = id || `in-${(label || 'x').replace(/\W+/g, '-').toLowerCase()}`;
   return (
@@ -84,6 +93,11 @@ export function TextInput({
         {icon ? <Icon name={icon} size={14} /> : null}
         <input
           id={inputId}
+          name={name}
+          type={type}
+          autoComplete={autoComplete}
+          // biome-ignore lint/a11y/noAutofocus: opt-in, for a screen whose only job is this field
+          autoFocus={autoFocus}
           className={cx(mono && 'is-mono')}
           placeholder={placeholder}
           defaultValue={value}
