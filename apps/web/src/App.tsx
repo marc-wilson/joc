@@ -10,8 +10,9 @@ import {
   TextInput,
 } from '@joc/ui';
 import { Fragment, useState } from 'react';
+import { Conversation } from './Conversation.tsx';
+import { useConversation, useNow, useSessions } from './hooks.ts';
 import { age } from './time.ts';
-import { useNow, useSessions } from './useSessions.ts';
 
 // Repos in first-seen order, so groups never reorder as sessions update.
 function groupByRepo(list: Session[]): [string, Session[]][] {
@@ -28,6 +29,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string>();
   const selected = sessions.find((s) => s.id === selectedId) ?? sessions[0];
   const needs = sessions.filter((s) => s.state === 'needs').length;
+  const items = useConversation(selected?.id);
 
   return (
     <div className="joc-app app">
@@ -90,12 +92,7 @@ export default function App() {
                 ]}
                 tab="conversation"
               />
-              <div className="app-main__scroll">
-                <EmptyState
-                  title="Conversation coming soon"
-                  body="JOC shows this session's live state. Its messages will show here once the plugin streams them."
-                />
-              </div>
+              <Conversation key={selected.id} items={items} state={selected.state} />
               <div className="app-main__dock">
                 <Composer disabled hint="Sending prompts from JOC isn't built yet" />
               </div>
