@@ -51,6 +51,10 @@ export const SessionReport = z.object({
 });
 export type SessionReport = z.infer<typeof SessionReport>;
 
+/** How a background task (shell command or subagent) ended. */
+export const TaskStatus = z.enum(['completed', 'failed', 'killed']);
+export type TaskStatus = z.infer<typeof TaskStatus>;
+
 const itemBase = { id: z.string().min(1).max(200), at: z.iso.datetime() };
 
 /** One entry in a session's conversation, normalized from its transcript by the plugin. */
@@ -70,6 +74,12 @@ export const ConversationItem = z.discriminatedUnion('kind', [
     name: z.string().max(200),
     /** One line on what the call touches: a command, a path, a pattern. */
     summary: z.string().max(500),
+    /** What Claude said the call is for, when it said (e.g. a shell command's description). */
+    description: z.string().max(200).optional(),
+    /** Set when Claude asked for the call to run in the background. */
+    background: z.boolean().optional(),
+    /** Set on a subagent call: the subagent's type, e.g. `Explore`. */
+    subagent: z.string().max(100).optional(),
   }),
   z.object({
     ...itemBase,
@@ -77,6 +87,18 @@ export const ConversationItem = z.discriminatedUnion('kind', [
     toolUseId: z.string().max(200),
     isError: z.boolean(),
     text: z.string().max(5_000),
+    /** Set when the call left a task running in the background; a `task_update` ends it. */
+    taskId: z.string().max(200).optional(),
+  }),
+  z.object({
+    ...itemBase,
+    kind: z.literal('task_update'),
+    taskId: z.string().max(200),
+    /** The call that started the task, when Claude Code says. */
+    toolUseId: z.string().max(200).optional(),
+    status: TaskStatus,
+    /** One line on how it ended, as Claude Code put it. */
+    summary: z.string().max(500),
   }),
 ]);
 export type ConversationItem = z.infer<typeof ConversationItem>;
