@@ -37,7 +37,10 @@ export const SessionReport = z.object({
   state: SessionState,
   repo: z.string().min(1),
   branch: z.string().optional(),
+  /** Fallback title, from the first prompt. Kept from the first report that has one. */
   title: z.string().max(200).optional(),
+  /** Claude Code's own name for the session (a custom name or its generated title). Latest wins. */
+  name: z.string().max(200).optional(),
   activity: z.string().max(500).optional(),
   contextLeft: z.number().min(0).max(100).optional(),
   machine: z.string().max(200).optional(),
@@ -45,7 +48,45 @@ export const SessionReport = z.object({
 });
 export type SessionReport = z.infer<typeof SessionReport>;
 
+const itemBase = { id: z.string().min(1).max(200), at: z.iso.datetime() };
+
+/** One entry in a session's conversation, normalized from its transcript by the plugin. */
+export const ConversationItem = z.discriminatedUnion('kind', [
+  z.object({
+    ...itemBase,
+    kind: z.literal('user'),
+    text: z.string().max(20_000),
+    /** Set when the prompt was a slash command, e.g. `review`. */
+    command: z.string().max(100).optional(),
+  }),
+  z.object({ ...itemBase, kind: z.literal('claude'), text: z.string().max(50_000) }),
+  z.object({
+    ...itemBase,
+    kind: z.literal('tool_call'),
+    toolUseId: z.string().max(200),
+    name: z.string().max(200),
+    /** One line on what the call touches: a command, a path, a pattern. */
+    summary: z.string().max(500),
+  }),
+  z.object({
+    ...itemBase,
+    kind: z.literal('tool_result'),
+    toolUseId: z.string().max(200),
+    isError: z.boolean(),
+    text: z.string().max(5_000),
+  }),
+]);
+export type ConversationItem = z.infer<typeof ConversationItem>;
+
+/** What the plugin sends with new conversation items. Items are deduplicated by id. */
+export const MessagesReport = z.object({
+  sessionId: z.string().min(1),
+  items: z.array(ConversationItem).max(500),
+});
+export type MessagesReport = z.infer<typeof MessagesReport>;
+
 /** Server-sent events on `GET /api/stream`. */
 export type StreamEvent =
   | { type: 'snapshot'; sessions: Session[] }
-  | { type: 'session'; session: Session };
+  | { type: 'session'; session: Session }
+  | { type: 'messages'; sessionId: string; items: ConversationItem[] };
