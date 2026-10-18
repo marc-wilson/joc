@@ -1,10 +1,11 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { getClient } from '@joc/db';
-import { MessagesReport, SessionReport, type StreamEvent } from '@joc/protocol';
+import { MessagesReport, PromptRequest, SessionReport, type StreamEvent } from '@joc/protocol';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { addMessages, listMessages, onMessages } from './messages.ts';
+import { claimPrompts, queuePrompt } from './prompts.ts';
 import { applyReport, listSessions, onSessionUpdate } from './sessions.ts';
 
 const app = new Hono();
@@ -37,6 +38,18 @@ app.post('/api/messages', async (c) => {
 });
 
 app.get('/api/sessions/:id/messages', async (c) => c.json(await listMessages(c.req.param('id'))));
+
+// From the dashboard: queue a prompt for the session.
+app.post('/api/sessions/:id/prompts', async (c) => {
+  const parsed = PromptRequest.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+  return c.json({ id: await queuePrompt(c.req.param('id'), parsed.data.text) }, 201);
+});
+
+// From the session's plugin: take the prompts waiting for it.
+app.post('/api/sessions/:id/prompts/claim', async (c) =>
+  c.json({ prompts: await claimPrompts(c.req.param('id')) }),
+);
 
 app.get('/api/stream', (c) =>
   streamSSE(

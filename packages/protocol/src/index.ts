@@ -85,6 +85,10 @@ export const MessagesReport = z.object({
 });
 export type MessagesReport = z.infer<typeof MessagesReport>;
 
+/** A prompt typed in the dashboard, for the session's plugin to submit. */
+export const PromptRequest = z.object({ text: z.string().trim().min(1).max(20_000) });
+export type PromptRequest = z.infer<typeof PromptRequest>;
+
 /** Server-sent events on `GET /api/stream`. */
 export type StreamEvent =
   | { type: 'snapshot'; sessions: Session[] }
