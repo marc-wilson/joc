@@ -10,3 +10,6 @@ dist/
 
 # Written by Claude Code beside a loaded plugin
 apps/plugin/.claude-plugin/types/
+
+# Agent worktrees
+.claude/worktrees/
