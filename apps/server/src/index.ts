@@ -1,9 +1,10 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { getClient } from '@joc/db';
-import { SessionReport, type StreamEvent } from '@joc/protocol';
+import { MessagesReport, SessionReport, type StreamEvent } from '@joc/protocol';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { addMessages, listMessages, onMessages } from './messages.ts';
 import { applyReport, listSessions, onSessionUpdate } from './sessions.ts';
 
 const app = new Hono();
@@ -29,6 +30,14 @@ app.post('/api/reports', async (c) => {
 
 app.get('/api/sessions', async (c) => c.json(await listSessions()));
 
+app.post('/api/messages', async (c) => {
+  const parsed = MessagesReport.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+  return c.json({ added: await addMessages(parsed.data) });
+});
+
+app.get('/api/sessions/:id/messages', async (c) => c.json(await listMessages(c.req.param('id'))));
+
 app.get('/api/stream', (c) =>
   streamSSE(
     c,
@@ -39,12 +48,17 @@ app.get('/api/stream', (c) =>
       // Subscribe before reading the snapshot so no update falls between the two.
       const pending: StreamEvent[] = [];
       let ready = false;
-      const unsubscribe = onSessionUpdate((session) => {
-        const event: StreamEvent = { type: 'session', session };
+      const publish = (event: StreamEvent) => {
         if (ready) void send(event);
         else pending.push(event);
+      };
+      const unsubscribers = [
+        onSessionUpdate((session) => publish({ type: 'session', session })),
+        onMessages((sessionId, items) => publish({ type: 'messages', sessionId, items })),
+      ];
+      stream.onAbort(() => {
+        for (const unsubscribe of unsubscribers) unsubscribe();
       });
-      stream.onAbort(unsubscribe);
 
       await send({ type: 'snapshot', sessions: await listSessions() });
       for (const event of pending) await send(event);

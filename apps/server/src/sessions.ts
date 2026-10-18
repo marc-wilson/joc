@@ -5,6 +5,7 @@ import type { Session, SessionReport } from '@joc/protocol';
 interface SessionDoc {
   _id: string;
   title?: string;
+  name?: string;
   repo: string;
   branch?: string;
   state: Session['state'];
@@ -25,9 +26,12 @@ function toSession({
   createdAt: _c,
   reportedAt: _r,
   updatedAt,
+  name,
+  title,
   ...rest
 }: SessionDoc): Session {
-  return { id: _id, ...rest, updatedAt: updatedAt.toISOString() };
+  // Claude Code's own name beats the first-prompt fallback.
+  return { id: _id, ...rest, title: name ?? title, updatedAt: updatedAt.toISOString() };
 }
 
 // Live fan-out within this process. A second server instance would miss these events, so the
