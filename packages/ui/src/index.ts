@@ -58,6 +58,7 @@ export {
   type FileTreeItem,
   FileTreePanel,
   type FileTreePanelProps,
+  type FileTreeProps,
   InlineComment,
   type InlineCommentProps,
   ReviewBar,

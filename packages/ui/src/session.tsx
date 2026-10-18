@@ -214,10 +214,11 @@ export interface SessionRailProps {
   groups: SessionRailGroup[];
   peek?: boolean;
   onExpand?: () => void;
+  onSelect?: (session: SessionRowProps) => void;
 }
 
 /** The session list collapsed to state dots, for screens that need the width. */
-export function SessionRail({ groups, peek, onExpand }: SessionRailProps) {
+export function SessionRail({ groups, peek, onExpand, onSelect }: SessionRailProps) {
   const needs = groups.flatMap((g) => g.sessions).filter((s) => s.state === 'needs').length;
   const describe = (s: SessionRowProps) => `${s.title} — ${STATE_LABEL[s.state ?? 'idle']}`;
   return (
@@ -257,6 +258,7 @@ export function SessionRail({ groups, peek, onExpand }: SessionRailProps) {
                 aria-label={describe(s)}
                 aria-current={s.selected ? 'true' : undefined}
                 title={s.title}
+                onClick={() => onSelect?.(s)}
               >
                 <StateDot state={s.state} label={describe(s)} />
               </button>

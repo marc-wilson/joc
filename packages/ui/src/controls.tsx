@@ -109,8 +109,10 @@ export interface SegmentedControlProps {
   label?: string;
 }
 
+/** Follows `value` when given; otherwise keeps its own choice. */
 export function SegmentedControl({ options, value, onChange, label }: SegmentedControlProps) {
-  const [current, setCurrent] = useState(value ?? options[0]?.id);
+  const [own, setCurrent] = useState(value ?? options[0]?.id);
+  const current = value ?? own;
   return (
     <div className="joc-seg" role="radiogroup" aria-label={label}>
       {options.map((o) => {
@@ -150,8 +152,10 @@ export interface TabsProps {
   onChange?: (id: string) => void;
 }
 
+/** Follows `value` when given; otherwise keeps its own choice. */
 export function Tabs({ items, value, onChange }: TabsProps) {
-  const [current, setCurrent] = useState(value ?? items[0]?.id);
+  const [own, setCurrent] = useState(value ?? items[0]?.id);
+  const current = value ?? own;
   return (
     <div className="joc-tabs" role="tablist">
       {items.map((it) => {

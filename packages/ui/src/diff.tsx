@@ -1,4 +1,11 @@
-import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useState } from 'react';
+import {
+  type KeyboardEvent,
+  type PointerEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Button, SegmentedControl } from './controls.tsx';
 import { cx } from './cx.ts';
 import { Icon } from './Icon.tsx';
@@ -8,8 +15,10 @@ export interface ViewedCheckboxProps {
   onChange?: (checked: boolean) => void;
 }
 
+/** Follows `checked` when given; otherwise keeps its own state. */
 export function ViewedCheckbox({ checked, onChange }: ViewedCheckboxProps) {
-  const [on, setOn] = useState(!!checked);
+  const [own, setOn] = useState(!!checked);
+  const on = checked ?? own;
   return (
     <label className={cx('joc-viewed', on && 'is-on')}>
       <input
@@ -47,7 +56,12 @@ export interface FileTreeItem {
   active?: boolean;
 }
 
-export function FileTree({ items }: { items: FileTreeItem[] }) {
+export interface FileTreeProps {
+  items: FileTreeItem[];
+  onSelect?: (item: FileTreeItem, index: number) => void;
+}
+
+export function FileTree({ items, onSelect }: FileTreeProps) {
   return (
     <div className="joc-tree" role="tree">
       {items.map((it, i) => {
@@ -61,6 +75,10 @@ export function FileTree({ items }: { items: FileTreeItem[] }) {
             aria-selected={!!it.active}
             className={cx('joc-tree__row', it.active && 'is-active', it.viewed && 'is-viewed')}
             style={{ paddingLeft: 8 + (it.depth ?? 0) * 14 }}
+            onClick={() => onSelect?.(it, i)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onSelect?.(it, i);
+            }}
           >
             <Icon name={dir ? 'folder' : 'file'} size={14} />
             <span className="joc-tree__name">{it.name}</span>
@@ -98,6 +116,7 @@ export interface FileTreePanelProps {
   minWidth?: number;
   maxWidth?: number;
   collapsed?: boolean;
+  onSelect?: (item: FileTreeItem, index: number) => void;
 }
 
 /** The diff's file tree: drag or arrow keys to resize, collapses to a strip of status marks. */
@@ -109,6 +128,7 @@ export function FileTreePanel({
   minWidth = 180,
   maxWidth = 480,
   collapsed: collapsedProp,
+  onSelect,
 }: FileTreePanelProps) {
   const [w, setW] = useState(width);
   const [collapsed, setCollapsed] = useState(!!collapsedProp);
@@ -166,6 +186,7 @@ export function FileTreePanel({
               title={f.name}
               aria-label={f.name + (f.viewed ? ' (viewed)' : '')}
               aria-current={f.active ? 'true' : undefined}
+              onClick={() => onSelect?.(f, items.indexOf(f))}
               className={cx(
                 'joc-ftp__mark',
                 `joc-tree__status--${f.status ?? 'modified'}`,
@@ -197,7 +218,7 @@ export function FileTreePanel({
         </button>
       </div>
       <div className="joc-ftp__body">
-        <FileTree items={items} />
+        <FileTree items={items} onSelect={onSelect} />
       </div>
       {/* biome-ignore lint/a11y/useSemanticElements: an <hr> can't be dragged or focused as a resize handle */}
       <div
@@ -370,27 +391,50 @@ export interface InlineCommentProps {
   body?: string;
   pending?: boolean;
   composing?: boolean;
+  /** While composing: close without keeping the comment. */
+  onCancel?: () => void;
+  /** While composing: keep the comment for the review, sent later with the rest. */
+  onAdd?: (text: string) => void;
+  /** While composing: send this one comment to Claude now. */
+  onSend?: (text: string) => void;
 }
 
-export function InlineComment({ author, time, body, pending, composing }: InlineCommentProps) {
+export function InlineComment({
+  author,
+  time,
+  body,
+  pending,
+  composing,
+  onCancel,
+  onAdd,
+  onSend,
+}: InlineCommentProps) {
+  const input = useRef<HTMLTextAreaElement>(null);
+  const withText = (fn?: (text: string) => void) => () => {
+    const text = input.current?.value.trim();
+    if (text) fn?.(text);
+  };
   return (
     <div className={cx('joc-icmt', pending && 'is-pending', composing && 'is-composing')}>
       {composing ? (
         <>
           <textarea
+            ref={input}
             className="joc-icmt__input"
             placeholder="Leave a comment — Claude will see it on its next turn"
             defaultValue={body}
             rows={3}
+            // biome-ignore lint/a11y/noAutofocus: opened by the person's own click on a line
+            autoFocus
           />
           <div className="joc-icmt__actions">
-            <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" onClick={onCancel}>
               Cancel
             </Button>
-            <Button variant="secondary" size="sm">
+            <Button variant="secondary" size="sm" onClick={withText(onAdd)}>
               Add to review
             </Button>
-            <Button variant="primary" size="sm">
+            <Button variant="primary" size="sm" onClick={withText(onSend)}>
               Send to Claude
             </Button>
           </div>
@@ -418,6 +462,9 @@ export interface ReviewBarProps {
   total?: number;
   sendLabel?: string;
   onSend?: () => void;
+  onDiscard?: () => void;
+  /** Shown only when given: needs the session's PR. */
+  onCommentOnPr?: () => void;
 }
 
 export function ReviewBar({
@@ -426,6 +473,8 @@ export function ReviewBar({
   total = 0,
   sendLabel = 'Send review to Claude',
   onSend,
+  onDiscard,
+  onCommentOnPr,
 }: ReviewBarProps) {
   return (
     <div className="joc-reviewbar">
@@ -449,13 +498,15 @@ export function ReviewBar({
         <span style={{ width: `${total ? (100 * viewed) / total : 0}%` }} />
       </span>
       <span className="joc-reviewbar__spacer" />
-      <Button variant="ghost" size="md">
+      <Button variant="ghost" size="md" disabled={!comments} onClick={onDiscard}>
         Discard
       </Button>
-      <Button variant="secondary" size="md" icon="pr">
-        Comment on PR
-      </Button>
-      <Button variant="primary" size="md" icon="send" kbd="⌘↵" onClick={onSend}>
+      {onCommentOnPr ? (
+        <Button variant="secondary" size="md" icon="pr" onClick={onCommentOnPr}>
+          Comment on PR
+        </Button>
+      ) : null}
+      <Button variant="primary" size="md" icon="send" disabled={!comments} onClick={onSend}>
         {sendLabel}
       </Button>
     </div>
