@@ -1,0 +1,161 @@
+/* JOC design tokens, ported from the JOC design system. */
+:root, [data-theme="dark"] {
+  --bg-base: #0d0e10;
+  --bg-raised: #15171a;
+  --bg-overlay: #1c1f23;
+  --bg-sunken: #0a0b0c;
+  --bg-hover: #1f2226;
+  --bg-selected: #252a31;
+  --border-subtle: #1f2226;
+  --border: #2c3036;
+  --border-strong: #6b717b;
+  --text-primary: #e8eaed;
+  --text-secondary: #a4aab3;
+  --text-tertiary: #8e949e;
+  --text-disabled: #565b63;
+  --text-inverse: #0d0e10;
+  --accent: #9a9cf8;
+  --accent-hover: #b0b2fa;
+  --accent-soft: #24254a;
+  --on-accent: #0d0e10;
+  --focus-ring: var(--accent);
+  --state-working: #3fb950;
+  --state-working-soft: #12261a;
+  --state-background: #4c9bff;
+  --state-background-soft: #122136;
+  --state-needs: #ff8c3a;
+  --state-needs-soft: #33200f;
+  --on-state-needs: #0d0e10;
+  --state-idle: #8b929b;
+  --state-idle-soft: #1d2024;
+  --state-offline: #ff6b63;
+  --state-offline-soft: #331716;
+  --ci-pass: #3fb950;
+  --ci-fail: #ff6b63;
+  --ci-pending: #e8cc5a;
+  --ci-skipped: #8b929b;
+  --diff-add-bg: #12261a;
+  --diff-add-emph: #1d4a2b;
+  --diff-del-bg: #2d1517;
+  --diff-del-emph: #5a2226;
+  --diff-add-sign: #3fb950;
+  --diff-del-sign: #ff6b63;
+  --bubble-user: #1f2329;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --syntax-keyword: #c792ea;
+  --syntax-string: #a5d6a7;
+  --syntax-number: #f2c27a;
+  --syntax-comment: #8e949e;
+  --syntax-fn: #82b1ff;
+  --shadow-1: 0 0 0 1px #2c3036;
+  --shadow-2: 0 0 0 1px #2c3036, 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-3: 0 0 0 1px #3a3f46, 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+[data-theme="light"] {
+  --bg-base: #f6f7f8;
+  --bg-raised: #ffffff;
+  --bg-overlay: #ffffff;
+  --bg-sunken: #f0f2f4;
+  --bg-hover: #eef0f2;
+  --bg-selected: #e6eaf0;
+  --border-subtle: #e8eaed;
+  --border: #d9dce1;
+  --border-strong: #868d97;
+  --text-primary: #16181b;
+  --text-secondary: #4f565f;
+  --text-tertiary: #5e656e;
+  --text-disabled: #a7adb5;
+  --text-inverse: #ffffff;
+  --accent: #4f4fd0;
+  --accent-hover: #3f3fb8;
+  --accent-soft: #ececfd;
+  --on-accent: #ffffff;
+  --focus-ring: var(--accent);
+  --state-working: #17763a;
+  --state-working-soft: #e6f4ea;
+  --state-background: #0a62c9;
+  --state-background-soft: #e5effc;
+  --state-needs: #b34400;
+  --state-needs-soft: #fff0e5;
+  --on-state-needs: #ffffff;
+  --state-idle: #626a74;
+  --state-idle-soft: #eff1f3;
+  --state-offline: #c4202b;
+  --state-offline-soft: #fdecec;
+  --ci-pass: #17763a;
+  --ci-fail: #c4202b;
+  --ci-pending: #6f6600;
+  --ci-skipped: #626a74;
+  --diff-add-bg: #e6f4ea;
+  --diff-add-emph: #b7e4c4;
+  --diff-del-bg: #fdecec;
+  --diff-del-emph: #f7c1c1;
+  --diff-add-sign: #17763a;
+  --diff-del-sign: #c4202b;
+  --bubble-user: #eef0f3;
+  --scrim: rgba(15, 18, 22, 0.32);
+  --syntax-keyword: #8e2fb8;
+  --syntax-string: #1f6f35;
+  --syntax-number: #975a00;
+  --syntax-comment: #5e656e;
+  --syntax-fn: #0b5cad;
+  --shadow-1: 0 1px 2px rgba(16, 18, 22, 0.06), 0 0 0 1px #e1e4e8;
+  --shadow-2: 0 0 0 1px #d9dce1, 0 8px 24px rgba(16, 18, 22, 0.12);
+  --shadow-3: 0 0 0 1px #d9dce1, 0 16px 40px rgba(16, 18, 22, 0.18);
+}
+:root {
+  --space-0\.5: 2px;
+  --space-1: 4px;
+  --space-1\.5: 6px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 999px;
+  --control-sm: 24px;
+  --control-md: 30px;
+  --control-lg: 36px;
+  --row-dense: 28px;
+  --row: 36px;
+  --row-session: 76px;
+  --dot: 8px;
+  --rail: 3px;
+  --sidebar: 340px;
+  --sidebar-rail: 48px;
+  --tree: 260px;
+  --tree-collapsed: 36px;
+  --thread-max: 1120px;
+  --reading-measure: 760px;
+  --duration-instant: 80ms;
+  --duration-fast: 140ms;
+  --duration-fade: 240ms;
+  --duration-pulse: 1600ms;
+  --duration-spin: 1100ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-linear: linear;
+  --z-sticky: 10;
+  --z-popover: 40;
+  --z-toast: 60;
+  --font-sans: "Geist Variable", Geist, "Geist Fallback", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.title-lg { font-family: var(--font-sans); font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; }
+.title { font-family: var(--font-sans); font-size: 15px; line-height: 22px; font-weight: 600; }
+.label-strong { font-family: var(--font-sans); font-size: 13px; line-height: 20px; font-weight: 550; }
+.body { font-family: var(--font-sans); font-size: 13px; line-height: 20px; font-weight: 400; }
+.meta { font-family: var(--font-sans); font-size: 12px; line-height: 16px; font-weight: 400; }
+.overline { font-family: var(--font-sans); font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: 0.04em; }
+.reading { font-family: var(--font-sans); font-size: 14px; line-height: 22px; font-weight: 400; }
+.reading-strong { font-family: var(--font-sans); font-size: 14px; line-height: 22px; font-weight: 600; }
+.code { font-family: var(--font-mono); font-size: 12.5px; line-height: 20px; font-weight: 400; }
+.code-diff { font-family: var(--font-mono); font-size: 11px; line-height: 18px; font-weight: 400; }
+.code-inline { font-family: var(--font-mono); font-size: 12px; line-height: 16px; font-weight: 450; }
+.code-sm { font-family: var(--font-mono); font-size: 11px; line-height: 16px; font-weight: 400; }
