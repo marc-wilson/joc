@@ -1,0 +1,16 @@
+{
+  "name": "@joc/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.ts",
+    "start": "node src/index.ts",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.5",
+    "@joc/db": "workspace:*",
+    "@joc/protocol": "workspace:*",
+    "hono": "^4.13.13"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "joc",
+  "owner": { "name": "Marc Wilson" },
+  "plugins": [
+    {
+      "name": "joc",
+      "source": "./apps/plugin",
+      "description": "Reports this Claude Code session to JOC and relays prompts back from the dashboard."
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "@joc/plugin",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@joc/protocol": "workspace:*"
+  }
+}
