@@ -65,7 +65,8 @@ export function SessionRow({
             {branch ? <Branch>{branch}</Branch> : null}
           </span>
           <span className="joc-srow__meter">
-            <ContextMeter left={contextLeft} />
+            {/* No meter until the context is known: an empty one would read as 100%. */}
+            {contextLeft != null ? <ContextMeter left={contextLeft} /> : null}
           </span>
         </span>
         {/* Keyed on the text so each new activity line fades in. */}
