@@ -152,3 +152,92 @@ test('transcript lines become conversation items', async () => {
   );
   assert.equal(items[1]?.kind === 'user' && items[1].command, 'review');
 });
+
+test('background shells, subagents and their task notifications are recognized', async () => {
+  const { parseLines } = await import('./transcript.ts');
+  const t = '2026-10-18T10:00:00.000Z';
+  const call = (uuid: string, id: string, name: string, input: Record<string, unknown>) =>
+    JSON.stringify({
+      type: 'assistant',
+      uuid,
+      timestamp: t,
+      message: { content: [{ type: 'tool_use', id, name, input }] },
+    });
+  const result = (uuid: string, id: string, toolUseResult: unknown) =>
+    JSON.stringify({
+      type: 'user',
+      uuid,
+      timestamp: t,
+      toolUseResult,
+      message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'started' }] },
+    });
+  const notice = (status: string, toolUse = '') =>
+    `<task-notification>\n<task-id>bg1</task-id>\n${toolUse}<status>${status}</status>\n<summary>Background command "Dev server" ${status}</summary>\n</task-notification>`;
+  const lines = [
+    call('a1', 't1', 'Bash', {
+      command: 'pnpm dev',
+      description: 'Dev server',
+      run_in_background: true,
+    }),
+    result('u1', 't1', { stdout: '', backgroundTaskId: 'bg1' }),
+    call('a2', 't2', 'Agent', { description: 'Map the auth flow', subagent_type: 'Explore' }),
+    result('u2', 't2', { status: 'async_launched', agentId: 'ag1', isAsync: true }),
+    call('a3', 't3', 'Task', { description: 'Review', run_in_background: 'true' }),
+    call('a4', 't4', 'Bash', { command: 'ls' }),
+    JSON.stringify({
+      type: 'user',
+      uuid: 'u3',
+      timestamp: t,
+      message: { content: notice('completed', '<tool-use-id>t1</tool-use-id>\n') },
+    }),
+    JSON.stringify({
+      type: 'attachment',
+      uuid: 'q1',
+      timestamp: t,
+      attachment: { type: 'queued_command', prompt: notice('killed') },
+    }),
+    JSON.stringify({
+      type: 'user',
+      uuid: 'u4',
+      timestamp: t,
+      message: { content: notice('running') },
+    }),
+  ];
+  const items = parseLines(lines, '/work').items;
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const toolCall = (id: string) => {
+    const item = byId.get(id);
+    return item?.kind === 'tool_call' ? item : undefined;
+  };
+  const toolResult = (id: string) => {
+    const item = byId.get(id);
+    return item?.kind === 'tool_result' ? item : undefined;
+  };
+
+  assert.equal(toolCall('a1:0')?.background, true);
+  assert.equal(toolCall('a1:0')?.description, 'Dev server');
+  assert.equal(toolCall('a1:0')?.subagent, undefined);
+  assert.equal(toolCall('a2:0')?.subagent, 'Explore');
+  assert.equal(toolCall('a2:0')?.background, undefined);
+  assert.equal(toolCall('a3:0')?.subagent, 'general-purpose');
+  assert.equal(toolCall('a3:0')?.background, true);
+  assert.equal(toolCall('a4:0')?.background, undefined);
+
+  assert.equal(toolResult('u1:0')?.taskId, 'bg1');
+  assert.equal(toolResult('u2:0')?.taskId, 'ag1');
+
+  assert.deepEqual(byId.get('u3'), {
+    id: 'u3',
+    at: t,
+    kind: 'task_update',
+    taskId: 'bg1',
+    toolUseId: 't1',
+    status: 'completed',
+    summary: 'Background command "Dev server" completed',
+  });
+  const queued = byId.get('q1');
+  assert.equal(queued?.kind === 'task_update' && queued.status, 'killed');
+  assert.equal(queued?.kind === 'task_update' && queued.toolUseId, undefined);
+  // Progress without a final status is not an update, and never a user message.
+  assert.equal(byId.has('u4'), false);
+});

@@ -101,6 +101,9 @@ interface Entry {
   isSidechain?: boolean;
   aiTitle?: string;
   message?: { content?: unknown };
+  /** Claude Code's structured record of a tool's result, next to the tool_result block. */
+  toolUseResult?: unknown;
+  attachment?: { type?: string; prompt?: unknown };
 }
 
 type Block = Record<string, unknown> & { type?: string };
@@ -128,6 +131,42 @@ function slashCommand(text: string): { command: string; args: string } | undefin
   };
 }
 
+type TaskUpdate = Extract<ConversationItem, { kind: 'task_update' }>;
+
+const STATUSES: readonly string[] = ['completed', 'failed', 'killed'];
+
+/**
+ * Claude Code tells Claude a background task ended with a `<task-notification>` message:
+ * `<task-id>`, `<tool-use-id>` (not always), `<status>` and `<summary>`. Notifications without
+ * a final status (progress events) are skipped.
+ */
+export function taskNotification(
+  text: string,
+): Pick<TaskUpdate, 'taskId' | 'toolUseId' | 'status' | 'summary'> | undefined {
+  const block = text.match(/<task-notification>([\s\S]*?)<\/task-notification>/)?.[1];
+  if (!block) return undefined;
+  const tag = (name: string) =>
+    block.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`))?.[1]?.trim() || undefined;
+  const taskId = tag('task-id');
+  const status = tag('status');
+  if (!taskId || !status || !STATUSES.includes(status)) return undefined;
+  return {
+    taskId: cut(taskId, 200),
+    toolUseId: tag('tool-use-id')?.slice(0, 200),
+    status: status as TaskUpdate['status'],
+    summary: firstLine(tag('summary'), 500) ?? '',
+  };
+}
+
+/** The background task a tool result left running: a shell's task id or an async agent's id. */
+function startedTask(result: unknown): string | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+  const r = result as Record<string, unknown>;
+  const id =
+    str(r.backgroundTaskId) ?? (r.status === 'async_launched' ? str(r.agentId) : undefined);
+  return id ? cut(id, 200) : undefined;
+}
+
 export interface Parsed {
   items: ConversationItem[];
   /** The latest title Claude Code generated, if one was in these lines. */
@@ -145,10 +184,25 @@ export function parseLines(lines: string[], cwd: string): Parsed {
       continue;
     }
     if (entry.type === 'ai-title' && entry.aiTitle) aiTitle = entry.aiTitle;
-    if (entry.type !== 'user' && entry.type !== 'assistant') continue;
     if (entry.isMeta || entry.isSidechain || !entry.uuid || !entry.timestamp) continue;
     const at = new Date(entry.timestamp).toISOString();
     const content = entry.message?.content;
+
+    // A notification that arrived mid-turn is queued as an attachment instead of a user message.
+    const notice =
+      entry.type === 'attachment' && entry.attachment?.type === 'queued_command'
+        ? str(entry.attachment.prompt)
+        : entry.type === 'user' && typeof content === 'string'
+          ? content
+          : undefined;
+    const update = notice?.trimStart().startsWith('<task-notification>')
+      ? taskNotification(notice)
+      : undefined;
+    if (update) {
+      items.push({ id: entry.uuid, at, kind: 'task_update', ...update });
+      continue;
+    }
+    if (entry.type !== 'user' && entry.type !== 'assistant') continue;
 
     if (entry.type === 'user' && typeof content === 'string') {
       const slash = slashCommand(content);
@@ -167,6 +221,8 @@ export function parseLines(lines: string[], cwd: string): Parsed {
       continue;
     }
     if (!Array.isArray(content)) continue;
+    // The structured result belongs to the entry, so only trust it for a single result.
+    const results = content.filter((b: Block) => b.type === 'tool_result').length;
 
     content.forEach((block: Block, i) => {
       const id = `${entry.uuid}:${i}`;
@@ -178,6 +234,8 @@ export function parseLines(lines: string[], cwd: string): Parsed {
           string,
           unknown
         >;
+        const subagent = name === 'Agent' || name === 'Task';
+        const background = input.run_in_background === true || input.run_in_background === 'true';
         items.push({
           id,
           at,
@@ -194,6 +252,9 @@ export function parseLines(lines: string[], cwd: string): Parsed {
             }),
             500,
           ),
+          description: firstLine(str(input.description), 200),
+          background: background && (subagent || name === 'Bash') ? true : undefined,
+          subagent: subagent ? cut(str(input.subagent_type) ?? 'general-purpose', 100) : undefined,
         });
       } else if (entry.type === 'user' && block.type === 'tool_result') {
         items.push({
@@ -203,6 +264,7 @@ export function parseLines(lines: string[], cwd: string): Parsed {
           toolUseId: str(block.tool_use_id) ?? '',
           isError: block.is_error === true,
           text: cut(resultText(block.content), 5_000),
+          taskId: results === 1 ? startedTask(entry.toolUseResult) : undefined,
         });
       } else if (entry.type === 'user' && block.type === 'text' && str(block.text)?.trim()) {
         const text = str(block.text) ?? '';
