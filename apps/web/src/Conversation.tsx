@@ -25,13 +25,22 @@ const markdown: Components = {
   h2: ({ children }) => <h3>{children}</h3>,
 };
 
+/** A prompt sent from the dashboard that the session hasn't started yet. */
+export interface PendingPrompt {
+  id: string;
+  sessionId: string;
+  text: string;
+  failed?: boolean;
+}
+
 interface Props {
   items: ConversationItem[];
+  pending: PendingPrompt[];
   state: SessionState;
 }
 
 /** A session's conversation, kept pinned to the newest message while you're at the bottom. */
-export function Conversation({ items, state }: Props) {
+export function Conversation({ items, pending, state }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
 
@@ -55,7 +64,7 @@ export function Conversation({ items, state }: Props) {
         pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
       }}
     >
-      {items.length ? (
+      {items.length || pending.length ? (
         <Thread>
           {items.map((item) => {
             switch (item.kind) {
@@ -95,6 +104,15 @@ export function Conversation({ items, state }: Props) {
                 return null;
             }
           })}
+          {pending.map((p) => (
+            <Message
+              key={p.id}
+              from="user"
+              time={p.failed ? 'Not sent' : 'Waiting for the session'}
+            >
+              {p.text}
+            </Message>
+          ))}
         </Thread>
       ) : (
         <EmptyState

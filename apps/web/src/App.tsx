@@ -10,7 +10,7 @@ import {
   TextInput,
 } from '@joc/ui';
 import { Fragment, useState } from 'react';
-import { Conversation } from './Conversation.tsx';
+import { Conversation, type PendingPrompt } from './Conversation.tsx';
 import { useConversation, useNow, useSessions } from './hooks.ts';
 import { age } from './time.ts';
 
@@ -30,6 +30,26 @@ export default function App() {
   const selected = sessions.find((s) => s.id === selectedId) ?? sessions[0];
   const needs = sessions.filter((s) => s.state === 'needs').length;
   const items = useConversation(selected?.id);
+  const [pending, setPending] = useState<PendingPrompt[]>([]);
+  // A sent prompt shows until the session's own transcript has it.
+  const waiting = pending.filter(
+    (p) =>
+      p.sessionId === selected?.id &&
+      !items.some((i) => i.kind === 'user' && i.text.trim() === p.text),
+  );
+
+  async function send(sessionId: string, text: string) {
+    const prompt: PendingPrompt = { id: crypto.randomUUID(), sessionId, text };
+    setPending((list) => [...list, prompt]);
+    const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+    }).catch(() => undefined);
+    if (!res?.ok) {
+      setPending((list) => list.map((p) => (p.id === prompt.id ? { ...p, failed: true } : p)));
+    }
+  }
 
   return (
     <div className="joc-app app">
@@ -92,9 +112,22 @@ export default function App() {
                 ]}
                 tab="conversation"
               />
-              <Conversation key={selected.id} items={items} state={selected.state} />
+              <Conversation
+                key={selected.id}
+                items={items}
+                pending={waiting}
+                state={selected.state}
+              />
               <div className="app-main__dock">
-                <Composer disabled hint="Sending prompts from JOC isn't built yet" />
+                {selected.state === 'offline' ? (
+                  <Composer disabled hint="This session is offline" />
+                ) : (
+                  <Composer
+                    key={selected.id}
+                    working={selected.state === 'working'}
+                    onSubmit={(text) => void send(selected.id, text)}
+                  />
+                )}
               </div>
             </>
           ) : (
