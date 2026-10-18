@@ -12,6 +12,7 @@ import { type Parsed, parseLines, readNewLines } from './transcript.ts';
 
 const at = Date.now();
 const serverUrl = (process.env.JOC_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+const token = process.env.JOC_TOKEN;
 const BATCH = 500;
 
 async function readStdin(): Promise<string> {
@@ -23,7 +24,10 @@ async function readStdin(): Promise<string> {
 function post(path: string, body: unknown, timeoutMs: number) {
   return fetch(`${serverUrl}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });

@@ -16,13 +16,15 @@ export const register: Register = (on) => {
     // Nobody reads a -p run's dashboard; only take prompts for sessions a person runs.
     if (!e.isInteractive) return result;
     const server = ((await $.env.get('JOC_URL')) ?? 'http://localhost:3000').replace(/\/$/, '');
+    const token = await $.env.get('JOC_TOKEN');
+    const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
 
     async function takePrompts() {
       // Read each time: a /clear starts a new session id without a new session.start.
       const sessionId = await $.session.id();
       const res = await $.http.fetch(
         `${server}/api/sessions/${encodeURIComponent(sessionId)}/prompts/claim`,
-        { method: 'POST' },
+        { method: 'POST', headers },
       );
       if (!res.ok) return;
       const { prompts } = JSON.parse(res.text) as { prompts: QueuedPrompt[] };
