@@ -1,4 +1,4 @@
-import { type ReactNode, useId, useState } from 'react';
+import { type ReactNode, useId, useRef, useState } from 'react';
 import { CIMark } from './ci.tsx';
 import { Button } from './controls.tsx';
 import { cx } from './cx.ts';
@@ -46,8 +46,11 @@ export interface ComposerProps {
   working?: boolean;
   disabled?: boolean;
   hint?: ReactNode;
+  /** Called with the trimmed text on Enter or the send button; the box then clears. */
+  onSubmit?: (text: string) => void;
 }
 
+/** The message box. `value` is its starting text; once typed in, the box owns its text. */
 export function Composer({
   value,
   placeholder = 'Message Claude — / for commands',
@@ -58,7 +61,20 @@ export function Composer({
   working,
   disabled,
   hint,
+  onSubmit,
 }: ComposerProps) {
+  const box = useRef<HTMLDivElement>(null);
+  const [empty, setEmpty] = useState(!value);
+
+  function submit() {
+    const el = box.current;
+    const text = el?.innerText.trim();
+    if (!el || !text || disabled || !onSubmit) return;
+    onSubmit(text);
+    el.textContent = '';
+    setEmpty(true);
+  }
+
   return (
     <div className={cx('joc-composer', disabled && 'is-disabled')}>
       {suggestions.length ? (
@@ -89,13 +105,28 @@ export function Composer({
         {command ? <SlashPill command={command} removable /> : null}
         {/* biome-ignore lint/a11y/useSemanticElements: contentEditable so the input can grow and hold rich content */}
         <div
-          className={cx('joc-composer__text', !value && 'is-empty')}
+          ref={box}
+          className={cx('joc-composer__text', empty && 'is-empty')}
           contentEditable={!disabled}
           suppressContentEditableWarning
           data-placeholder={placeholder}
           role="textbox"
           tabIndex={0}
           aria-multiline="true"
+          aria-label="Message Claude"
+          onInput={(e) => setEmpty(!e.currentTarget.innerText.trim())}
+          onKeyDown={(e) => {
+            // Enter sends, Shift+Enter is a new line; leave Enter alone while an IME composes.
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          onPaste={(e) => {
+            // Paste as plain text, never the source's formatting.
+            e.preventDefault();
+            document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
+          }}
         >
           {value}
         </div>
@@ -117,8 +148,9 @@ export function Composer({
           variant="primary"
           size="sm"
           icon="send"
-          disabled={disabled || !value}
+          disabled={disabled || empty}
           aria-label="Send"
+          onClick={submit}
         />
       </div>
     </div>
