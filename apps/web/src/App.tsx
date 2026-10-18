@@ -6,12 +6,14 @@ import {
   NewSessionButton,
   RepoGroupHeader,
   SessionHeader,
+  SessionRail,
   SessionRow,
   TextInput,
 } from '@joc/ui';
 import { Fragment, useState } from 'react';
+import { ChangesView } from './Changes.tsx';
 import { Conversation, type PendingPrompt } from './Conversation.tsx';
-import { useConversation, useNow, useSessions } from './hooks.ts';
+import { useChanges, useConversation, useNow, useSessions } from './hooks.ts';
 import { age } from './time.ts';
 
 // Repos in first-seen order, so groups never reorder as sessions update.
@@ -30,6 +32,11 @@ export default function App() {
   const selected = sessions.find((s) => s.id === selectedId) ?? sessions[0];
   const needs = sessions.filter((s) => s.state === 'needs').length;
   const items = useConversation(selected?.id);
+  const changes = useChanges(selected?.id);
+  const [tab, setTab] = useState('conversation');
+  // The Changes tab needs the width, so the session list folds into a rail of state dots.
+  const [listOpen, setListOpen] = useState(false);
+  const railed = tab === 'changes' && !listOpen;
   const [pending, setPending] = useState<PendingPrompt[]>([]);
   // A sent prompt shows until the session's own transcript has it.
   const waiting = pending.filter(
@@ -64,36 +71,54 @@ export default function App() {
         machineOffline={!connected}
       />
       <div className="joc-app__body">
-        <aside className="joc-app__side">
-          <div className="app-side__filter">
-            <TextInput placeholder="Filter sessions" kbd="/" />
-          </div>
-          <div className="app-side__list" role="listbox" aria-label="Sessions">
-            {groupByRepo(sessions).map(([repo, list]) => (
-              <Fragment key={repo}>
-                <RepoGroupHeader
-                  repo={repo}
-                  count={list.length}
-                  needs={list.filter((s) => s.state === 'needs').length}
-                />
-                {list.map((s) => (
-                  <SessionRow
-                    key={s.id}
-                    state={s.state}
-                    title={s.title ?? UNTITLED}
-                    branch={s.branch}
-                    contextLeft={s.contextLeft}
-                    activity={s.activity}
-                    time={age(s.updatedAt, now)}
-                    selected={s.id === selected?.id}
-                    onSelect={() => setSelectedId(s.id)}
+        {railed ? (
+          <aside className="joc-app__side is-rail">
+            <SessionRail
+              groups={groupByRepo(sessions).map(([repo, list]) => ({
+                repo,
+                sessions: list.map((s) => ({
+                  id: s.id,
+                  state: s.state,
+                  title: s.title ?? UNTITLED,
+                  selected: s.id === selected?.id,
+                })),
+              }))}
+              onExpand={() => setListOpen(true)}
+              onSelect={(s) => setSelectedId(s.id)}
+            />
+          </aside>
+        ) : (
+          <aside className="joc-app__side">
+            <div className="app-side__filter">
+              <TextInput placeholder="Filter sessions" kbd="/" />
+            </div>
+            <div className="app-side__list" role="listbox" aria-label="Sessions">
+              {groupByRepo(sessions).map(([repo, list]) => (
+                <Fragment key={repo}>
+                  <RepoGroupHeader
+                    repo={repo}
+                    count={list.length}
+                    needs={list.filter((s) => s.state === 'needs').length}
                   />
-                ))}
-                <NewSessionButton repo={repo} />
-              </Fragment>
-            ))}
-          </div>
-        </aside>
+                  {list.map((s) => (
+                    <SessionRow
+                      key={s.id}
+                      state={s.state}
+                      title={s.title ?? UNTITLED}
+                      branch={s.branch}
+                      contextLeft={s.contextLeft}
+                      activity={s.activity}
+                      time={age(s.updatedAt, now)}
+                      selected={s.id === selected?.id}
+                      onSelect={() => setSelectedId(s.id)}
+                    />
+                  ))}
+                  <NewSessionButton repo={repo} />
+                </Fragment>
+              ))}
+            </div>
+          </aside>
+        )}
         <main className="joc-app__main">
           {selected ? (
             <>
@@ -107,28 +132,50 @@ export default function App() {
                 contextLeft={selected.contextLeft}
                 tabs={[
                   { id: 'conversation', label: 'Conversation' },
-                  { id: 'background', label: 'Background' },
-                  { id: 'changes', label: 'Changes' },
+                  { id: 'background', label: 'Background', disabled: true },
+                  {
+                    id: 'changes',
+                    label: 'Changes',
+                    count: changes.status === 'ready' ? changes.files.length : undefined,
+                  },
                 ]}
-                tab="conversation"
+                tab={tab}
+                onTabChange={(id) => {
+                  setTab(id);
+                  setListOpen(false);
+                }}
               />
-              <Conversation
-                key={selected.id}
-                items={items}
-                pending={waiting}
-                state={selected.state}
-              />
-              <div className="app-main__dock">
-                {selected.state === 'offline' ? (
-                  <Composer disabled hint="This session is offline" />
-                ) : (
-                  <Composer
+              {tab === 'changes' ? (
+                <ChangesView
+                  key={selected.id}
+                  sessionId={selected.id}
+                  changes={changes}
+                  onSend={(text) => {
+                    void send(selected.id, text);
+                    setTab('conversation');
+                  }}
+                />
+              ) : (
+                <>
+                  <Conversation
                     key={selected.id}
-                    working={selected.state === 'working'}
-                    onSubmit={(text) => void send(selected.id, text)}
+                    items={items}
+                    pending={waiting}
+                    state={selected.state}
                   />
-                )}
-              </div>
+                  <div className="app-main__dock">
+                    {selected.state === 'offline' ? (
+                      <Composer disabled hint="This session is offline" />
+                    ) : (
+                      <Composer
+                        key={selected.id}
+                        working={selected.state === 'working'}
+                        onSubmit={(text) => void send(selected.id, text)}
+                      />
+                    )}
+                  </div>
+                </>
+              )}
             </>
           ) : (
             <EmptyState

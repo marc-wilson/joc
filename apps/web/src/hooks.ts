@@ -1,5 +1,6 @@
 import type { ConversationItem, Session } from '@joc/protocol';
 import { useEffect, useState } from 'react';
+import { type DiffFile, parseDiff } from './diff.ts';
 import { subscribe } from './stream.ts';
 
 /** Live sessions, in first-seen order. */
@@ -78,4 +79,49 @@ export function useNow(intervalMs = 30_000): number {
     return () => clearInterval(id);
   }, [intervalMs]);
   return now;
+}
+
+export type Changes =
+  | { status: 'loading' }
+  | { status: 'none' }
+  | { status: 'ready'; base: string; files: DiffFile[]; truncated: boolean; updatedAt: string };
+
+/** A session's latest diff, refetched whenever the plugin reports a new one. */
+export function useChanges(sessionId: string | undefined): Changes {
+  const [changes, setChanges] = useState<Changes>({ status: 'loading' });
+
+  useEffect(() => {
+    setChanges({ status: 'loading' });
+    if (!sessionId) return;
+    let cancelled = false;
+    const load = () =>
+      fetch(`/api/sessions/${encodeURIComponent(sessionId)}/changes`)
+        .then(async (r) => {
+          if (cancelled) return;
+          if (!r.ok) return setChanges({ status: 'none' });
+          const body = (await r.json()) as {
+            base: string;
+            diff: string;
+            truncated: boolean;
+            updatedAt: string;
+          };
+          setChanges({ status: 'ready', ...body, files: parseDiff(body.diff) });
+        })
+        .catch(() => {});
+    const unsubscribe = subscribe((event) => {
+      if (
+        (event.type === 'changes' && event.sessionId === sessionId) ||
+        event.type === 'snapshot'
+      ) {
+        void load();
+      }
+    });
+    void load();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [sessionId]);
+
+  return changes;
 }

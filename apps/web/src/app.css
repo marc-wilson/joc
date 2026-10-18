@@ -29,3 +29,34 @@
   padding: var(--space-3) var(--space-8) var(--space-4);
   border-top: 1px solid var(--border-subtle);
 }
+
+.app-changes {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.app-changes__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-changes__scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+.app-changes__file {
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.app-changes__note {
+  margin: 0 0 var(--space-3);
+  color: var(--text-secondary);
+}

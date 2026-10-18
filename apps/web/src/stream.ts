@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 const Snapshot = z.object({ type: z.literal('snapshot'), sessions: z.array(Session) });
 const Update = z.object({ type: z.literal('session'), session: Session });
+const ChangesEvent = z.object({ type: z.literal('changes'), sessionId: z.string() });
 const Messages = z.object({
   type: z.literal('messages'),
   sessionId: z.string(),
@@ -15,6 +16,7 @@ export type LiveEvent =
   | z.infer<typeof Snapshot>
   | z.infer<typeof Update>
   | z.infer<typeof Messages>
+  | z.infer<typeof ChangesEvent>
   | { type: 'status'; connected: boolean };
 
 // The server pings every 15s. A proxy can keep a connection open after the server behind it
@@ -46,6 +48,7 @@ function start() {
     on('snapshot', Snapshot);
     on('session', Update);
     on('messages', Messages);
+    on('changes', ChangesEvent);
     source.addEventListener('ping', () => {
       lastMessage = Date.now();
     });
