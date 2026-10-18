@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc",
-    "test": "node --test src/*.test.ts"
+    "test": "node --test src/*.test.ts",
+    "validate": "claude plugin validate ."
   },
   "dependencies": {
     "@joc/protocol": "workspace:*"

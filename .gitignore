@@ -7,3 +7,6 @@ dist/
 !.env.example
 .DS_Store
 .idea/
+
+# Written by Claude Code beside a loaded plugin
+apps/plugin/.claude-plugin/types/
