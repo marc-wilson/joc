@@ -85,6 +85,7 @@ Run from the repo root.
 | `pnpm dev`       | Runs every package's `dev` script in parallel         |
 | `pnpm build`     | Builds every package that has a `build` script        |
 | `pnpm typecheck` | Type-checks every package                             |
+| `pnpm test`      | Runs every package's tests                            |
 | `pnpm check`     | Biome lint + format check                             |
 | `pnpm fix`       | Biome lint + format, applying safe fixes              |
 
@@ -93,4 +94,29 @@ Run from the repo root.
 - [CONTRIBUTING.md](CONTRIBUTING.md): setup, dev loop, commits and PRs
 - [AGENTS.md](AGENTS.md): conventions for coding agents working in this repo
 
-License: not yet chosen.
+
+## Deployment
+
+JOC ships as one image, `marcswilsoncontainers.azurecr.io/joc`: the server serves the API and
+the built dashboard (`WEB_DIST`) on port 3000, so everything is same-origin.
+
+- **CI** (`.github/workflows/ci.yml`, pull requests): `pnpm check`, `pnpm typecheck`,
+  `pnpm build` and commitlint over the PR's commits.
+- **Release** (`.github/workflows/release.yml`, push to `main`): builds the `Dockerfile` for
+  `linux/arm64`, pushes `latest` and the commit SHA, then runs `helm upgrade --install` of the
+  chart in `k8s/` into namespace `joc` on AKS (`production` environment).
+- The chart runs exactly one replica (live updates fan out in-process) behind
+  `joc.marcswilson.com`. `MONGODB_URI` comes from the `joc-secrets` Kubernetes secret, which is
+  created by hand and never by the chart.
+
+Build and run the image locally:
+
+```sh
+docker build -t joc:local .
+docker run --rm -p 3000:3000 --env-file apps/server/.env joc:local
+curl http://localhost:3000/health/db   # {"ok":true}
+```
+
+## License
+
+Not yet chosen.

@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+    kubernetes.io/ingress.class: nginx
+    # SSE: stream events as they're written and keep long-lived connections open.
+    nginx.ingress.kubernetes.io/proxy-buffering: 'off'
+    nginx.ingress.kubernetes.io/proxy-read-timeout: '3600'
+    nginx.ingress.kubernetes.io/proxy-send-timeout: '3600'
+  name: joc-ingress
+  namespace: joc
+spec:
+  rules:
+    - host: joc.marcswilson.com
+      http:
+        paths:
+          - pathType: Prefix
+            path: /
+            backend:
+              service:
+                name: joc-service
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - joc.marcswilson.com
+      secretName: joc-tls

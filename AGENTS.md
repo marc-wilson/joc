@@ -50,6 +50,7 @@ Run from the repo root.
 | `pnpm check` | Biome lint + format check |
 | `pnpm fix` | Biome with safe fixes written |
 | `pnpm typecheck` | `tsc` in every package |
+| `pnpm test` | Every package's tests (Node's built-in runner: `node --test`) |
 | `pnpm build` | Build packages that have a build (currently `@joc/web`) |
 
 - One package: `pnpm --filter @joc/server dev` (or `@joc/web`, etc.).
@@ -59,7 +60,7 @@ Run from the repo root.
 
 Before committing:
 
-1. `pnpm check && pnpm typecheck && pnpm build` passes.
+1. `pnpm check && pnpm typecheck && pnpm test && pnpm build` passes.
 2. UI changes: look at the result in both the dark and light theme.
 
 ## Commits

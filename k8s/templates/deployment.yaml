@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: joc-deployment
+  namespace: joc
+  labels:
+    app: joc-app
+spec:
+  # Exactly 1 replica: live updates (SSE) fan out in-process, so a second replica would
+  # miss events published on the other one. Scale out only once the server moves to
+  # Mongo change streams.
+  replicas: 1
+  # Recreate rather than RollingUpdate keeps it to one pod during deploys too.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: joc-app
+  template:
+    metadata:
+      labels:
+        app: joc-app
+    spec:
+      containers:
+        - name: joc
+          image: 'marcswilsoncontainers.azurecr.io/joc:{{ .Values.image_tag }}'
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+          env:
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  # Created by hand, never by this chart.
+                  name: joc-secrets
+                  key: MONGODB_URI
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 384Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 2
+            periodSeconds: 10

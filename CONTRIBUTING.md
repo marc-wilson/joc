@@ -42,7 +42,7 @@ Check the server can reach the database: `curl http://localhost:3000/health/db`.
 Before you push:
 
 ```sh
-pnpm check && pnpm typecheck && pnpm build
+pnpm check && pnpm typecheck && pnpm test && pnpm build
 ```
 
 | Script           | What it does                                  |
@@ -50,6 +50,7 @@ pnpm check && pnpm typecheck && pnpm build
 | `pnpm dev`       | Runs every package's `dev` script in parallel |
 | `pnpm build`     | Builds every package that has a `build` step  |
 | `pnpm typecheck` | Type-checks every package                     |
+| `pnpm test`      | Runs every package's tests                    |
 | `pnpm check`     | Biome lint + format check                     |
 | `pnpm fix`       | Biome lint + format, applying safe fixes      |
 
@@ -135,7 +136,7 @@ Rebase on `main` to stay current, and keep branches small enough to merge in a d
 ## Pull requests
 
 - **Small, one concern.** Split unrelated changes into separate PRs.
-- **Green locally**: `pnpm check && pnpm typecheck && pnpm build` passes.
+- **Green locally**: `pnpm check && pnpm typecheck && pnpm test && pnpm build` passes.
 - **Screenshots for UI changes**, in both the dark and light themes.
 - **Describe the why**, not just the what, and link the issue if there is one.
 - PR titles follow the same Conventional Commits format as commits.

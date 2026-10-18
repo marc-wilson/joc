@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# No secrets here: the repo is public and forks can open PRs.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # commitlint reads every commit in the PR
+
+      - uses: pnpm/setup@v3
+        with:
+          runtime: node@24
+          cache: true
+          install: false
+
+      # --ignore-scripts: CI needs no git hooks.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - run: pnpm check
+
+      - run: pnpm typecheck
+
+      - run: pnpm build
+
+      - run: pnpm test
+
+      - name: Lint commit messages
+        run: >-
+          pnpm exec commitlint
+          --from ${{ github.event.pull_request.base.sha }}
+          --to ${{ github.event.pull_request.head.sha }}
