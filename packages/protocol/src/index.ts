@@ -111,3 +111,11 @@ export type StreamEvent =
   | { type: 'messages'; sessionId: string; items: ConversationItem[] }
   /** The session's diff changed; fetch it from `/api/sessions/:id/changes`. */
   | { type: 'changes'; sessionId: string };
+
+/** `POST /api/login`: the shared token, pasted into the dashboard's sign-in screen. */
+export const LoginRequest = z.object({ token: z.string().min(1).max(1_000) });
+export type LoginRequest = z.infer<typeof LoginRequest>;
+
+/** `GET /api/auth`: whether the server needs a token, and whether this request carried one. */
+export const AuthStatus = z.object({ required: z.boolean(), signedIn: z.boolean() });
+export type AuthStatus = z.infer<typeof AuthStatus>;
