@@ -50,9 +50,10 @@ app.get('/api/stream', (c) =>
       for (const event of pending) await send(event);
       ready = true;
 
-      // Keep idle connections open through proxies.
+      // Keeps idle connections open through proxies, and lets the browser tell a quiet stream
+      // from a dead one (it reconnects after STREAM_TIMEOUT_MS of silence).
       while (!stream.aborted) {
-        await stream.sleep(25_000);
+        await stream.sleep(15_000);
         if (!stream.aborted) await stream.writeSSE({ event: 'ping', data: '' });
       }
     },
