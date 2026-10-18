@@ -1,22 +1,17 @@
 import type { Session } from '@joc/protocol';
 import {
-  Code,
   Composer,
   EmptyState,
-  Message,
   NavBar,
   NewSessionButton,
-  QuestionCard,
   RepoGroupHeader,
   SessionHeader,
   SessionRow,
-  SlashPill,
   TextInput,
-  Thread,
 } from '@joc/ui';
 import { Fragment, useState } from 'react';
-import { conversations, sessions, type Turn } from './fixtures.ts';
 import { age } from './time.ts';
+import { useNow, useSessions } from './useSessions.ts';
 
 // Repos in first-seen order, so groups never reorder as sessions update.
 function groupByRepo(list: Session[]): [string, Session[]][] {
@@ -25,46 +20,14 @@ function groupByRepo(list: Session[]): [string, Session[]][] {
   return [...groups];
 }
 
-function TurnView({ turn }: { turn: Turn }) {
-  switch (turn.kind) {
-    case 'user':
-      return (
-        <Message from="user" time={turn.time}>
-          {turn.command ? <SlashPill command={turn.command} /> : null} {turn.text}
-        </Message>
-      );
-    case 'claude':
-      return (
-        <Message from="claude" time={turn.time}>
-          <div className="joc-md">
-            {turn.paragraphs.map((p) => (
-              <p key={p}>{p}</p>
-            ))}
-          </div>
-        </Message>
-      );
-    case 'tool':
-      return (
-        <Message
-          from="tool"
-          name={turn.name}
-          target={turn.target}
-          meta={turn.meta}
-          status={turn.status}
-        >
-          {turn.output ? <Code>{turn.output}</Code> : null}
-        </Message>
-      );
-    case 'question':
-      return <QuestionCard question={turn.question} options={turn.options} />;
-  }
-}
+const UNTITLED = 'New session';
 
 export default function App() {
-  const [selectedId, setSelectedId] = useState(sessions[0]?.id);
-  const selected = sessions.find((s) => s.id === selectedId);
+  const { sessions, connected } = useSessions();
+  const now = useNow();
+  const [selectedId, setSelectedId] = useState<string>();
+  const selected = sessions.find((s) => s.id === selectedId) ?? sessions[0];
   const needs = sessions.filter((s) => s.state === 'needs').length;
-  const turns = (selected && conversations[selected.id]) ?? [];
 
   return (
     <div className="joc-app app">
@@ -75,8 +38,8 @@ export default function App() {
           { id: 'history', label: 'History' },
         ]}
         value="sessions"
-        machine="dev-mbp"
-        user="Sam Lee"
+        machine={connected ? 'Connected' : 'Reconnecting'}
+        machineOffline={!connected}
       />
       <div className="joc-app__body">
         <aside className="joc-app__side">
@@ -95,12 +58,12 @@ export default function App() {
                   <SessionRow
                     key={s.id}
                     state={s.state}
-                    title={s.title}
+                    title={s.title ?? UNTITLED}
                     branch={s.branch}
                     contextLeft={s.contextLeft}
                     activity={s.activity}
-                    time={age(s.updatedAt)}
-                    selected={s.id === selectedId}
+                    time={age(s.updatedAt, now)}
+                    selected={s.id === selected?.id}
                     onSelect={() => setSelectedId(s.id)}
                   />
                 ))}
@@ -113,7 +76,7 @@ export default function App() {
           {selected ? (
             <>
               <SessionHeader
-                title={selected.title}
+                title={selected.title ?? UNTITLED}
                 state={selected.state}
                 repo={selected.repo}
                 branch={selected.branch}
@@ -128,30 +91,20 @@ export default function App() {
                 tab="conversation"
               />
               <div className="app-main__scroll">
-                {turns.length ? (
-                  <Thread>
-                    {turns.map((t, i) => (
-                      // biome-ignore lint/suspicious/noArrayIndexKey: turns are append-only, so position is stable
-                      <TurnView key={i} turn={t} />
-                    ))}
-                  </Thread>
-                ) : (
-                  <EmptyState
-                    title="No messages yet"
-                    body="This session's conversation will show here."
-                  />
-                )}
+                <EmptyState
+                  title="Conversation coming soon"
+                  body="JOC shows this session's live state. Its messages will show here once the plugin streams them."
+                />
               </div>
               <div className="app-main__dock">
-                <Thread>
-                  <Composer working={selected.state === 'working'} />
-                </Thread>
+                <Composer disabled hint="Sending prompts from JOC isn't built yet" />
               </div>
             </>
           ) : (
             <EmptyState
               title="No live sessions"
-              body="Start Claude Code with the JOC plugin to see it here."
+              body="Install the JOC plugin in Claude Code, then start a session."
+              command="/plugin marketplace add marc-wilson/joc"
             />
           )}
         </main>
