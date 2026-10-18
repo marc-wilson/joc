@@ -6,6 +6,7 @@
     "dev": "pnpm -r --parallel dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
     "check": "biome check .",
     "fix": "biome check --write .",
     "prepare": "simple-git-hooks"
