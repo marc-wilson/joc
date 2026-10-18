@@ -1,5 +1,6 @@
 import type { ConversationItem, Session } from '@joc/protocol';
 import { useEffect, useState } from 'react';
+import { apiFetch } from './auth.ts';
 import { type DiffFile, parseDiff } from './diff.ts';
 import { subscribe } from './stream.ts';
 
@@ -47,7 +48,7 @@ export function useConversation(sessionId: string | undefined): ConversationItem
     if (!sessionId) return;
     let cancelled = false;
     const load = () =>
-      fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`)
+      apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`)
         .then((r) => (r.ok ? (r.json() as Promise<ConversationItem[]>) : []))
         .then((loaded) => {
           if (!cancelled) setItems((list) => merge(list, loaded));
@@ -95,7 +96,7 @@ export function useChanges(sessionId: string | undefined): Changes {
     if (!sessionId) return;
     let cancelled = false;
     const load = () =>
-      fetch(`/api/sessions/${encodeURIComponent(sessionId)}/changes`)
+      apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/changes`)
         .then(async (r) => {
           if (cancelled) return;
           if (!r.ok) return setChanges({ status: 'none' });

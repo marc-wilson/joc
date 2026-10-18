@@ -11,6 +11,7 @@ import {
   TextInput,
 } from '@joc/ui';
 import { Fragment, useState } from 'react';
+import { apiFetch } from './auth.ts';
 import { ChangesView } from './Changes.tsx';
 import { Conversation, type PendingPrompt } from './Conversation.tsx';
 import { useChanges, useConversation, useNow, useSessions } from './hooks.ts';
@@ -48,7 +49,7 @@ export default function App() {
   async function send(sessionId: string, text: string) {
     const prompt: PendingPrompt = { id: crypto.randomUUID(), sessionId, text };
     setPending((list) => [...list, prompt]);
-    const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`, {
+    const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text }),

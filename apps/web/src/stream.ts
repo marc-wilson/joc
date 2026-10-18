@@ -1,5 +1,6 @@
 import { ConversationItem, Session } from '@joc/protocol';
 import { z } from 'zod';
+import { checkAuth } from './auth.ts';
 
 // One connection to the server's event stream for the whole app, shared by every hook.
 
@@ -24,16 +25,17 @@ export type LiveEvent =
 const STREAM_TIMEOUT_MS = 40_000;
 
 const listeners = new Set<(event: LiveEvent) => void>();
-let started = false;
+let stop: (() => void) | undefined;
 
 const emit = (event: LiveEvent) => {
   for (const listener of listeners) listener(event);
 };
 
-function start() {
+function start(): () => void {
   let source: EventSource | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let lastMessage = Date.now();
+  let stopped = false;
 
   // Each (re)connect starts with a fresh snapshot, so nothing is missed while disconnected.
   function connect() {
@@ -55,26 +57,40 @@ function start() {
     source.onerror = () => {
       emit({ type: 'status', connected: false });
       // EventSource retries dropped connections itself, but gives up for good when a retry
-      // gets an error response (the server restarting, a deploy). Start over in that case.
-      if (source?.readyState === EventSource.CLOSED) retry = setTimeout(connect, 2000);
+      // gets an error response (the server restarting, a deploy, a 401). Start over in that
+      // case, unless the server no longer takes our cookie: then the sign-in screen takes over.
+      if (source?.readyState !== EventSource.CLOSED) return;
+      retry = setTimeout(async () => {
+        if ((await checkAuth()) === 'signedIn' && !stopped) connect();
+      }, 2000);
     };
   }
 
   connect();
-  setInterval(() => {
+  const watchdog = setInterval(() => {
     if (Date.now() - lastMessage < STREAM_TIMEOUT_MS) return;
     emit({ type: 'status', connected: false });
     source?.close();
     clearTimeout(retry);
     connect();
   }, 5_000);
+  return () => {
+    stopped = true;
+    clearInterval(watchdog);
+    clearTimeout(retry);
+    source?.close();
+  };
 }
 
 export function subscribe(listener: (event: LiveEvent) => void): () => void {
   listeners.add(listener);
-  if (!started) {
-    started = true;
-    start();
-  }
-  return () => listeners.delete(listener);
+  stop ??= start();
+  return () => {
+    listeners.delete(listener);
+    // Nobody listening (signed out): close the connection; the next subscriber reopens it.
+    if (listeners.size === 0) {
+      stop?.();
+      stop = undefined;
+    }
+  };
 }
