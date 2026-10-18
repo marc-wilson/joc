@@ -1,0 +1,31 @@
+/* Layout glue for the app shell. Visual styling comes from @joc/ui; use its tokens only. */
+
+.app {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app .joc-app__body {
+  flex-wrap: nowrap;
+}
+
+.app-side__filter {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.app-side__list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.app-main__scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-6) var(--space-8);
+}
+
+.app-main__dock {
+  padding: var(--space-3) var(--space-8) var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}

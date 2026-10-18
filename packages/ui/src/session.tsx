@@ -20,6 +20,7 @@ export interface SessionRowProps {
   time?: string;
   selected?: boolean;
   needsLabel?: string;
+  onSelect?: () => void;
 }
 
 export function SessionRow({
@@ -31,6 +32,7 @@ export function SessionRow({
   time,
   selected,
   needsLabel,
+  onSelect,
 }: SessionRowProps) {
   return (
     <div
@@ -38,6 +40,13 @@ export function SessionRow({
       role="option"
       aria-selected={!!selected}
       tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect?.();
+        }
+      }}
     >
       <span className="joc-srow__rail" aria-hidden="true" />
       <span className="joc-srow__glyph">
