@@ -85,6 +85,21 @@ export const MessagesReport = z.object({
 });
 export type MessagesReport = z.infer<typeof MessagesReport>;
 
+/** Most of a diff the plugin sends; beyond it, whole files are left out and `truncated` set. */
+export const MAX_DIFF_BYTES = 2 * 1024 * 1024;
+
+/** The session's changes: its working tree against where its branch left the default branch. */
+export const ChangesReport = z.object({
+  sessionId: z.string().min(1),
+  at: z.number().int().positive(),
+  /** What the diff is against, e.g. `origin/main`, or `HEAD` for uncommitted changes only. */
+  base: z.string().max(200),
+  /** A unified diff, as `git diff` prints it. */
+  diff: z.string().max(MAX_DIFF_BYTES),
+  truncated: z.boolean(),
+});
+export type ChangesReport = z.infer<typeof ChangesReport>;
+
 /** A prompt typed in the dashboard, for the session's plugin to submit. */
 export const PromptRequest = z.object({ text: z.string().trim().min(1).max(20_000) });
 export type PromptRequest = z.infer<typeof PromptRequest>;
@@ -93,4 +108,6 @@ export type PromptRequest = z.infer<typeof PromptRequest>;
 export type StreamEvent =
   | { type: 'snapshot'; sessions: Session[] }
   | { type: 'session'; session: Session }
-  | { type: 'messages'; sessionId: string; items: ConversationItem[] };
+  | { type: 'messages'; sessionId: string; items: ConversationItem[] }
+  /** The session's diff changed; fetch it from `/api/sessions/:id/changes`. */
+  | { type: 'changes'; sessionId: string };
