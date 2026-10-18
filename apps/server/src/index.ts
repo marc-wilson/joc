@@ -1,9 +1,16 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { getClient } from '@joc/db';
-import { MessagesReport, PromptRequest, SessionReport, type StreamEvent } from '@joc/protocol';
+import {
+  ChangesReport,
+  MessagesReport,
+  PromptRequest,
+  SessionReport,
+  type StreamEvent,
+} from '@joc/protocol';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { getChanges, onChanges, saveChanges } from './changes.ts';
 import { addMessages, listMessages, onMessages } from './messages.ts';
 import { claimPrompts, queuePrompt } from './prompts.ts';
 import { applyReport, listSessions, onSessionUpdate } from './sessions.ts';
@@ -39,6 +46,18 @@ app.post('/api/messages', async (c) => {
 
 app.get('/api/sessions/:id/messages', async (c) => c.json(await listMessages(c.req.param('id'))));
 
+app.post('/api/changes', async (c) => {
+  const parsed = ChangesReport.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+  // 202 for a stale report: accepted, but a newer diff already won.
+  return (await saveChanges(parsed.data)) ? c.json({ ok: true }) : c.body(null, 202);
+});
+
+app.get('/api/sessions/:id/changes', async (c) => {
+  const changes = await getChanges(c.req.param('id'));
+  return changes ? c.json(changes) : c.json({ error: 'No changes reported yet' }, 404);
+});
+
 // From the dashboard: queue a prompt for the session.
 app.post('/api/sessions/:id/prompts', async (c) => {
   const parsed = PromptRequest.safeParse(await c.req.json().catch(() => null));
@@ -68,6 +87,7 @@ app.get('/api/stream', (c) =>
       const unsubscribers = [
         onSessionUpdate((session) => publish({ type: 'session', session })),
         onMessages((sessionId, items) => publish({ type: 'messages', sessionId, items })),
+        onChanges((sessionId) => publish({ type: 'changes', sessionId })),
       ];
       stream.onAbort(() => {
         for (const unsubscribe of unsubscribers) unsubscribe();
