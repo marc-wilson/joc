@@ -12,6 +12,8 @@ import {
 } from '@joc/ui';
 import { Fragment, useState } from 'react';
 import { apiFetch } from './auth.ts';
+import { BackgroundView } from './Background.tsx';
+import { backgroundTasks } from './background.ts';
 import { ChangesView } from './Changes.tsx';
 import { Conversation, type PendingPrompt } from './Conversation.tsx';
 import { useChanges, useConversation, useNow, useSessions } from './hooks.ts';
@@ -34,6 +36,8 @@ export default function App() {
   const needs = sessions.filter((s) => s.state === 'needs').length;
   const items = useConversation(selected?.id);
   const changes = useChanges(selected?.id);
+  const tasks = selected ? backgroundTasks(items, selected.state) : [];
+  const running = tasks.filter((t) => t.status === 'running').length;
   const [tab, setTab] = useState('conversation');
   // The Changes tab needs the width, so the session list folds into a rail of state dots.
   const [listOpen, setListOpen] = useState(false);
@@ -133,7 +137,12 @@ export default function App() {
                 contextLeft={selected.contextLeft}
                 tabs={[
                   { id: 'conversation', label: 'Conversation' },
-                  { id: 'background', label: 'Background', disabled: true },
+                  {
+                    id: 'background',
+                    label: 'Background',
+                    count: running || undefined,
+                    state: running ? 'background' : undefined,
+                  },
                   {
                     id: 'changes',
                     label: 'Changes',
@@ -146,7 +155,9 @@ export default function App() {
                   setListOpen(false);
                 }}
               />
-              {tab === 'changes' ? (
+              {tab === 'background' ? (
+                <BackgroundView key={selected.id} tasks={tasks} />
+              ) : tab === 'changes' ? (
                 <ChangesView
                   key={selected.id}
                   sessionId={selected.id}
