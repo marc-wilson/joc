@@ -3,7 +3,8 @@
 // session, so every failure is swallowed and it always exits 0.
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { MessagesReport, SessionReport } from '@joc/protocol';
+import type { ChangesReport, MessagesReport, SessionReport } from '@joc/protocol';
+import { changesHash, collectChanges, lastSentHash, rememberSent } from './changes.ts';
 import { contextLeft } from './context.ts';
 import { branchOf, repoOf } from './git.ts';
 import { eventFields, type HookInput } from './report.ts';
@@ -76,6 +77,17 @@ async function main() {
     if (!response.ok) return; // Keep the old position so the next hook resends.
   }
   conversation.commit();
+
+  // The diff, once per turn and when a session starts, and only when it changed.
+  if (input.hook_event_name === 'Stop' || input.hook_event_name === 'SessionStart') {
+    const changes = collectChanges(input.cwd);
+    if (!changes) return;
+    const hash = changesHash(changes);
+    if (hash === lastSentHash(input.session_id)) return;
+    const report: ChangesReport = { sessionId: input.session_id, at, ...changes };
+    const response = await post('/api/changes', report, 10_000);
+    if (response.ok) rememberSent(input.session_id, hash);
+  }
 }
 
 main()
