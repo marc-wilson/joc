@@ -23,6 +23,10 @@ export interface PRRowProps {
   deletions?: number;
   selected?: boolean;
   session?: { title: string; state: SessionState; href?: string };
+  /** Opens the PR, from a click or Enter anywhere on the row but its session link. */
+  onOpen?: () => void;
+  /** Shown as "Start session" when the PR has no session; absent, nothing is shown. */
+  onStartSession?: () => void;
 }
 
 export function PRRow({
@@ -40,10 +44,24 @@ export function PRRow({
   deletions,
   selected,
   session,
+  onOpen,
+  onStartSession,
 }: PRRowProps) {
   return (
-    // biome-ignore lint/a11y/noNoninteractiveTabindex: rows are keyboard-navigable in the PR list
-    <div className={cx('joc-pr', selected && 'is-selected')} tabIndex={0}>
+    // The row opens the PR; the session link inside it stays its own link.
+    // biome-ignore lint/a11y/useSemanticElements: an <a> can't hold the session link (no nested links)
+    <div
+      className={cx('joc-pr', selected && 'is-selected')}
+      role="link"
+      tabIndex={0}
+      onClick={(e) => {
+        if (e.target instanceof Element && e.target.closest('a, button')) return;
+        onOpen?.();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && e.target === e.currentTarget) onOpen?.();
+      }}
+    >
       <span className={cx('joc-pr__icon', draft && 'is-draft')}>
         <Icon name="pr" size={16} />
       </span>
@@ -75,11 +93,11 @@ export function PRRow({
       <span className="joc-pr__session">
         {session ? (
           <SessionLink {...session} />
-        ) : (
-          <Button variant="ghost" size="sm" icon="plus">
+        ) : onStartSession ? (
+          <Button variant="ghost" size="sm" icon="plus" onClick={onStartSession}>
             Start session
           </Button>
-        )}
+        ) : null}
       </span>
       <span className="joc-pr__ci">
         <CIBadge status={ci} detail={ciDetail} />
