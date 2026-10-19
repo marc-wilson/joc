@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import { getClient } from '@joc/db';
 import {
   type AuthStatus,
@@ -60,6 +61,8 @@ export interface AppOptions {
   github?: GitHubAuth;
   /** Where the dashboard is reached, e.g. `https://joc.marcswilson.com`. */
   publicUrl: string;
+  /** Aborted when the server shuts down: live streams end so browsers reconnect elsewhere. */
+  shutdown?: AbortSignal;
 }
 
 /** How a request proved who it is: a browser session, a machine's token, or open local dev. */
@@ -70,7 +73,11 @@ export type Env = { Variables: { owner: Owner; via: Via } };
 const LOCAL = ownerFrom('local');
 
 /** The API, without serving: index.ts serves it, and tests call `app.request` directly. */
-export function createApp({ github, publicUrl }: AppOptions): Hono<Env> {
+export function createApp({
+  github,
+  publicUrl,
+  shutdown = new AbortController().signal,
+}: AppOptions): Hono<Env> {
   const app = new Hono<Env>();
 
   // In memory, as the server runs one replica.
@@ -354,19 +361,29 @@ export function createApp({ github, publicUrl }: AppOptions): Hono<Env> {
           onChanges(owner, (sessionId) => publish({ type: 'changes', sessionId })),
           onGitHub(owner, () => publish({ type: 'github' })),
         ];
-        stream.onAbort(() => {
+        const unsubscribeAll = () => {
           for (const unsubscribe of unsubscribers) unsubscribe();
-        });
+        };
+        stream.onAbort(unsubscribeAll);
 
-        await send({ type: 'snapshot', sessions: await listSessions(owner) });
-        for (const event of pending) await send(event);
-        ready = true;
+        try {
+          await send({ type: 'snapshot', sessions: await listSessions(owner) });
+          for (const event of pending) await send(event);
+          ready = true;
 
-        // Keeps idle connections open through proxies, and lets the browser tell a quiet stream
-        // from a dead one (it reconnects after STREAM_TIMEOUT_MS of silence).
-        while (!stream.aborted) {
-          await stream.sleep(15_000);
-          if (!stream.aborted) await stream.writeSSE({ event: 'ping', data: '' });
+          // Keeps idle connections open through proxies, and lets the browser tell a quiet
+          // stream from a dead one (it reconnects after STREAM_TIMEOUT_MS of silence). On
+          // shutdown the stream ends, and the browser reconnects to the server taking over,
+          // which starts it with a fresh snapshot.
+          while (!stream.aborted && !shutdown.aborted) {
+            // Rejects when the shutdown cuts the pause short; the loop condition handles that.
+            await sleep(15_000, undefined, { signal: shutdown }).catch(() => undefined);
+            if (!stream.aborted && !shutdown.aborted) {
+              await stream.writeSSE({ event: 'ping', data: '' });
+            }
+          }
+        } finally {
+          unsubscribeAll();
         }
       },
       async (error, stream) => {
