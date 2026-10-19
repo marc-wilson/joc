@@ -1,8 +1,7 @@
-// One shared token guards the API. The plugin sends it as a bearer header; the browser holds it
-// in an HttpOnly cookie, because EventSource can't send headers. With no token set (local dev),
-// everything stays open.
+// The shared token: the plugin sends it as a bearer header; the browser holds it in an HttpOnly
+// cookie, because EventSource can't send headers. index.ts turns a matching token into an owner.
 import { createHash, timingSafeEqual } from 'node:crypto';
-import type { Context, MiddlewareHandler } from 'hono';
+import type { Context } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 
 export const COOKIE = 'joc_token';
@@ -22,18 +21,6 @@ export function requestToken(c: Context): string | undefined {
   const header = c.req.header('authorization');
   const bearer = header?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
   return bearer || getCookie(c, COOKIE) || undefined;
-}
-
-export function isSignedIn(c: Context, token: string | undefined): boolean {
-  return token === undefined || tokenMatches(requestToken(c), token);
-}
-
-/** Rejects requests without the token. Pass the routes that stay reachable signed out. */
-export function requireToken(token: string | undefined, open: string[]): MiddlewareHandler {
-  return async (c, next) => {
-    if (open.includes(c.req.path) || isSignedIn(c, token)) return next();
-    return c.json({ error: 'Unauthorized' }, 401);
-  };
 }
 
 function isHttps(c: Context): boolean {
