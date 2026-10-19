@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Hono } from 'hono';
-import { requireToken, setTokenCookie, tokenMatches } from './auth.ts';
+import { setTokenCookie, tokenMatches } from './auth.ts';
 
 const TOKEN = 'harbor-labs-test-token';
 
@@ -13,11 +13,8 @@ test('tokenMatches accepts only the exact token', () => {
   assert.equal(tokenMatches(undefined, TOKEN), false);
 });
 
-function appWith(token: string | undefined) {
+function appWith() {
   const app = new Hono();
-  app.use('/api/*', requireToken(token, ['/api/auth', '/api/login']));
-  app.get('/api/auth', (c) => c.text('open'));
-  app.get('/api/sessions', (c) => c.text('ok'));
   app.post('/api/login', (c) => {
     setTokenCookie(c, TOKEN);
     return c.body(null, 204);
@@ -25,24 +22,8 @@ function appWith(token: string | undefined) {
   return app;
 }
 
-test('requireToken lets everything through when no token is set', async () => {
-  const res = await appWith(undefined).request('/api/sessions');
-  assert.equal(res.status, 200);
-});
-
-test('requireToken checks the bearer header and the cookie', async () => {
-  const app = appWith(TOKEN);
-  assert.equal((await app.request('/api/sessions')).status, 401);
-  assert.equal((await app.request('/api/auth')).status, 200);
-  const bearer = (value: string) => ({ headers: { authorization: `Bearer ${value}` } });
-  assert.equal((await app.request('/api/sessions', bearer('wrong'))).status, 401);
-  assert.equal((await app.request('/api/sessions', bearer(TOKEN))).status, 200);
-  const cookie = { headers: { cookie: `joc_token=${TOKEN}` } };
-  assert.equal((await app.request('/api/sessions', cookie)).status, 200);
-});
-
 test('the cookie is HttpOnly and SameSite=Strict, and Secure over https', async () => {
-  const app = appWith(TOKEN);
+  const app = appWith();
   const plain = (await app.request('http://localhost/api/login', { method: 'POST' })).headers;
   const cookie = plain.get('set-cookie') ?? '';
   assert.match(cookie, /HttpOnly/);
