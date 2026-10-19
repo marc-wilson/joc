@@ -57,7 +57,7 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-const auth = (): Record<string, string> => (token ? { authorization: `Bearer ${token}` } : {});
+const auth = (): { authorization?: string } => (token ? { authorization: `Bearer ${token}` } : {});
 
 /** Sends to the server; undefined when it didn't answer. Never throws. */
 async function post(path: string, body: unknown, timeoutMs: number): Promise<Response | undefined> {
