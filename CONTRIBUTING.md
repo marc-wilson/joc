@@ -142,6 +142,9 @@ Rebase on `main` to stay current, and keep branches small enough to merge in a d
 - **Small, one concern.** Split unrelated changes into separate PRs.
 - **Green locally**: `pnpm check && pnpm typecheck && pnpm test && pnpm build` passes.
 - **Screenshots for UI changes**, in both the dark and light themes.
+- **Plugin changes bump its version.** Anything changed under `apps/plugin/` needs a new
+  `version` in `apps/plugin/.claude-plugin/plugin.json`: patch for a fix, minor for a feature.
+  Installs from GitHub only update when the version changes, and CI fails the PR otherwise.
 - **Describe the why**, not just the what, and link the issue if there is one.
 - PR titles follow the same `type(scope): description` format as commits; CI checks them.
 

@@ -114,10 +114,16 @@ the built dashboard (`WEB_DIST`) on port 3000, so everything is same-origin.
 One workflow, `.github/workflows/ci.yml`, with two jobs:
 
 - **check** (every PR and push): `pnpm check`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and
-  on PRs commitlint over the title and every commit. `main` requires it to pass.
+  on PRs commitlint over the title and every commit, plus a check that a change under
+  `apps/plugin/` bumps the plugin's version. `main` requires it to pass.
 - **deploy** (pushes to `main`, after check): builds the `Dockerfile` for `linux/arm64`, pushes
-  `latest` and the commit SHA to ACR, then runs `helm upgrade --install` of the chart in `k8s/`
-  into namespace `joc` on AKS, in the `production` environment.
+  it to ACR tagged with the commit SHA, then runs `helm upgrade --install` of the chart in `k8s/`
+  into namespace `joc` on AKS, in the `production` environment. One deploy runs at a time, and
+  only the current tip of `main` deploys: a run for an older commit (a late one, or a re-run)
+  skips, so production always ends on the newest `main`.
+- Deploys have no downtime: the new pod starts first, takes traffic once it's ready, and the
+  old one stops only after the ingress has stopped routing to it. Live streams end on shutdown
+  and browsers reconnect to the new pod, which starts them with a fresh snapshot.
 - The chart runs exactly one replica (live updates fan out in-process) behind
   `joc.marcswilson.com`. `MONGODB_URI` and `JOC_GITHUB_CLIENT_SECRET` are secrets, and
   `JOC_GITHUB_CLIENT_ID` a variable (it's public), in the GitHub `production` environment; the
