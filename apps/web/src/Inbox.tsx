@@ -56,7 +56,7 @@ async function post(path: string, body: unknown): Promise<boolean> {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
-  }).catch(() => undefined);
+  }).catch(() => undefined); // Unreachable: reported as not marked, below.
   return res?.ok === true;
 }
 
