@@ -81,6 +81,12 @@ machine to a JOC server (`https://joc.marcswilson.com` unless you pass another U
 kept in `~/.claude/joc/credentials.json`. Without a link the plugin reports to
 `http://localhost:3000`. `JOC_URL` and `JOC_TOKEN` in Claude Code's environment override both.
 
+The plugin never shows an error in a session. If sessions stop updating on the dashboard, run
+`/joc-status`: it says where the machine reports, whether the server answers and takes its token,
+and the plugin's recent problems (an unreachable server, a refused token or report, an error in
+the plugin itself). They're kept, capped, in `~/.claude/joc/status.json`, and also shown under
+Plugin problems on the Machines page once the server is reachable again.
+
 ## Scripts
 
 Run from the repo root.

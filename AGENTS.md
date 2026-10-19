@@ -18,6 +18,7 @@ Claude Code session ── plugin ──▶ server ──▶ web dashboard (live
 - Hosted, for many people at once. A browser signs in with GitHub (an HttpOnly session cookie); a machine links with `/joc-login` and gets its own bearer token. Every request resolves to one owner. Without a GitHub app configured (local dev only) everything is open and belongs to `local`; production refuses to start that way.
 - **Isolation is the rule:** every store function takes an `Owner` first (apps/server/src/owner.ts), records are keyed `owner/session`, and live updates fan out per owner. Never query a collection without the owner. A new route gets a case in `apps/server/src/isolation.test.ts`.
 - GitHub data comes from the `gh` CLI on the user's machine, using its sign-in.
+- The plugin never shows a failure in the session. It records it in its local problem log (`apps/plugin/src/problems.ts`, `~/.claude/joc/status.json`), which `/joc-status` reads and which goes to `POST /api/problems` for the Machines page once the server answers. A new plugin request records its outcome there too.
 
 ## Repo map
 
