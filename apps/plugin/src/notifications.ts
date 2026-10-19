@@ -215,12 +215,12 @@ export function readFeed(since?: string): Feed {
 
 /** Marks the threads read on GitHub; says whether any was. */
 export function markRead(ids: string[]): boolean {
-  let any = false;
+  let marked = false;
   for (const id of ids) {
     if (!/^\d+$/.test(id)) continue;
-    if (gh(['api', '-X', 'PATCH', `/notifications/threads/${id}`]).status === 0) any = true;
+    if (gh(['api', '-X', 'PATCH', `/notifications/threads/${id}`]).status === 0) marked = true;
   }
-  return any;
+  return marked;
 }
 
 /**
@@ -264,6 +264,7 @@ type Post = (path: string, body: unknown, timeoutMs: number) => Promise<Response
 /** Ids of a claim response; it's our own server's, but checked like any input. */
 async function claimed(res: Response | undefined): Promise<string[]> {
   if (!res?.ok) return [];
+  // A reply that is not JSON names no threads, so none are marked.
   const body: unknown = await res.json().catch(() => undefined);
   const ids = body && typeof body === 'object' && 'ids' in body ? body.ids : undefined;
   return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
