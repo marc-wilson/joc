@@ -7,6 +7,7 @@
 //
 // Nothing here ever shows an error in the session. What fails goes to the plugin's local problem
 // log (problems.ts), which `/joc-status` reads on demand.
+import type { MessagesReport } from '@joc/protocol';
 import type { EngineInterface, HttpResponse, Register } from 'claude-code';
 import {
   age,
@@ -282,6 +283,57 @@ async function status($: EngineInterface): Promise<string> {
   ].join('\n');
 }
 
+/** `/name args` from the dashboard, a command to run; undefined for a prompt, which a path such
+ * as `/src/app.ts is broken` is. */
+function slashCommand(line: string): { command: string; args: string } | undefined {
+  const match = line.match(/^\/([\w:.-]+)(?:\s+([\s\S]*))?$/);
+  return match?.[1] ? { command: match[1], args: match[2]?.trim() ?? '' } : undefined;
+}
+
+/**
+ * Runs a slash command sent from the dashboard as if typed: built-in, plugin, skill and MCP
+ * commands alike. `$.prompt.submit` would only send its text to Claude. One that can't run says
+ * why in the conversation, as nothing else would.
+ */
+async function runCommand(
+  $: EngineInterface,
+  slash: { command: string; args: string },
+  promptId: string,
+): Promise<void> {
+  try {
+    await $.command.run(slash);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const { url, headers } = await connection($);
+    const at = new Date().toISOString();
+    const id = `joc-${promptId}`;
+    const report: MessagesReport = {
+      sessionId: await $.session.id(),
+      items: [
+        { id, at, kind: 'command', name: slash.command.slice(0, 100), args: slash.args },
+        {
+          id: `${id}:output`,
+          at,
+          kind: 'command_output',
+          commandId: id,
+          text: `Couldn't run /${slash.command} from JOC: ${reason}`.slice(0, 5000),
+          isError: true,
+        },
+      ],
+    };
+    await $.http
+      .fetch(`${url}/api/messages`, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify(report),
+      })
+      .catch(() => undefined); // The server being down must not hold up the prompts after it.
+  }
+}
+
+/** Set once the session starts: reports the conversation a moment from now. */
+let syncSoon: (() => void) | undefined;
+
 export const register: Register = (on) => {
   const log = problemLog();
   const failedIn = (where: string) => (error: unknown) =>
@@ -324,6 +376,7 @@ export const register: Register = (on) => {
       await writeOutcomes($, log.take());
     }, failedIn('module'));
     $.clock.after(1, sync);
+    syncSoon = () => $.clock.after(1000, sync);
     $.clock.every(SYNC_MS, sync);
 
     // Nobody reads a -p run's dashboard; only take prompts for sessions a person runs.
@@ -353,7 +406,11 @@ export const register: Register = (on) => {
       for (const prompt of prompts) {
         const lines = [text(field(prompt, 'text')) ?? '', ...(await saveImages(prompt))];
         const promptText = lines.filter(Boolean).join('\n\n');
-        if (promptText) await $.prompt.submit({ text: promptText, asUser: true });
+        // A command carries no images; with them, the text is a prompt.
+        const command = lines.length === 1 ? slashCommand(promptText) : undefined;
+        const id = text(field(prompt, 'id')) ?? String(Date.now());
+        if (command) await runCommand($, command, id);
+        else if (promptText) await $.prompt.submit({ text: promptText, asUser: true });
       }
     }
 
@@ -386,6 +443,16 @@ export const register: Register = (on) => {
     return result;
   });
 
+  // No hook reports a built-in command (no prompt, no tool), so it would wait for the next sync.
+  on('command.run', async (_$, e, next) => {
+    const result = await next(e);
+    try {
+      syncSoon?.();
+    } catch {
+      // Reporting is best effort; the command has run either way.
+    }
+    return result;
+  });
   on('command.run', { command: 'joc-login' }, async ($, e) => ({ text: await login($, e.args) }));
   on('command.run', { command: 'joc-logout' }, async ($) => ({ text: await logout($) }));
   on('command.run', { command: 'joc-status' }, async ($) => {
