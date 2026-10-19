@@ -107,6 +107,29 @@ export type GitHubSnapshot = z.infer<typeof GitHubSnapshot>;
 export const TaskStatus = z.enum(['completed', 'failed', 'killed']);
 export type TaskStatus = z.infer<typeof TaskStatus>;
 
+/** The image formats JOC takes, told apart by their bytes. Never SVG: it can carry script. */
+export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
+export const ImageType = z.enum(IMAGE_TYPES);
+export type ImageType = z.infer<typeof ImageType>;
+
+/** The largest image JOC stores. */
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/** The most images one message or prompt carries. */
+export const MAX_IMAGES_PER_MESSAGE = 10;
+
+/** An image's id: the SHA-256 of its bytes, in hex, worked out by the server. */
+export const ImageId = z.string().regex(/^[0-9a-f]{64}$/);
+export type ImageId = z.infer<typeof ImageId>;
+
+/** A stored image, as `POST /api/images` answers and messages and prompts refer to it. */
+export const ImageRef = z.object({
+  id: ImageId,
+  type: ImageType,
+  /** Its size, when known. */
+  bytes: z.number().int().positive().max(MAX_IMAGE_BYTES).optional(),
+});
+export type ImageRef = z.infer<typeof ImageRef>;
+
 const itemBase = { id: z.string().min(1).max(200), at: z.iso.datetime() };
 
 /** One entry in a session's conversation, normalized from its transcript by the plugin. */
@@ -117,6 +140,8 @@ export const ConversationItem = z.discriminatedUnion('kind', [
     text: z.string().max(20_000),
     /** Set when the prompt was a slash command, e.g. `review`. */
     command: z.string().max(100).optional(),
+    /** Images sent with the prompt, served by `GET /api/images/:id`. */
+    images: z.array(ImageRef).max(MAX_IMAGES_PER_MESSAGE).optional(),
   }),
   z.object({ ...itemBase, kind: z.literal('claude'), text: z.string().max(50_000) }),
   z.object({
@@ -177,9 +202,23 @@ export const ChangesReport = z.object({
 });
 export type ChangesReport = z.infer<typeof ChangesReport>;
 
-/** A prompt typed in the dashboard, for the session's plugin to submit. */
-export const PromptRequest = z.object({ text: z.string().trim().min(1).max(20_000) });
+/** A prompt typed in the dashboard, for the session's plugin to submit: text, images or both. */
+export const PromptRequest = z
+  .object({
+    text: z.string().trim().max(20_000),
+    /** Images uploaded first with `POST /api/images`. */
+    images: z.array(ImageId).max(MAX_IMAGES_PER_MESSAGE).optional(),
+  })
+  .refine((p) => p.text !== '' || !!p.images?.length, { message: 'A prompt needs text or images' });
 export type PromptRequest = z.infer<typeof PromptRequest>;
+
+/** A queued prompt, as `POST /api/sessions/:id/prompts/claim` hands it to the plugin. */
+export const ClaimedPrompt = z.object({
+  id: z.string(),
+  text: z.string(),
+  images: z.array(ImageRef),
+});
+export type ClaimedPrompt = z.infer<typeof ClaimedPrompt>;
 
 /** Server-sent events on `GET /api/stream`. */
 export type StreamEvent =
