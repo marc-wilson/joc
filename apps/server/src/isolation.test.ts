@@ -10,6 +10,8 @@ import {
   HistorySession,
   ImageRef,
   MachineProblem,
+  NotificationsSnapshot,
+  ReadsClaim,
   Session,
 } from '@joc/protocol';
 import { MongoMemoryServer } from 'mongodb-memory-server';
@@ -95,6 +97,11 @@ test('every API route needs an owner', async () => {
     ['POST', '/api/problems'],
     ['POST', '/api/images'],
     ['GET', `/api/images/${'0'.repeat(64)}`],
+    ['GET', '/api/notifications'],
+    ['POST', '/api/notifications'],
+    ['POST', '/api/notifications/read'],
+    ['POST', '/api/notifications/read-all'],
+    ['POST', '/api/notifications/reads/claim'],
   ] as const) {
     const res = await app.request(path, { method });
     assert.equal(res.status, 401, `${method} ${path}`);
@@ -212,11 +219,17 @@ test("a live stream hears only its owner's updates", async () => {
       diff: '',
       truncated: false,
     });
+    await call('bob', '/api/notifications', {
+      at: ++clock,
+      status: 'ok',
+      threads: [thread('9001', 'Bob secret thread')],
+      more: false,
+    });
     await call('alice', '/api/reports', report('alice-live', { title: 'Alice update' }));
   });
   assert.match(heard, /event: snapshot/);
   assert.match(heard, /Alice update/);
-  assert.doesNotMatch(heard, /bob-live|Bob secret/);
+  assert.doesNotMatch(heard, /bob-live|Bob secret|event: notifications/);
 });
 
 const pr = (title: string) => ({
@@ -398,4 +411,97 @@ test("slash commands stay with their owner, and a command's output isn't counted
   assert.deepEqual(bob, []);
   const history = await read(await call('alice', '/api/history'), z.array(HistorySession));
   assert.equal(history.find((s) => s.id === 'alice-cmd')?.messages, 1);
+});
+
+function thread(id: string, title: string, updatedAt = new Date().toISOString()) {
+  return {
+    id,
+    reason: 'review_requested',
+    title,
+    type: 'PullRequest',
+    repo: 'harbor-labs/atlas-web',
+    url: `https://github.com/harbor-labs/atlas-web/pull/${id}`,
+    updatedAt,
+    number: Number(id),
+    alert: 'review',
+  };
+}
+
+const unread = async (who: Who) => {
+  const snapshot = await read(await call(who, '/api/notifications'), NotificationsSnapshot);
+  return snapshot.state === 'reported' ? snapshot.threads.map((t) => t.title) : 'none';
+};
+const claim = async (who: Who) =>
+  (await read(await call(who, '/api/notifications/reads/claim', {}), ReadsClaim)).ids;
+
+test('notifications stay with their owner', async () => {
+  const sent = { at: ++clock, status: 'ok', threads: [thread('101', 'Alice thread')], more: false };
+  assert.equal((await call('alice', '/api/notifications', sent)).status, 200);
+  assert.deepEqual(await unread('alice'), ['Alice thread']);
+  // Bob's own, from the live stream test, and never Alice's.
+  assert.deepEqual(await unread('bob'), ['Bob secret thread']);
+});
+
+test("marking read reaches only the owner's machines, and hides only the owner's thread", async () => {
+  const at = ++clock;
+  await call('alice', '/api/notifications', {
+    at,
+    status: 'ok',
+    threads: [thread('201', 'Alice one'), thread('202', 'Alice two')],
+    more: false,
+  });
+  await call('bob', '/api/notifications', {
+    at,
+    status: 'ok',
+    threads: [thread('201', 'Bob one')],
+    more: false,
+  });
+
+  // Bob marks the same thread id read, and then everything he has.
+  assert.equal((await call('bob', '/api/notifications/read', { ids: ['201'] })).status, 204);
+  assert.equal((await call('bob', '/api/notifications/read-all', {})).status, 204);
+  assert.deepEqual(await unread('bob'), []);
+  assert.deepEqual(await unread('alice'), ['Alice one', 'Alice two']);
+  assert.deepEqual(await claim('alice'), []);
+  assert.deepEqual(await claim('bob'), ['201']);
+
+  assert.equal((await call('alice', '/api/notifications/read', { ids: ['202'] })).status, 204);
+  assert.deepEqual(await unread('alice'), ['Alice one']);
+  assert.deepEqual(await claim('bob'), []);
+  assert.deepEqual(await claim('alice'), ['202']);
+  // Claimed once: the next machine to read finds nothing left.
+  assert.deepEqual(await claim('alice'), []);
+});
+
+test('a thread marked read comes back when something new happens on it', async () => {
+  const earlier = new Date(Date.now() - 60_000).toISOString();
+  await call('alice', '/api/notifications/read', { ids: ['301'] });
+  const later = new Date(Date.now() + 60_000).toISOString();
+  await call('alice', '/api/notifications', {
+    at: ++clock,
+    status: 'ok',
+    threads: [thread('301', 'Quiet since', earlier), thread('302', 'New comment', later)],
+    more: false,
+  });
+  await call('alice', '/api/notifications/read', { ids: ['302'] });
+  await call('alice', '/api/notifications', {
+    at: ++clock,
+    status: 'ok',
+    threads: [
+      thread('301', 'Quiet since', earlier),
+      thread('302', 'New comment', new Date(Date.now() + 120_000).toISOString()),
+    ],
+    more: false,
+  });
+  assert.deepEqual(await unread('alice'), ['New comment']);
+});
+
+test('only a machine takes the mark-read queue, and bad ids are refused', async () => {
+  const res = await app.request('/api/notifications/reads/claim', {
+    method: 'POST',
+    headers: { cookie: cookies.get('alice') ?? '', host: 'joc.test', origin: 'http://joc.test' },
+  });
+  assert.equal(res.status, 403);
+  assert.equal((await call('alice', '/api/notifications/read', { ids: ['../x'] })).status, 400);
+  assert.equal((await call('alice', '/api/notifications/read', { ids: [] })).status, 400);
 });
