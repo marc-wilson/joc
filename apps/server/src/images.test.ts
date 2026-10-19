@@ -22,7 +22,7 @@ after(async () => {
   await mongo.stop();
 });
 
-const app = createApp({ publicUrl: 'http://joc.test' });
+const app = createApp({ publicUrl: 'http://joc.test', pluginVersion: '1.0.0' });
 
 const bytes = (...parts: (number[] | string)[]) =>
   new Uint8Array(parts.flatMap((p) => (typeof p === 'string' ? [...Buffer.from(p)] : p)));

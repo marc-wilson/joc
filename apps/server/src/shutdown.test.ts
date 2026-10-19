@@ -22,7 +22,11 @@ after(async () => {
 // The timeout is well under the stream's 15s ping pause, so only the shutdown can end it in time.
 test('a live stream ends when the server shuts down', { timeout: 5000 }, async () => {
   const shutdown = new AbortController();
-  const app = createApp({ publicUrl: 'http://joc.test', shutdown: shutdown.signal });
+  const app = createApp({
+    publicUrl: 'http://joc.test',
+    pluginVersion: '1.0.0',
+    shutdown: shutdown.signal,
+  });
   const res = await app.request('/api/stream');
   assert.equal(res.status, 200);
   const reader = res.body?.getReader();

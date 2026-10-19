@@ -1,9 +1,17 @@
 // People and their credentials: GitHub users, browser sessions, and linked machines. Every secret
 // is stored as its SHA-256 hash, so the database alone can't sign anyone in.
 import { getDb } from '@joc/db';
-import type { Device, DeviceStart, DeviceToken, PendingDevice, User } from '@joc/protocol';
+import type {
+  Device,
+  DeviceStart,
+  DeviceToken,
+  PendingDevice,
+  PluginVersion,
+  User,
+} from '@joc/protocol';
 import { type Owner, ownerFrom } from './owner.ts';
 import { hashSecret, newSecret } from './secrets.ts';
+import { isBehind } from './version.ts';
 
 const SESSION_DAYS = 30;
 const LINK_MINUTES = 10;
@@ -39,6 +47,11 @@ interface DeviceDoc {
   name: string;
   createdAt: Date;
   lastSeenAt: Date;
+  /**
+   * The plugin version the machine last sent: null when it sent none (a plugin from before
+   * versions were sent), unset when it hasn't been seen since.
+   */
+  plugin?: string | null;
 }
 
 interface LinkDoc {
@@ -239,28 +252,42 @@ export async function createDeviceToken(owner: Owner, name: string): Promise<str
   return token;
 }
 
-const seen = new Map<string, number>();
+/** When each machine was last written down, and with which plugin version. */
+const seen = new Map<string, { at: number; plugin: string | null }>();
 
-export async function resolveDeviceToken(token: string): Promise<Owner | undefined> {
+/**
+ * The owner of a machine's token, noting that the machine was seen and the plugin version it
+ * sent (`undefined`: it sent none).
+ */
+export async function resolveDeviceToken(
+  token: string,
+  pluginVersion?: PluginVersion,
+): Promise<Owner | undefined> {
   const _id = hashSecret(token);
   const doc = await devices().findOne({ _id });
   if (!doc) return undefined;
-  // Last seen, at most once a minute per machine.
+  // At most once a minute per machine, or at once when its plugin changed.
   const now = Date.now();
-  if (now - (seen.get(_id) ?? 0) > 60_000) {
-    seen.set(_id, now);
-    await devices().updateOne({ _id }, { $set: { lastSeenAt: new Date(now) } });
+  const plugin = pluginVersion ?? null;
+  const last = seen.get(_id);
+  if (!last || now - last.at > 60_000 || last.plugin !== plugin) {
+    seen.set(_id, { at: now, plugin });
+    await devices().updateOne({ _id }, { $set: { lastSeenAt: new Date(now), plugin } });
   }
   return ownerFrom(doc.userId);
 }
 
-export async function listDevices(owner: Owner): Promise<Device[]> {
+/** The owner's machines; `latest` is the plugin version they should run. */
+export async function listDevices(owner: Owner, latest: PluginVersion): Promise<Device[]> {
   const docs = await devices().find({ userId: owner }).sort({ createdAt: 1 }).toArray();
   return docs.map((d) => ({
     id: d.id,
     name: d.name,
     createdAt: d.createdAt.toISOString(),
     lastSeenAt: d.lastSeenAt.toISOString(),
+    plugin: d.plugin ?? undefined,
+    // A plugin that sent no version predates sending one, so it's behind any version that does.
+    outdated: d.plugin === null || (d.plugin !== undefined && isBehind(d.plugin, latest)),
   }));
 }
 

@@ -6,6 +6,7 @@ import { closeClient, getDb } from '@joc/db';
 import {
   ClaimedPrompt,
   ConversationItem,
+  Device,
   GitHubSnapshot,
   HistorySession,
   ImageRef,
@@ -51,7 +52,7 @@ const github: GitHubAuth = {
   authorizeUrl: () => 'https://github.example/authorize',
   profileFor: async () => undefined,
 };
-const app = createApp({ github, publicUrl: 'http://joc.test' });
+const app = createApp({ github, publicUrl: 'http://joc.test', pluginVersion: '1.0.0' });
 
 const Sessions = z.array(Session);
 const Items = z.array(ConversationItem);
@@ -94,6 +95,7 @@ test('every API route needs an owner', async () => {
     ['GET', '/api/github'],
     ['POST', '/api/github'],
     ['GET', '/api/problems'],
+    ['GET', '/api/version'],
     ['POST', '/api/problems'],
     ['POST', '/api/images'],
     ['GET', `/api/images/${'0'.repeat(64)}`],
@@ -324,6 +326,30 @@ test("a machine's problems are shown only to its owner, and only to a signed-in 
     body: JSON.stringify({ machine: 'alice-laptop', problems: [problem] }),
   });
   assert.equal(fromBrowser.status, 403);
+});
+
+test("a machine's plugin version is shown only to its owner, and an old plugin still works", async () => {
+  const asPlugin = (who: Who, version: string) =>
+    app.request('/api/sessions', { headers: { ...auth(who), 'x-joc-plugin': version } });
+  // Behind the server's 1.0.0: answered as usual, with the version it should run.
+  const old = await asPlugin('alice', '0.9.0');
+  assert.equal(old.status, 200);
+  assert.equal(old.headers.get('x-joc-plugin-latest'), '1.0.0');
+  assert.equal((await asPlugin('bob', '1.0.0')).headers.get('x-joc-plugin-latest'), null);
+
+  const machines = async (who: Who) =>
+    read(
+      await app.request('/api/devices', { headers: { cookie: cookies.get(who) ?? '' } }),
+      z.array(Device),
+    );
+  assert.deepEqual(
+    (await machines('alice')).map((d) => [d.name, d.plugin, d.outdated]),
+    [['alice-laptop', '0.9.0', true]],
+  );
+  assert.deepEqual(
+    (await machines('bob')).map((d) => [d.name, d.plugin, d.outdated]),
+    [['bob-laptop', '1.0.0', false]],
+  );
 });
 
 /** A tiny made-up PNG: the signature, then bytes of its own. */
