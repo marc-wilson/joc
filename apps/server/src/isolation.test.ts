@@ -2,8 +2,8 @@
 // or hear about the other's data through any route. Runs against an in-memory MongoDB.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { closeClient } from '@joc/db';
-import { ConversationItem, Session } from '@joc/protocol';
+import { closeClient, getDb } from '@joc/db';
+import { ConversationItem, GitHubSnapshot, HistorySession, Session } from '@joc/protocol';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { z } from 'zod';
 import { createApp } from './app.ts';
@@ -77,6 +77,9 @@ test('every API route needs an owner', async () => {
     ['POST', '/api/changes'],
     ['POST', '/api/sessions/s/prompts'],
     ['POST', '/api/sessions/s/prompts/claim'],
+    ['GET', '/api/history'],
+    ['GET', '/api/github'],
+    ['POST', '/api/github'],
   ] as const) {
     const res = await app.request(path, { method });
     assert.equal(res.status, 401, `${method} ${path}`);
@@ -199,4 +202,55 @@ test("a live stream hears only its owner's updates", async () => {
   assert.match(heard, /event: snapshot/);
   assert.match(heard, /Alice update/);
   assert.doesNotMatch(heard, /bob-live|Bob secret/);
+});
+
+const pr = (title: string) => ({
+  number: 7,
+  title,
+  url: 'https://github.example/harbor-labs/atlas-web/pull/7',
+  repo: 'harbor-labs/atlas-web',
+  branch: 'fix/auth-redirect',
+  author: 'alice',
+  updatedAt: new Date().toISOString(),
+  draft: false,
+  additions: 3,
+  deletions: 1,
+  ci: 'pass',
+});
+
+test('GitHub data stays with its owner', async () => {
+  const report = { at: ++clock, status: 'ok', reviewRequested: [], mine: [pr('Alice PR')] };
+  assert.equal((await call('alice', '/api/github', report)).status, 200);
+  const alice = await read(await call('alice', '/api/github'), GitHubSnapshot);
+  const bob = await read(await call('bob', '/api/github'), GitHubSnapshot);
+  assert.deepEqual(alice.state === 'reported' && alice.mine.map((p) => p.title), ['Alice PR']);
+  assert.equal(bob.state, 'none');
+});
+
+test('history is per owner, and a silent session leaves the live list but stays in history', async () => {
+  await call('alice', '/api/reports', report('alice-old', { title: 'Old one' }));
+  // An hour and a bit of silence.
+  await getDb()
+    .collection('sessions')
+    .updateOne(
+      { owner: 'gh_1', sessionId: 'alice-old' },
+      { $set: { updatedAt: new Date(Date.now() - 61 * 60_000) } },
+    );
+
+  const live = await read(await call('alice', '/api/sessions'), Sessions);
+  const history = await read(await call('alice', '/api/history'), z.array(HistorySession));
+  const bobs = await read(await call('bob', '/api/history'), z.array(HistorySession));
+  assert.equal(
+    live.some((s) => s.id === 'alice-old'),
+    false,
+  );
+  assert.equal(
+    history.some((s) => s.id === 'alice-old'),
+    true,
+  );
+  assert.equal(history.find((s) => s.id === 'shared-id')?.messages, 1);
+  assert.equal(
+    bobs.some((s) => s.title === 'Old one' || s.title === 'Alice'),
+    false,
+  );
 });

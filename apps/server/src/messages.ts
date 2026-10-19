@@ -65,3 +65,19 @@ export async function addMessages(
   if (fresh.length) updates.emit(`messages:${owner}`, sessionId, fresh);
   return fresh.length;
 }
+
+/** How many messages each of the owner's sessions has. */
+export async function countMessages(
+  owner: Owner,
+  sessionIds: string[],
+): Promise<Map<string, number>> {
+  await ensureIndex();
+  const rows = await messages()
+    .aggregate<{ _id: string; n: number }>([
+      // Tool results ride along with their calls, so they don't count as messages.
+      { $match: { owner, sessionId: { $in: sessionIds }, kind: { $ne: 'tool_result' } } },
+      { $group: { _id: '$sessionId', n: { $sum: 1 } } },
+    ])
+    .toArray();
+  return new Map(rows.map((r) => [r._id, r.n]));
+}
