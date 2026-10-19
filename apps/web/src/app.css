@@ -70,3 +70,29 @@
 .app-tasks > :last-child {
   border-bottom: 0;
 }
+
+/* Markdown tables in messages. The design system's .joc-md has no table styles yet; these
+   belong there, so move them when it next syncs. */
+.app-md-table {
+  overflow-x: auto;
+  margin: 0 0 var(--space-3);
+}
+
+.app-md-table table {
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.app-md-table th,
+.app-md-table td {
+  padding: var(--space-1\.5, 6px) var(--space-3);
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.app-md-table th {
+  background: var(--bg-raised);
+  font-weight: 600;
+}

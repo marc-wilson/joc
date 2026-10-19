@@ -27,6 +27,12 @@ const markdown: Components = {
       {children}
     </a>
   ),
+  // Wide tables scroll inside the message instead of stretching the column.
+  table: ({ children }) => (
+    <div className="app-md-table">
+      <table>{children}</table>
+    </div>
+  ),
   h1: ({ children }) => <h3>{children}</h3>,
   h2: ({ children }) => <h3>{children}</h3>,
 };
