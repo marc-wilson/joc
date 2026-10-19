@@ -10,7 +10,8 @@
     "./styles.css": "./src/styles.css"
   },
   "scripts": {
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "test": "node --test src/*.test.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

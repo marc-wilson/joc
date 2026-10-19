@@ -270,6 +270,74 @@
 .joc-ibrow__sep,
 .joc-ibrow__time {
   flex: none;
+
+/* Dialog and image viewer (@joc/ui Dialog, ImageViewer). Claude Design drew these by hand; the
+   styles belong in the design system, so move them there when it next syncs. Motion is opacity
+   only. */
+.joc-dialog {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: var(--space-8);
+  box-sizing: border-box;
+  border: 0;
+  background: var(--scrim);
+  color: var(--text-primary);
+  align-items: center;
+  justify-content: center;
+  animation: joc-fade var(--duration-fast) var(--ease-standard) both;
+}
+
+.joc-dialog[open] {
+  display: flex;
+}
+
+.joc-dialog::backdrop {
+  background: transparent;
+}
+
+.joc-dialog__panel {
+  width: 100%;
+  max-width: var(--thread-max);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-overlay);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+}
+
+.joc-dialog__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.joc-dialog__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.joc-dialog__meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 16px;
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
 }
@@ -374,4 +442,56 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+
+.joc-dialog__body {
+  min-height: 0;
+  overflow: auto;
+}
+
+.joc-dialog__foot {
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-tertiary);
+}
+
+.joc-viewer .joc-dialog__body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: var(--bg-sunken);
+}
+
+.joc-viewer__img {
+  display: block;
+  max-width: 100%;
+  /* The viewport less the dialog's padding, the stage's padding, header and footer. */
+  max-height: calc(100dvh - 2 * var(--space-8) - 2 * var(--space-4) - 2 * var(--space-12));
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.joc-viewer__nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.joc-viewer__pos {
+  width: 8ch;
+  margin-right: var(--space-2);
+  text-align: right;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .joc-dialog {
+    animation: none;
+  }
 }
