@@ -53,6 +53,24 @@ jobs:
           --from ${{ github.event.pull_request.base.sha }}
           --to ${{ github.event.pull_request.head.sha }}
 
+      # Installs from GitHub update only when the plugin's version changes, so every change under
+      # apps/plugin/ bumps it.
+      - name: Check the plugin version was bumped
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          MANIFEST: apps/plugin/.claude-plugin/plugin.json
+        run: |
+          base=$(git merge-base "$BASE" HEAD)
+          if git diff --quiet "$base" HEAD -- apps/plugin/; then exit 0; fi
+          old=$(git show "$base:$MANIFEST" | jq -r .version)
+          new=$(jq -r .version "$MANIFEST")
+          if [ "$old" = "$new" ]; then
+            echo "::error file=$MANIFEST::apps/plugin/ changed but the plugin version is still $old. Bump \"version\" in $MANIFEST: patch for a fix, minor for a feature."
+            exit 1
+          fi
+          echo "Plugin version $old -> $new"
+
   # Build the arm64 image, push it to ACR and roll it out with Helm. Only for pushes to main;
   # every secret lives in the `production` environment, which PRs and forks never reach.
   #

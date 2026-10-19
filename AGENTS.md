@@ -64,6 +64,9 @@ Before committing:
 
 1. `pnpm check && pnpm typecheck && pnpm test && pnpm build` passes.
 2. UI changes: look at the result in both the dark and light theme.
+3. Changed anything under `apps/plugin/`? Bump `version` in `apps/plugin/.claude-plugin/plugin.json`
+   (patch for a fix, minor for a feature), or installs never see the update. CI fails a PR that
+   doesn't.
 
 ## Commits
 
