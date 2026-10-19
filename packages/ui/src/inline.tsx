@@ -17,3 +17,8 @@ export function Branch({ children }: { children?: ReactNode }) {
 export function Emph({ children }: { children?: ReactNode }) {
   return <span className="joc-emph">{children}</span>;
 }
+
+/** A small outlined label beside a name, e.g. "Draft" or "Out of date". */
+export function Tag({ children }: { children?: ReactNode }) {
+  return <span className="joc-tag">{children}</span>;
+}

@@ -1,4 +1,5 @@
 export { Avatar, type AvatarProps } from './Avatar.tsx';
+export { Banner, type BannerProps } from './Banner.tsx';
 export {
   AgentTeam,
   type AgentTeamMember,
@@ -80,7 +81,7 @@ export {
 } from './history.tsx';
 export { Icon, type IconName, type IconProps } from './Icon.tsx';
 export { type InboxMark, InboxRow, type InboxRowProps } from './inbox.tsx';
-export { Branch, Code, Emph } from './inline.tsx';
+export { Branch, Code, Emph, Tag } from './inline.tsx';
 export {
   EmptyState,
   type EmptyStateProps,
