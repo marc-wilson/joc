@@ -74,8 +74,14 @@ export async function countMessages(
   await ensureIndex();
   const rows = await messages()
     .aggregate<{ _id: string; n: number }>([
-      // Tool results ride along with their calls, so they don't count as messages.
-      { $match: { owner, sessionId: { $in: sessionIds }, kind: { $ne: 'tool_result' } } },
+      // Tool results and command output ride along with their calls, so they don't count.
+      {
+        $match: {
+          owner,
+          sessionId: { $in: sessionIds },
+          kind: { $nin: ['tool_result', 'command_output'] },
+        },
+      },
       { $group: { _id: '$sessionId', n: { $sum: 1 } } },
     ])
     .toArray();
