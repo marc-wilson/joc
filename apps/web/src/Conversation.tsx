@@ -1,8 +1,17 @@
-import type { ConversationItem, SessionState } from '@joc/protocol';
-import { CodeBlock, EmptyState, Message, SlashPill, Thread } from '@joc/ui';
+import type { ConversationItem, ImageRef, SessionState } from '@joc/protocol';
+import {
+  Attachment,
+  CodeBlock,
+  EmptyState,
+  formatBytes,
+  Message,
+  SlashPill,
+  Thread,
+} from '@joc/ui';
 import { isValidElement, type ReactNode, useLayoutEffect, useRef } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { PendingPrompt } from './pending.ts';
 
 const time = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -37,12 +46,50 @@ const markdown: Components = {
   h2: ({ children }) => <h3>{children}</h3>,
 };
 
-/** A prompt sent from the dashboard that the session hasn't started yet. */
-export interface PendingPrompt {
-  id: string;
-  sessionId: string;
+/** A message's images, each opening full size in a new tab. Served by the API, never inlined. */
+function Images({ images }: { images: ImageRef[] }) {
+  return (
+    <div className="joc-row">
+      {images.map((image, i) => {
+        const src = `/api/images/${image.id}`;
+        return (
+          <Attachment
+            key={image.id}
+            name={`Image ${i + 1}`}
+            src={src}
+            href={src}
+            size={image.bytes ? formatBytes(image.bytes) : undefined}
+            width={240}
+            height={160}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/** A prompt's text and images; just the text when there are none, as before images. */
+function UserMessage({
+  text,
+  command,
+  images,
+}: {
   text: string;
-  failed?: boolean;
+  command?: string;
+  images: ImageRef[];
+}) {
+  const words = (
+    <>
+      {command ? <SlashPill command={command} /> : null} {text}
+    </>
+  );
+  if (!images.length) return words;
+  return (
+    <>
+      {text || command ? <p>{words}</p> : null}
+      <Images images={images} />
+    </>
+  );
 }
 
 interface Props {
@@ -83,7 +130,11 @@ export function Conversation({ items, pending, state }: Props) {
               case 'user':
                 return (
                   <Message key={item.id} from="user" time={time(item.at)}>
-                    {item.command ? <SlashPill command={item.command} /> : null} {item.text}
+                    <UserMessage
+                      text={item.text}
+                      command={item.command}
+                      images={item.images ?? []}
+                    />
                   </Message>
                 );
               case 'claude':
@@ -122,7 +173,7 @@ export function Conversation({ items, pending, state }: Props) {
               from="user"
               time={p.failed ? 'Not sent' : 'Waiting for the session'}
             >
-              {p.text}
+              <UserMessage text={p.text} images={p.images} />
             </Message>
           ))}
         </Thread>

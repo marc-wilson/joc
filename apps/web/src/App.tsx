@@ -1,4 +1,10 @@
-import type { Session } from '@joc/protocol';
+import {
+  IMAGE_TYPES,
+  ImageRef,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGES_PER_MESSAGE,
+  type Session,
+} from '@joc/protocol';
 import {
   Composer,
   EmptyState,
@@ -14,9 +20,10 @@ import { apiFetch } from './auth.ts';
 import { BackgroundView } from './Background.tsx';
 import { backgroundTasks } from './background.ts';
 import { ChangesView } from './Changes.tsx';
-import { Conversation, type PendingPrompt } from './Conversation.tsx';
+import { Conversation } from './Conversation.tsx';
 import { useChanges, useConversation, useNow, useSessions } from './hooks.ts';
 import { Nav } from './Nav.tsx';
+import { delivered, type PendingPrompt } from './pending.ts';
 import { plain } from './plain.ts';
 import { age } from './time.ts';
 
@@ -28,6 +35,20 @@ function groupByRepo(list: Session[]): [string, Session[]][] {
 }
 
 const UNTITLED = 'New session';
+
+const IMAGE_LIMITS = { types: IMAGE_TYPES, maxBytes: MAX_IMAGE_BYTES, max: MAX_IMAGES_PER_MESSAGE };
+
+/** Uploads a pasted image; its stored ref, or undefined when the server didn't take it. */
+async function uploadImage(file: File): Promise<ImageRef | undefined> {
+  const res = await apiFetch('/api/images', {
+    method: 'POST',
+    headers: { 'content-type': file.type },
+    body: file,
+  });
+  if (!res.ok) return undefined;
+  const parsed = ImageRef.safeParse(await res.json());
+  return parsed.success ? parsed.data : undefined;
+}
 
 export default function App() {
   const { sessions, connected } = useSessions();
@@ -48,22 +69,28 @@ export default function App() {
   const railed = tab === 'changes' && !listOpen;
   const [pending, setPending] = useState<PendingPrompt[]>([]);
   // A sent prompt shows until the session's own transcript has it.
-  const waiting = pending.filter(
-    (p) =>
-      p.sessionId === selected?.id &&
-      !items.some((i) => i.kind === 'user' && i.text.trim() === p.text),
-  );
+  const waiting = pending.filter((p) => p.sessionId === selected?.id && !delivered(items, p));
 
-  async function send(sessionId: string, text: string) {
-    const prompt: PendingPrompt = { id: crypto.randomUUID(), sessionId, text };
+  async function send(sessionId: string, text: string, files: File[] = []) {
+    const prompt: PendingPrompt = { id: crypto.randomUUID(), sessionId, text, images: [] };
+    const update = (change: Partial<PendingPrompt>) =>
+      setPending((list) => list.map((p) => (p.id === prompt.id ? { ...p, ...change } : p)));
     setPending((list) => [...list, prompt]);
-    const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text }),
-    }).catch(() => undefined);
-    if (!res?.ok) {
-      setPending((list) => list.map((p) => (p.id === prompt.id ? { ...p, failed: true } : p)));
+    try {
+      // The images first: the prompt refers to them by the ids the server gives them.
+      const images = await Promise.all(files.map(uploadImage));
+      const uploaded = images.filter((i) => i !== undefined);
+      update({ images: uploaded });
+      if (uploaded.length < files.length) return update({ failed: true });
+      const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text, images: uploaded.map((i) => i.id) }),
+      });
+      if (!res.ok) update({ failed: true });
+    } catch {
+      // The server is unreachable: the prompt shows as not sent.
+      update({ failed: true });
     }
   }
 
@@ -177,7 +204,8 @@ export default function App() {
                       <Composer
                         key={selected.id}
                         working={selected.state === 'working'}
-                        onSubmit={(text) => void send(selected.id, text)}
+                        imageLimits={IMAGE_LIMITS}
+                        onSubmit={(text, images) => void send(selected.id, text, images)}
                       />
                     )}
                   </div>
