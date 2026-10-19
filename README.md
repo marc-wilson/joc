@@ -87,6 +87,19 @@ and the plugin's recent problems (an unreachable server, a refused token or repo
 the plugin itself). They're kept, capped, in `~/.claude/joc/status.json`, and also shown under
 Plugin problems on the Machines page once the server is reachable again.
 
+The plugin also reads your GitHub pull requests and unread notifications through `gh`, once per
+machine (notifications no more often than GitHub's `X-Poll-Interval`, with conditional requests).
+Notifications show on the dashboard's **Inbox**, grouped by reason with review requests, mentions
+and CI first; marking one read there marks it read on GitHub on your machine's next read. Review
+requests, mentions and failed CI also raise a native notification in Claude Code, once per
+machine, and, if you turn on the Inbox's switch, a browser notification while the dashboard is
+open (as does a session that needs you).
+
+| Variable in Claude Code's environment | Effect |
+| --- | --- |
+| `JOC_GITHUB=0` | Keeps GitHub on your machine: no pull requests, no notifications |
+| `JOC_NOTIFY=0` | No native notifications in Claude Code (the Inbox still fills) |
+
 ## Scripts
 
 Run from the repo root.
