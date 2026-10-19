@@ -7,9 +7,11 @@
 // news to raise as a native notification (src/notifications.ts); JOC_NOTIFY=0 keeps it quiet.
 //
 // Nothing here ever shows an error in the session. What fails goes to the plugin's local problem
-// log (problems.ts), which `/joc-status` reads on demand.
+// log (problems.ts), which `/joc-status` reads on demand. The one thing it does say unasked: when
+// the server answers that this plugin is behind, a toast once per session pointing at
+// `/joc-update`, which updates it.
 import type { MessagesReport } from '@joc/protocol';
-import type { EngineInterface, HttpResponse, Register } from 'claude-code';
+import type { EngineInterface, HttpResponse, ProcessRunResult, Register } from 'claude-code';
 import {
   age,
   applyOutcomes,
@@ -23,12 +25,14 @@ import {
   responseOutcome,
   STATUS_PATH,
 } from './problems.ts';
+import { LATEST_HEADER, manifestVersion, versionHeader } from './version.ts';
 
 const POLL_MS = 2000;
 const SYNC_MS = 30_000;
 const SYNC_TIMEOUT_MS = 60_000;
 const CHECK_TIMEOUT_MS = 5000;
 const SAVE_TIMEOUT_MS = 60_000;
+const UPDATE_TIMEOUT_MS = 120_000;
 const DEFAULT_SERVER = 'https://joc.marcswilson.com';
 /** Under the home folder; src/credentials.ts reads the same file for the command hooks. */
 const CREDENTIALS = '.claude/joc/credentials.json';
@@ -38,6 +42,12 @@ const CLAIM_PATH = '/api/sessions/{id}/prompts/claim';
 const MAX_PENDING = 200;
 /** Problems `/joc-status` lists. */
 const SHOWN_PROBLEMS = 8;
+/** What updates the plugin, run by `/joc-update` and shown when it can't. */
+const UPDATE_STEPS = [
+  ['claude', 'plugin', 'marketplace', 'update', 'joc'],
+  ['claude', 'plugin', 'update', 'joc@joc'],
+];
+const RELOAD = 'reload-plugins';
 
 interface Credentials {
   url: string;
@@ -55,6 +65,22 @@ function pluginData(root: string): string | undefined {
   if (!installed) return undefined;
   const [, config, marketplace, plugin] = installed;
   return `${config}/plugins/data/${`${plugin}@${marketplace}`.replace(/[^\w-]/g, '-')}`;
+}
+
+/** The plugin's folder: `$.plugin.root`, which may name its .claude-plugin folder. */
+const pluginRoot = ($: EngineInterface) =>
+  $.plugin.root.replace(/\/+$/, '').replace(/\/\.claude-plugin$/, '');
+
+let ownVersion: Promise<string | undefined> | undefined;
+
+/** This plugin's version, from its manifest; read once. Undefined when it can't be read. */
+function pluginVersion($: EngineInterface): Promise<string | undefined> {
+  ownVersion ??= $.fs
+    .read(`${pluginRoot($)}/.claude-plugin/plugin.json`)
+    .then(manifestVersion)
+    // Unreadable: requests go without a version, as an older plugin's do.
+    .catch(() => undefined);
+  return ownVersion;
 }
 
 /** Runs `task` unless its last run is still going; never throws, `failed` hears why instead. */
@@ -146,7 +172,10 @@ async function connection($: EngineInterface) {
   const credentials = await readCredentials($).catch(() => undefined);
   const url = (await $.env.get('JOC_URL')) || credentials?.url || 'http://localhost:3000';
   const token = (await $.env.get('JOC_TOKEN')) || credentials?.token;
-  const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+  const headers: Record<string, string> = {
+    ...versionHeader(await pluginVersion($)),
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
+  };
   return { url: url.replace(/\/$/, ''), headers };
 }
 
@@ -159,9 +188,10 @@ async function login($: EngineInterface, args: string): Promise<string> {
   const host = await $.process.run(['hostname', '-s'], { timeoutMs: 5000 }).catch(() => undefined);
   const name = host?.stdout.trim() || 'Claude Code';
 
+  const version = versionHeader(await pluginVersion($));
   const res = await $.http.fetch(`${url}/api/devices/start`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...version },
     body: JSON.stringify({ name }),
   });
   if (!res.ok) return `JOC: couldn't reach ${url} to link this machine (HTTP ${res.status}).`;
@@ -188,7 +218,7 @@ async function login($: EngineInterface, args: string): Promise<string> {
       }
       const poll = await $.http.fetch(`${url}/api/devices/token`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...version },
         body: JSON.stringify({ deviceCode }),
       });
       if (!poll.ok) return;
@@ -263,17 +293,22 @@ async function logout($: EngineInterface): Promise<string> {
   return 'JOC: this machine is unlinked. To revoke its token on the server too, remove it under Machines in the dashboard.';
 }
 
-/** What the server says about this machine's connection, in a sentence. */
-async function checkServer($: EngineInterface): Promise<string> {
+/** What the server says about this machine's connection, and the plugin version it expects. */
+async function checkServer($: EngineInterface): Promise<{ text: string; latest?: string }> {
   const { url, headers } = await connection($);
   const timeout = $.clock.sleep(CHECK_TIMEOUT_MS).then(() => undefined);
   let res: HttpResponse | undefined;
   try {
     res = await Promise.race([$.http.fetch(`${url}/api/auth`, { headers }), timeout]);
   } catch (error) {
-    return `Can't reach it: ${errorDetail(error)}`;
+    return { text: `Can't reach it: ${errorDetail(error)}` };
   }
-  if (!res) return `Can't reach it: no answer in ${CHECK_TIMEOUT_MS / 1000}s.`;
+  if (!res) return { text: `Can't reach it: no answer in ${CHECK_TIMEOUT_MS / 1000}s.` };
+  return { text: authAnswer(res, !!headers.authorization), latest: res.headers[LATEST_HEADER] };
+}
+
+/** What `/api/auth`'s answer says about this machine's link, in a sentence. */
+function authAnswer(res: HttpResponse, hasToken: boolean): string {
   if (!res.ok) return `It answers, but with HTTP ${res.status}.`;
   let body: unknown;
   try {
@@ -285,7 +320,7 @@ async function checkServer($: EngineInterface): Promise<string> {
   if (field(body, 'required') === false) return 'Reachable. An open local server: no sign-in.';
   const login = text(field(field(body, 'user'), 'login'));
   if (field(body, 'signedIn') === true) return `Reachable. Reporting as @${login ?? 'you'}.`;
-  if (headers.authorization) {
+  if (hasToken) {
     return "Reachable, but it refused this machine's token (revoked, or from another server). Run /joc-login to link it again.";
   }
   return "Reachable, but this machine isn't linked. Run /joc-login.";
@@ -305,11 +340,16 @@ async function status($: EngineInterface): Promise<string> {
   // A broken log reads as an empty one, as everywhere else.
   const log: PluginStatus = parseStatus(await readStatusText($).catch(() => undefined));
   const problems = log.problems.slice(-SHOWN_PROBLEMS).reverse();
+  const server = await checkServer($);
+  const version = (await pluginVersion($)) ?? 'unknown';
   return [
     'JOC status',
     '',
     `  Server  ${url} (${source})`,
-    `          ${await checkServer($)}`,
+    `          ${server.text}`,
+    server.latest
+      ? `  Plugin  ${version}, behind ${server.latest}. Run /joc-update.`
+      : `  Plugin  ${version}`,
     `  Last report the server took: ${log.lastOkAt ? `${age(now - log.lastOkAt)} ago` : 'none recorded'}`,
     '',
     problems.length
@@ -370,6 +410,58 @@ async function runCommand(
 /** Set once the session starts: reports the conversation a moment from now. */
 let syncSoon: (() => void) | undefined;
 
+const shown = (argv: readonly string[]) => argv.join(' ');
+
+/** The last line a command printed, for saying how it went. */
+const lastLine = (out: string) => out.trim().split('\n').at(-1)?.trim() ?? '';
+
+/**
+ * `/joc-update`: refreshes the JOC marketplace and updates the plugin through the `claude` CLI,
+ * then reloads plugins so the session runs the new version. Whatever it can't do, it says how
+ * to do by hand.
+ */
+async function update($: EngineInterface): Promise<string> {
+  const manual = [
+    'To update by hand, run in a terminal:',
+    '',
+    `    ${UPDATE_STEPS.map(shown).join(' && ')}`,
+    '',
+    `then /${RELOAD} here.`,
+  ];
+  const lines: string[] = [];
+  for (const argv of UPDATE_STEPS) {
+    let run: ProcessRunResult;
+    try {
+      run = await $.process.run(argv, { timeoutMs: UPDATE_TIMEOUT_MS });
+    } catch (error) {
+      return [`JOC: couldn't run ${shown(argv)}: ${errorDetail(error)}`, '', ...manual].join('\n');
+    }
+    if (run.exitCode !== 0) {
+      const why = lastLine(run.stderr) || lastLine(run.stdout) || `exit code ${run.exitCode}`;
+      return [`JOC: ${shown(argv)} failed: ${why}`, '', ...manual].join('\n');
+    }
+    lines.push(`  ${shown(argv)}: ${lastLine(run.stdout) || 'done'}`);
+  }
+  // The new version only runs once plugins reload. A command can't run inside another, so the
+  // reload is queued for when this one has finished.
+  // No list (an older host): no reload to queue, so the answer says to run it.
+  const canReload = (await $.command.list().catch(() => [])).some((c) => c.name === RELOAD);
+  if (canReload) {
+    $.clock.after(1, () => {
+      // Refused (a host without it, a turn starting): the answer below already says what to run.
+      $.command.run({ command: RELOAD }).catch(() => {});
+    });
+  }
+  return [
+    'JOC: plugin updated.',
+    ...lines,
+    '',
+    canReload
+      ? `Reloading plugins now. If the new version doesn't show in /joc-status, run /${RELOAD}.`
+      : `Run /${RELOAD} to start using it.`,
+  ].join('\n');
+}
+
 export const register: Register = (on) => {
   const log = problemLog();
   const failedIn = (where: string) => (error: unknown) =>
@@ -383,7 +475,11 @@ export const register: Register = (on) => {
       name: 'joc-status',
       description: "Check this machine's link to JOC and its recent problems",
     });
-    const root = $.plugin.root.replace(/\/+$/, '').replace(/\/\.claude-plugin$/, '');
+    await $.command.register({
+      name: 'joc-update',
+      description: 'Update the JOC plugin to the version the server expects',
+    });
+    const root = pluginRoot($);
 
     // Every session, as the command hooks report every session. hook.ts finds the server and
     // token the same way this module does (src/credentials.ts).
@@ -438,6 +534,7 @@ export const register: Register = (on) => {
       log.note(
         responseOutcome({ status: res.status, body: res.text }, CLAIM_PATH, url, Date.now()),
       );
+      await warnIfBehind(res);
       if (!res.ok) return;
       const prompts = field(JSON.parse(res.text), 'prompts');
       if (!Array.isArray(prompts)) return;
@@ -478,6 +575,18 @@ export const register: Register = (on) => {
       }
     }
 
+    let warned = false;
+    /** Once per session: the server said this plugin is behind the version it expects. */
+    async function warnIfBehind(res: HttpResponse) {
+      const latest = res.headers[LATEST_HEADER];
+      if (warned || !latest) return;
+      warned = true;
+      const version = (await pluginVersion($)) ?? 'unknown';
+      $.ui.toast(`JOC: plugin ${version} is behind ${latest}. Run /joc-update.`, {
+        timeoutMs: 10_000,
+      });
+    }
+
     $.clock.every(POLL_MS, oneAtATime(takePrompts, failedIn('module')));
     return result;
   });
@@ -494,6 +603,7 @@ export const register: Register = (on) => {
   });
   on('command.run', { command: 'joc-login' }, async ($, e) => ({ text: await login($, e.args) }));
   on('command.run', { command: 'joc-logout' }, async ($) => ({ text: await logout($) }));
+  on('command.run', { command: 'joc-update' }, async ($) => ({ text: await update($) }));
   on('command.run', { command: 'joc-status' }, async ($) => {
     // So the answer includes what this session noted since its last sync. A failed write only
     // leaves those out.

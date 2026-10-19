@@ -7,6 +7,7 @@
 // it catches the server up (the conversation backlog, the diff) and refreshes the session
 // without changing its state. Only a sync prints anything: the GitHub notifications for
 // register.ts to show.
+import { readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type {
@@ -41,6 +42,7 @@ import {
   readNewLines,
   type TranscriptImage,
 } from './transcript.ts';
+import { manifestVersion, PLUGIN_HEADER, versionHeader } from './version.ts';
 
 const at = Date.now();
 const { url: serverUrl, token } = connection(process.env, readCredentials());
@@ -59,7 +61,25 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-const auth = (): { authorization?: string } => (token ? { authorization: `Bearer ${token}` } : {});
+/** This plugin's version, from its manifest beside src/; undefined when it can't be read. */
+function ownVersion(): string | undefined {
+  try {
+    return manifestVersion(
+      readFileSync(new URL('../.claude-plugin/plugin.json', import.meta.url), 'utf8'),
+    );
+  } catch {
+    // No manifest there (a copy of src/ alone): requests go without a version.
+    return undefined;
+  }
+}
+
+const version = versionHeader(ownVersion());
+
+/** Who this machine is, and which plugin version it runs: on every request. */
+const auth = (): { authorization?: string; [PLUGIN_HEADER]?: string } => ({
+  ...version,
+  ...(token ? { authorization: `Bearer ${token}` } : {}),
+});
 
 /** Sends to the server; undefined when it didn't answer. Never throws. */
 async function post(path: string, body: unknown, timeoutMs: number): Promise<Response | undefined> {
