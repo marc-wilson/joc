@@ -26,7 +26,7 @@ export function readCredentials(file = credentialsFile()): Credentials | undefin
 }
 
 /** Where to report and as whom: JOC_URL/JOC_TOKEN when set, else the link, else local dev. */
-export function connection(env = process.env, credentials = readCredentials()) {
+export function connection(env: NodeJS.ProcessEnv, credentials: Credentials | undefined) {
   const url = env.JOC_URL || credentials?.url || 'http://localhost:3000';
   return {
     url: url.replace(/\/$/, ''),
