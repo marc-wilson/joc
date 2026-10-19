@@ -120,7 +120,9 @@ export function findTranscript(sessionId: string, cwd: string): string | undefin
 
 interface Entry {
   type?: string;
+  subtype?: string;
   uuid?: string;
+  parentUuid?: string;
   timestamp?: string;
   isMeta?: boolean;
   isSidechain?: boolean;
@@ -129,6 +131,8 @@ interface Entry {
   /** Claude Code's structured record of a tool's result, next to the tool_result block. */
   toolUseResult?: unknown;
   attachment?: { type?: string; prompt?: unknown };
+  /** A `system` entry's text, e.g. a `local_command` one's command or output. */
+  content?: unknown;
 }
 
 type Block = Record<string, unknown> & { type?: string };
@@ -148,14 +152,28 @@ function resultText(content: unknown): string {
   return '';
 }
 
-/** `<command-name>/review</command-name>…<command-args>x</command-args>` → review, x */
-function slashCommand(text: string): { command: string; args: string } | undefined {
-  const name = text.match(/<command-name>\/?([^<]+)<\/command-name>/)?.[1];
+/**
+ * A slash command as the transcript records it, in a user entry or a `local_command` system one:
+ * `<command-name>/review</command-name>`, `<command-message>…` and `<command-args>auth…`, in
+ * any order.
+ */
+function slashCommand(text: string): { name: string; args: string } | undefined {
+  const name = text.match(/<command-name>\/?([^<]+)<\/command-name>/)?.[1]?.trim();
   if (!name) return undefined;
   return {
-    command: name.trim(),
-    args: text.match(/<command-args>([\s\S]*?)<\/command-args>/)?.[1]?.trim() ?? '',
+    name: cut(name, 100),
+    args: cut(text.match(/<command-args>([\s\S]*?)<\/command-args>/)?.[1]?.trim() ?? '', 20_000),
   };
+}
+
+// Terminal colour codes, in case a command's output keeps them.
+const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, 'g');
+
+/** What a built-in command printed: `<local-command-stdout>` (or `-stderr`) around the text. */
+function commandOutput(text: string): { text: string; isError: boolean } | undefined {
+  const out = text.match(/<local-command-(stdout|stderr)>([\s\S]*?)<\/local-command-\1>/);
+  const printed = out?.[2]?.replace(ANSI, '').trim();
+  return out && printed ? { text: cut(printed, 5_000), isError: out[1] === 'stderr' } : undefined;
 }
 
 type TaskUpdate = Extract<ConversationItem, { kind: 'task_update' }>;
@@ -268,19 +286,28 @@ export function parseLines(lines: string[], cwd: string): Parsed {
       items.push({ id: entry.uuid, at, kind: 'task_update', ...update });
       continue;
     }
+    // A command and what it printed: user entries, or `local_command` system ones.
+    const recorded =
+      entry.type === 'user' && typeof content === 'string'
+        ? content
+        : entry.type === 'system' && entry.subtype === 'local_command'
+          ? str(entry.content)
+          : undefined;
+    const command = recorded ? slashCommand(recorded) : undefined;
+    if (command) {
+      items.push({ id: entry.uuid, at, kind: 'command', ...command });
+      continue;
+    }
+    const output = recorded ? commandOutput(recorded) : undefined;
+    if (output) {
+      const commandId = entry.parentUuid?.slice(0, 200);
+      items.push({ id: entry.uuid, at, kind: 'command_output', commandId, ...output });
+      continue;
+    }
     if (entry.type !== 'user' && entry.type !== 'assistant') continue;
 
     if (entry.type === 'user' && typeof content === 'string') {
-      const slash = slashCommand(content);
-      if (slash) {
-        items.push({
-          id: entry.uuid,
-          at,
-          kind: 'user',
-          text: cut(slash.args, 20_000),
-          command: slash.command,
-        });
-      } else if (!content.startsWith('<')) {
+      if (!content.startsWith('<')) {
         // Other tagged strings are Claude Code's own bookkeeping (command output, caveats).
         items.push(userItem(entry.uuid, at, content));
       }
