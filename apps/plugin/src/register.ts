@@ -26,6 +26,7 @@ const POLL_MS = 2000;
 const SYNC_MS = 30_000;
 const SYNC_TIMEOUT_MS = 60_000;
 const CHECK_TIMEOUT_MS = 5000;
+const SAVE_TIMEOUT_MS = 60_000;
 const DEFAULT_SERVER = 'https://joc.marcswilson.com';
 /** Under the home folder; src/credentials.ts reads the same file for the command hooks. */
 const CREDENTIALS = '.claude/joc/credentials.json';
@@ -350,8 +351,34 @@ export const register: Register = (on) => {
       if (!Array.isArray(prompts)) return;
       // Each starts its own turn once the session is idle, in the order they were sent.
       for (const prompt of prompts) {
-        const promptText = text(field(prompt, 'text'));
+        const lines = [text(field(prompt, 'text')) ?? '', ...(await saveImages(prompt))];
+        const promptText = lines.filter(Boolean).join('\n\n');
         if (promptText) await $.prompt.submit({ text: promptText, asUser: true });
+      }
+    }
+
+    /**
+     * A prompt can't carry an image, but Claude reads an image file a prompt names. Node saves
+     * the prompt's images (src/save-images.ts), as this module can't write bytes, and answers
+     * with a line per image naming its file. Never throws: a line says when an image is missing.
+     */
+    async function saveImages(prompt: unknown): Promise<string[]> {
+      const images = field(prompt, 'images');
+      if (!Array.isArray(images) || images.length === 0) return [];
+      const missing = images.map(() => '[An image sent from JOC could not be loaded]');
+      const run = await $.process
+        .run(['node', `${root}/src/save-images.ts`], {
+          stdin: JSON.stringify({ images }),
+          timeoutMs: SAVE_TIMEOUT_MS,
+        })
+        .catch(() => undefined); // Node missing or too slow: the lines say so.
+      if (run?.exitCode !== 0) return missing;
+      try {
+        const lines = field(JSON.parse(run.stdout), 'lines');
+        return Array.isArray(lines) ? lines.flatMap((l) => text(l) ?? []) : missing;
+      } catch {
+        // Output that isn't the expected JSON: the images count as missing.
+        return missing;
       }
     }
 
