@@ -376,3 +376,26 @@ test("a prompt's images reach only their owner's plugin", async () => {
     [[image]],
   );
 });
+
+test("slash commands stay with their owner, and a command's output isn't counted", async () => {
+  await call('alice', '/api/reports', report('alice-cmd', { title: 'Commands' }));
+  const at = new Date().toISOString();
+  const items = [
+    { id: 'c1', at, kind: 'command', name: 'cost', args: '' },
+    { id: 'c2', at, kind: 'command_output', commandId: 'c1', text: 'Total: $0.42', isError: false },
+  ];
+  assert.equal(
+    (await call('alice', '/api/messages', { sessionId: 'alice-cmd', items })).status,
+    200,
+  );
+
+  const alice = await read(await call('alice', '/api/sessions/alice-cmd/messages'), Items);
+  const bob = await read(await call('bob', '/api/sessions/alice-cmd/messages'), Items);
+  assert.deepEqual(
+    alice.map((i) => i.kind),
+    ['command', 'command_output'],
+  );
+  assert.deepEqual(bob, []);
+  const history = await read(await call('alice', '/api/history'), z.array(HistorySession));
+  assert.equal(history.find((s) => s.id === 'alice-cmd')?.messages, 1);
+});
