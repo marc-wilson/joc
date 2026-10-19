@@ -169,3 +169,209 @@
   gap: var(--space-2);
   justify-content: center;
 }
+
+/* The Inbox row and the settings switch, from the JOC design system's Inbox design. Their
+   styles belong in the design system's components.css; move them there when it next syncs. */
+.joc-ibrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-3);
+  row-gap: var(--space-1\.5, 6px);
+  min-height: 56px;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  background: var(--bg-base);
+  transition: background-color var(--duration-instant) var(--ease-standard, ease);
+}
+
+.joc-ibrow.is-unread {
+  background: var(--bg-raised);
+}
+
+.joc-ibrow:hover {
+  background: var(--bg-hover);
+}
+
+.joc-ibrow + .joc-ibrow {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.joc-ibrow__mark {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.joc-ibrow__main {
+  flex: 999 1 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0\.5, 2px);
+}
+
+.joc-ibrow__line1 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.joc-ibrow__title {
+  color: var(--text-secondary);
+  font-weight: 400;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.joc-ibrow.is-unread .joc-ibrow__title {
+  color: var(--text-primary);
+  font-weight: 550;
+}
+
+.joc-ibrow__title:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.joc-ibrow__title:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.joc-ibrow__ref {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.joc-ibrow__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1\.5, 6px);
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.joc-ibrow__verb {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.joc-ibrow__sep,
+.joc-ibrow__time {
+  flex: none;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.joc-ibrow__session {
+  flex: 0 0 220px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.joc-ibrow__action {
+  flex: 0 0 112px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.joc-ibrow__action .joc-btn {
+  width: 104px;
+}
+
+.joc-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.joc-switchbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: var(--space-1\.5, 6px) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+}
+
+.joc-switchbar__label {
+  cursor: pointer;
+}
+
+.joc-switchbar__desc {
+  flex: 1 1 240px;
+  color: var(--text-secondary);
+}
+
+.joc-switchbar__state {
+  color: var(--text-tertiary);
+}
+
+.joc-switch {
+  appearance: none;
+  margin: 0;
+  width: 28px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--border-strong);
+  position: relative;
+  cursor: pointer;
+  flex: none;
+  transition: background-color var(--duration-instant) var(--ease-standard, ease);
+}
+
+.joc-switch::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-full);
+  background: var(--bg-raised);
+}
+
+.joc-switch:checked {
+  background: var(--accent);
+}
+
+.joc-switch:checked::before {
+  left: 14px;
+}
+
+.joc-switch:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.joc-switch:disabled,
+.joc-switchbar.is-disabled .joc-switchbar__label {
+  cursor: not-allowed;
+}
+
+/* The Inbox: groups stacked, each a header over its rows. */
+.app-inbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
