@@ -3,6 +3,7 @@ import { CIMark } from './ci.tsx';
 import { Button } from './controls.tsx';
 import { cx } from './cx.ts';
 import { Icon } from './Icon.tsx';
+import { formatBytes } from './media.ts';
 import { StateDot } from './state.tsx';
 
 export interface SlashPillProps {
@@ -43,13 +44,6 @@ export interface ComposerImageLimits {
   maxBytes: number;
   /** The most images one message carries. */
   max: number;
-}
-
-/** A file size the way people read it: `840 B`, `84 KB`, `1.2 MB`. */
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 interface Pasted {

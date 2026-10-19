@@ -37,7 +37,6 @@ export {
   type ComposerImageLimits,
   type ComposerProps,
   type ComposerSuggestion,
-  formatBytes,
   Message,
   type MessageProps,
   QuestionCard,
@@ -50,6 +49,7 @@ export {
   type ToolCallProps,
 } from './conversation.tsx';
 export { cx } from './cx.ts';
+export { Dialog, type DialogProps } from './dialog.tsx';
 export {
   DiffFileHeader,
   type DiffFileHeaderProps,
@@ -96,6 +96,7 @@ export {
   Toast,
   type ToastProps,
 } from './layout.tsx';
+export { formatBytes, imageTypeName } from './media.ts';
 export {
   NewSessionButton,
   type NewSessionButtonProps,
@@ -118,3 +119,4 @@ export {
   StateDot,
   type StateDotProps,
 } from './state.tsx';
+export { ImageViewer, type ImageViewerProps, type ViewerImage } from './viewer.tsx';
