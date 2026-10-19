@@ -1,4 +1,4 @@
-import { type ReactNode, useId, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { CIMark } from './ci.tsx';
 import { Button } from './controls.tsx';
 import { cx } from './cx.ts';
@@ -36,6 +36,27 @@ export interface ComposerSuggestion {
   description: string;
 }
 
+/** Which pasted images the composer takes. Without it, pasting an image does nothing. */
+export interface ComposerImageLimits {
+  /** MIME types, e.g. `image/png`. */
+  types: readonly string[];
+  maxBytes: number;
+  /** The most images one message carries. */
+  max: number;
+}
+
+/** A file size the way people read it: `840 B`, `84 KB`, `1.2 MB`. */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+interface Pasted {
+  file: File;
+  url: string;
+}
+
 export interface ComposerProps {
   value?: string;
   placeholder?: string;
@@ -46,8 +67,11 @@ export interface ComposerProps {
   working?: boolean;
   disabled?: boolean;
   hint?: ReactNode;
-  /** Called with the trimmed text on Enter or the send button; the box then clears. */
-  onSubmit?: (text: string) => void;
+  /** Lets images be pasted in, within these limits. */
+  imageLimits?: ComposerImageLimits;
+  /** Called with the trimmed text and any pasted images on Enter or the send button; the box
+   * then clears. */
+  onSubmit?: (text: string, images: File[]) => void;
 }
 
 /** The message box. `value` is its starting text; once typed in, the box owns its text. */
@@ -61,16 +85,59 @@ export function Composer({
   working,
   disabled,
   hint,
+  imageLimits,
   onSubmit,
 }: ComposerProps) {
   const box = useRef<HTMLDivElement>(null);
   const [empty, setEmpty] = useState(!value);
+  const [images, setImages] = useState<Pasted[]>([]);
+  const [notice, setNotice] = useState<string>();
+
+  // Previews hold object URLs; free whatever is left when the composer goes.
+  const shown = useRef(images);
+  shown.current = images;
+  useEffect(
+    () => () => {
+      for (const p of shown.current) URL.revokeObjectURL(p.url);
+    },
+    [],
+  );
+
+  function addImages(files: File[]) {
+    if (!imageLimits) return;
+    const { types, maxBytes, max } = imageLimits;
+    const fitting = files.filter((f) => types.includes(f.type) && f.size <= maxBytes);
+    const room = max - images.length;
+    const taken = fitting.slice(0, Math.max(room, 0));
+    setNotice(
+      fitting.length < files.length
+        ? `Images can be PNG, JPEG, GIF or WebP, up to ${formatBytes(maxBytes)}`
+        : taken.length < fitting.length
+          ? `Up to ${max} images a message`
+          : undefined,
+    );
+    setImages((list) => [
+      ...list,
+      ...taken.map((file) => ({ file, url: URL.createObjectURL(file) })),
+    ]);
+  }
+
+  function removeImage(image: Pasted) {
+    URL.revokeObjectURL(image.url);
+    setImages((list) => list.filter((p) => p !== image));
+  }
 
   function submit() {
     const el = box.current;
-    const text = el?.innerText.trim();
-    if (!el || !text || disabled || !onSubmit) return;
-    onSubmit(text);
+    const text = el?.innerText.trim() ?? '';
+    if (!el || (!text && !images.length) || disabled || !onSubmit) return;
+    onSubmit(
+      text,
+      images.map((p) => p.file),
+    );
+    for (const p of images) URL.revokeObjectURL(p.url);
+    setImages([]);
+    setNotice(undefined);
     el.textContent = '';
     setEmpty(true);
   }
@@ -101,6 +168,23 @@ export function Composer({
           })}
         </div>
       ) : null}
+      {images.length ? (
+        <div className="joc-composer__box">
+          <div className="joc-row">
+            {images.map((p, i) => (
+              <Attachment
+                key={p.url}
+                name={p.file.name || `Image ${i + 1}`}
+                src={p.url}
+                size={formatBytes(p.file.size)}
+                width={160}
+                height={96}
+                onRemove={() => removeImage(p)}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className="joc-composer__box">
         {command ? <SlashPill command={command} removable /> : null}
         {/* biome-ignore lint/a11y/useSemanticElements: contentEditable so the input can grow and hold rich content */}
@@ -123,9 +207,12 @@ export function Composer({
             }
           }}
           onPaste={(e) => {
-            // Paste as plain text, never the source's formatting.
+            // Paste as plain text, never the source's formatting; images go above the text.
             e.preventDefault();
-            document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
+            const files = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'));
+            if (files.length) addImages(files);
+            const text = e.clipboardData.getData('text/plain');
+            if (text) document.execCommand('insertText', false, text);
           }}
         >
           {value}
@@ -133,7 +220,7 @@ export function Composer({
       </div>
       <div className="joc-composer__bar">
         <span className="joc-composer__hint">
-          {hint || (
+          {notice || hint || (
             <>
               <kbd className="joc-kbd">↵</kbd> send <kbd className="joc-kbd">⇧↵</kbd> newline
             </>
@@ -148,7 +235,7 @@ export function Composer({
           variant="primary"
           size="sm"
           icon="send"
-          disabled={disabled || empty}
+          disabled={disabled || (empty && !images.length)}
           aria-label="Send"
           onClick={submit}
         />
@@ -316,6 +403,10 @@ export interface AttachmentProps {
   size?: string;
   width?: number;
   height?: number;
+  /** Opens the full image in a new tab when it's clicked. */
+  href?: string;
+  /** Shows a remove button, e.g. for an image waiting in the composer. */
+  onRemove?: () => void;
   children?: ReactNode;
 }
 
@@ -327,19 +418,37 @@ export function Attachment({
   size,
   width,
   height,
+  href,
+  onRemove,
   children,
 }: AttachmentProps) {
+  const image = src ? <img src={src} alt={alt || name} /> : children;
   return (
     <figure
       className={cx('joc-attach', align && `joc-attach--${align}`)}
       style={width ? { width } : undefined}
     >
       <div className="joc-attach__frame" style={height ? { height } : undefined}>
-        {src ? <img src={src} alt={alt || name} /> : children}
+        {href ? (
+          <a href={href} target="_blank" rel="noopener noreferrer">
+            {image}
+          </a>
+        ) : (
+          image
+        )}
       </div>
       <figcaption className="joc-attach__cap">
         <span className="joc-attach__name">{name}</span>
         {size ? <span className="joc-attach__size">{size}</span> : null}
+        {onRemove ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="x"
+            aria-label={`Remove ${name}`}
+            onClick={onRemove}
+          />
+        ) : null}
       </figcaption>
     </figure>
   );
