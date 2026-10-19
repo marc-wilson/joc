@@ -138,6 +138,7 @@ export function useGitHub(): GitHubSnapshot | undefined {
         .then(async (r) => {
           if (r.ok && !cancelled) setGitHub(GitHubSnapshot.parse(await r.json()));
         })
+        // Unreachable for now: the next github event or reconnect snapshot loads it again.
         .catch(() => {});
     const unsubscribe = subscribe((event) => {
       if (event.type === 'github' || event.type === 'snapshot') void load();
@@ -153,18 +154,28 @@ export function useGitHub(): GitHubSnapshot | undefined {
 
 const History = z.array(HistorySession);
 
-/** Past sessions, loaded once when the page opens, so the list holds still while it's read. */
+/**
+ * Past sessions, loaded when the page opens and again after a reconnect (the stream's snapshot),
+ * but not on every update, so the list holds still while it's read.
+ */
 export function useHistory(): HistorySession[] | undefined {
   const [history, setHistory] = useState<HistorySession[]>();
   useEffect(() => {
     let cancelled = false;
-    apiFetch('/api/history')
-      .then(async (r) => {
-        if (r.ok && !cancelled) setHistory(History.parse(await r.json()));
-      })
-      .catch(() => {});
+    const load = () =>
+      apiFetch('/api/history')
+        .then(async (r) => {
+          if (r.ok && !cancelled) setHistory(History.parse(await r.json()));
+        })
+        // Unreachable for now: the reconnect snapshot loads it again.
+        .catch(() => {});
+    const unsubscribe = subscribe((event) => {
+      if (event.type === 'snapshot') void load();
+    });
+    void load();
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, []);
   return history;

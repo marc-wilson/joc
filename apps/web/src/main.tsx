@@ -11,12 +11,12 @@ import { AuthGate } from './SignIn.tsx';
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing #root element');
 
-const pages: Record<string, () => React.JSX.Element> = {
-  '/github': GitHubPage,
-  '/history': HistoryPage,
-  '/link': LinkPage,
-};
-const Page = pages[location.pathname] ?? App;
+const pages = new Map([
+  ['/github', GitHubPage],
+  ['/history', HistoryPage],
+  ['/link', LinkPage],
+]);
+const Page = pages.get(location.pathname) ?? App;
 
 createRoot(root).render(
   <StrictMode>
