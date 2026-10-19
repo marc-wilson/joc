@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { closeClient } from '@joc/db';
-import { AuthStatus, Device, DeviceStart, DeviceToken } from '@joc/protocol';
+import { AuthStatus, Device, DeviceStart, DeviceToken, PendingDevice } from '@joc/protocol';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { z } from 'zod';
 import { createApp } from './app.ts';
@@ -136,6 +136,17 @@ test('a machine links with a code and gets its own token, once', async () => {
   );
   assert.match(start.userCode, /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
   assert.equal(start.verificationUri, 'http://joc.test/link');
+  // The ready-made link carries the user code, never the secret device code.
+  assert.equal(start.verificationUriComplete, `http://joc.test/link?code=${start.userCode}`);
+  assert.ok(!start.verificationUriComplete.includes(start.deviceCode));
+
+  // Before linking, the page can show which machine is asking, to a signed-in person only.
+  const pending = (headers: Record<string, string>, code: string) =>
+    app.request(`/api/devices/pending?code=${encodeURIComponent(code)}`, { headers });
+  assert.equal((await pending({}, start.userCode)).status, 401);
+  const asking = await json(await pending({ cookie: carol }, start.userCode), PendingDevice);
+  assert.equal(asking.name, 'carol-laptop');
+  assert.equal((await pending({ cookie: carol }, 'ZZZZ-ZZZZ')).status, 404);
 
   const poll = async () =>
     json(
