@@ -100,6 +100,19 @@ open (as does a session that needs you).
 | `JOC_GITHUB=0` | Keeps GitHub on your machine: no pull requests, no notifications |
 | `JOC_NOTIFY=0` | No native notifications in Claude Code (the Inbox still fills) |
 
+The server expects the plugin version it was built with. The Machines page shows each machine's
+plugin version, and the dashboard shows a banner while one is out of date. In Claude Code, an out
+of date plugin says so once per session; run `/joc-update` to update it (it runs
+`claude plugin marketplace update joc` and `claude plugin update joc@joc`, then reloads plugins).
+A plugin from before `/joc-update` existed is updated by hand:
+
+```sh
+claude plugin marketplace update joc && claude plugin update joc@joc
+```
+
+then `/reload-plugins` in its sessions. An older plugin keeps working meanwhile; only newer
+features miss it. A dashboard tab left open across a deploy offers to reload.
+
 ## Scripts
 
 Run from the repo root.
