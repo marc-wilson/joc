@@ -1,6 +1,7 @@
 import type { ConversationItem, ImageRef, SessionState } from '@joc/protocol';
 import {
   Attachment,
+  Code,
   CodeBlock,
   EmptyState,
   formatBytes,
@@ -11,6 +12,7 @@ import {
 import { isValidElement, type ReactNode, useLayoutEffect, useRef } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { commandLine } from './commands.ts';
 import type { PendingPrompt } from './pending.ts';
 
 const time = (iso: string) =>
@@ -112,6 +114,9 @@ export function Conversation({ items, pending, state }: Props) {
     items.flatMap((i) => (i.kind === 'tool_result' ? [[i.toolUseId, i] as const] : [])),
   );
   const lastCall = items.findLast((i) => i.kind === 'tool_call');
+  const commands = new Map(
+    items.flatMap((i) => (i.kind === 'command' ? [[i.id, i] as const] : [])),
+  );
 
   return (
     <div
@@ -137,6 +142,27 @@ export function Conversation({ items, pending, state }: Props) {
                     />
                   </Message>
                 );
+              case 'command':
+                return (
+                  <Message key={item.id} from="user" time={time(item.at)}>
+                    <Code>{commandLine(item)}</Code>
+                  </Message>
+                );
+              case 'command_output': {
+                const command = item.commandId ? commands.get(item.commandId) : undefined;
+                return (
+                  <Message
+                    key={item.id}
+                    from="tool"
+                    name="Output"
+                    target={command ? commandLine(command) : undefined}
+                    status={item.isError ? 'error' : 'done'}
+                    expanded
+                  >
+                    {item.text}
+                  </Message>
+                );
+              }
               case 'claude':
                 return (
                   <Message key={item.id} from="claude" time={time(item.at)}>
