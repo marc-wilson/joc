@@ -98,7 +98,8 @@ jobs:
       - name: Deploy joc
         env:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
-          JOC_TOKEN: ${{ secrets.JOC_TOKEN }}
+          JOC_GITHUB_CLIENT_ID: ${{ secrets.JOC_GITHUB_CLIENT_ID }}
+          JOC_GITHUB_CLIENT_SECRET: ${{ secrets.JOC_GITHUB_CLIENT_SECRET }}
         run: |
           envsubst < k8s/values.yaml | \
           helm upgrade --install joc k8s \

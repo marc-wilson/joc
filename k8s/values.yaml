@@ -1,5 +1,8 @@
 image_tag: # auto-injected
-# Filled from the `production` environment's GitHub secrets by the release workflow, through
+# Where the dashboard is reached; GitHub sends sign-ins back to <public_url>/auth/github/callback.
+public_url: https://joc.marcswilson.com
+# Filled from the `production` environment's GitHub secrets by the CI deploy job, through
 # envsubst. Never commit values.
 mongodb_uri: "${MONGODB_URI}"
-joc_token: "${JOC_TOKEN}"
+github_client_id: "${JOC_GITHUB_CLIENT_ID}"
+github_client_secret: "${JOC_GITHUB_CLIENT_SECRET}"
