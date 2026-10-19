@@ -120,7 +120,8 @@ test('a sync with nothing new only refreshes the session', async () => {
 test('a backlog the server refused is sent again on the next sync', async () => {
   messagesStatus = 503;
   await sync();
-  assert.deepEqual(paths(), ['/api/reports', '/api/messages']);
+  // The refusal goes to the problem log, and on to the server since it took the report.
+  assert.deepEqual(paths(), ['/api/reports', '/api/messages', '/api/problems']);
   messagesStatus = 200;
   appendFileSync(transcript, line('u2', 'And the logout'));
   received = [];
