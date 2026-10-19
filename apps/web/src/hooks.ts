@@ -1,8 +1,18 @@
-import { type ConversationItem, GitHubSnapshot, HistorySession, type Session } from '@joc/protocol';
-import { useEffect, useState } from 'react';
+import {
+  type ConversationItem,
+  type GitHubNotification,
+  GitHubSnapshot,
+  HistorySession,
+  NotificationsSnapshot,
+  type Session,
+  type SessionState,
+} from '@joc/protocol';
+import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
+import { freshThreads, newlyNeeding, seenNow, sessionAlert, threadAlert } from './alerts.ts';
 import { apiFetch } from './auth.ts';
 import { type DiffFile, parseDiff } from './diff.ts';
+import { show } from './notify.ts';
 import { subscribe } from './stream.ts';
 
 /** Live sessions, in first-seen order. */
@@ -150,6 +160,61 @@ export function useGitHub(): GitHubSnapshot | undefined {
     };
   }, []);
   return github;
+}
+
+/** The person's unread GitHub notifications, refetched whenever their plugin reports new ones. */
+export function useNotifications(): NotificationsSnapshot | undefined {
+  const [notifications, setNotifications] = useState<NotificationsSnapshot>();
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      apiFetch('/api/notifications')
+        .then(async (r) => {
+          if (r.ok && !cancelled) setNotifications(NotificationsSnapshot.parse(await r.json()));
+        })
+        // Unreachable for now: the next notifications event or reconnect snapshot loads it again.
+        .catch(() => {});
+    const unsubscribe = subscribe((event) => {
+      if (event.type === 'notifications' || event.type === 'snapshot') void load();
+    });
+    void load();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+  return notifications;
+}
+
+/**
+ * Raises browser notifications for news while the page is open (see alerts.ts). What's there
+ * when the page loads is the starting point, never news, so a reload or another page never
+ * repeats one.
+ */
+export function useBrowserAlerts(
+  threads: GitHubNotification[] | undefined,
+  sessions: Session[],
+  connected: boolean,
+) {
+  const seen = useRef<Set<string>>(undefined);
+  const states = useRef<Map<string, SessionState>>(undefined);
+
+  useEffect(() => {
+    if (!threads) return;
+    if (!seen.current) {
+      seen.current = seenNow(threads);
+      return;
+    }
+    for (const t of freshThreads(seen.current, threads)) show(threadAlert(t));
+  }, [threads]);
+
+  useEffect(() => {
+    // Before the stream's first snapshot the list is empty, not known.
+    if (!connected) return;
+    const before = states.current;
+    states.current = new Map(sessions.map((s) => [s.id, s.state]));
+    if (before) for (const s of newlyNeeding(before, sessions)) show(sessionAlert(s));
+  }, [sessions, connected]);
 }
 
 const History = z.array(HistorySession);

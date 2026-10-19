@@ -1,15 +1,37 @@
-import type { PullRequest, Session } from '@joc/protocol';
+import type { GitHubNotification, PullRequest, Session } from '@joc/protocol';
 
 // Sessions and pull requests belong together when they're on the same repo and branch.
 
-export const sameWork = (pr: PullRequest, session: Pick<Session, 'repo' | 'branch'>) =>
-  pr.repo === session.repo && pr.branch === session.branch;
+type Work = Pick<Session, 'repo' | 'branch'>;
+
+export const sameWork = (a: Work, b: Work) => a.repo === b.repo && a.branch === b.branch;
+
+/** The most recently active of the live sessions on a repo and branch. */
+function latestOn(work: Work, sessions: Session[]) {
+  return sessions
+    .filter((s) => sameWork(work, s))
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))[0];
+}
 
 /** The live session working on a PR's branch: the most recently active, if several. */
-export function sessionFor(pr: PullRequest, sessions: Session[]): Session | undefined {
-  return sessions
-    .filter((s) => sameWork(pr, s))
-    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))[0];
+export const sessionFor = (pr: PullRequest, sessions: Session[]): Session | undefined =>
+  latestOn(pr, sessions);
+
+/**
+ * The live session on a notification's branch: a CI run's own, or a pull request's head
+ * branch when it's one of the person's or waiting on their review.
+ */
+export function sessionForThread(
+  thread: GitHubNotification,
+  prs: PullRequest[],
+  sessions: Session[],
+): Session | undefined {
+  const branch =
+    thread.branch ??
+    (thread.type === 'PullRequest'
+      ? prs.find((pr) => pr.repo === thread.repo && pr.number === thread.number)?.branch
+      : undefined);
+  return branch ? latestOn({ repo: thread.repo, branch }, sessions) : undefined;
 }
 
 /** The PR a session's branch is in, if any. */
