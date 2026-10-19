@@ -1,5 +1,8 @@
 import { type Db, MongoClient } from 'mongodb';
 
+/** BSON binary data, for stores that keep bytes (e.g. images), without their own driver import. */
+export { Binary } from 'mongodb';
+
 let client: MongoClient | undefined;
 
 // One client for the whole process, reused by every request. Pool settings stay at the
