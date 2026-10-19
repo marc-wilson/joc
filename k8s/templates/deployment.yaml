@@ -34,12 +34,19 @@ spec:
                   # From templates/secret.yaml, filled from GitHub secrets at deploy time.
                   name: joc-secrets
                   key: MONGODB_URI
-            # The shared token for the API and dashboard. Required: without it the site is open.
-            - name: JOC_TOKEN
+            # GitHub sign-in. The server won't start in production without both.
+            - name: JOC_GITHUB_CLIENT_ID
               valueFrom:
                 secretKeyRef:
                   name: joc-secrets
-                  key: JOC_TOKEN
+                  key: JOC_GITHUB_CLIENT_ID
+            - name: JOC_GITHUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: joc-secrets
+                  key: JOC_GITHUB_CLIENT_SECRET
+            - name: JOC_PUBLIC_URL
+              value: {{ required "public_url is required" .Values.public_url | quote }}
           resources:
             requests:
               cpu: 50m

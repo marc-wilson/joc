@@ -1,16 +1,19 @@
-import { AuthStatus } from '@joc/protocol';
+import { AuthStatus, type User } from '@joc/protocol';
 import { useEffect, useState } from 'react';
 
-// Whether the dashboard may load. The server holds the shared token in an HttpOnly cookie, so
-// all this tracks is the answer to GET /api/auth, and any 401 since.
+// Whether the dashboard may load, and as whom. The browser's session lives in an HttpOnly cookie,
+// so all this tracks is GET /api/auth's answer, and any 401 since.
 
-export type AuthState = 'checking' | 'signedOut' | 'signedIn';
+export type AuthState =
+  | { status: 'checking' }
+  | { status: 'signedOut' }
+  /** `user` is absent in local dev, where everything is open. */
+  | { status: 'signedIn'; user?: User };
 
-let state: AuthState = 'checking';
+let state: AuthState = { status: 'checking' };
 const listeners = new Set<(state: AuthState) => void>();
 
 function set(next: AuthState) {
-  if (next === state) return;
   state = next;
   for (const listener of listeners) listener(state);
 }
@@ -18,31 +21,30 @@ function set(next: AuthState) {
 /** Asks the server whether this browser is signed in. */
 export async function checkAuth(): Promise<AuthState> {
   try {
-    const res = await fetch('/api/auth');
-    const status = AuthStatus.parse(await res.json());
-    set(status.required && !status.signedIn ? 'signedOut' : 'signedIn');
+    const status = AuthStatus.parse(await (await fetch('/api/auth')).json());
+    set(status.signedIn ? { status: 'signedIn', user: status.user } : { status: 'signedOut' });
   } catch {
     // The server is unreachable: show the app, which says it's reconnecting.
-    set('signedIn');
+    set({ status: 'signedIn' });
   }
   return state;
 }
 
-/** Sends the token; on success the server sets the cookie and the app loads. */
-export async function signIn(token: string): Promise<boolean> {
-  const res = await fetch('/api/login', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ token }),
-  }).catch(() => undefined);
-  if (res?.ok) set('signedIn');
-  return !!res?.ok;
+/** Off to GitHub, and back to this page once signed in. */
+export function signIn() {
+  const back = `${location.pathname}${location.search}`;
+  location.assign(`/auth/github?return=${encodeURIComponent(back)}`);
+}
+
+export async function signOut(): Promise<void> {
+  await fetch('/auth/logout', { method: 'POST' }).catch(() => undefined);
+  set({ status: 'signedOut' });
 }
 
 /** `fetch` for the API: a 401 sends the app back to the sign-in screen. */
 export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(input, init);
-  if (res.status === 401) set('signedOut');
+  if (res.status === 401) set({ status: 'signedOut' });
   return res;
 }
 
@@ -51,7 +53,7 @@ export function useAuth(): AuthState {
   useEffect(() => {
     listeners.add(setCurrent);
     setCurrent(state);
-    if (state === 'checking') void checkAuth();
+    if (state.status === 'checking') void checkAuth();
     return () => {
       listeners.delete(setCurrent);
     };

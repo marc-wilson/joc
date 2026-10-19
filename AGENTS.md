@@ -15,7 +15,8 @@ Claude Code session ── plugin ──▶ server ──▶ web dashboard (live
 
 - The plugin runs inside each session, pushes reports to the server, and polls it for prompts, question answers and new-session requests.
 - Nothing reaches into the user's machine. A new session starts because a running session's plugin picks up the request.
-- Hosted: for now, one shared token (`JOC_TOKEN`) guards the whole site, with no accounts or sign-up. When it's set, every `/api/*` route needs it, as `Authorization: Bearer` (plugin) or the HttpOnly `joc_token` cookie set by `POST /api/login` (browser). Unset, everything is open (local dev). `/health*` and `GET /api/auth` stay open.
+- Hosted, for many people at once. A browser signs in with GitHub (an HttpOnly session cookie); a machine links with `/joc-login` and gets its own bearer token. Every request resolves to one owner. Without a GitHub app configured (local dev only) everything is open and belongs to `local`; production refuses to start that way.
+- **Isolation is the rule:** every store function takes an `Owner` first (apps/server/src/owner.ts), records are keyed `owner/session`, and live updates fan out per owner. Never query a collection without the owner. A new route gets a case in `apps/server/src/isolation.test.ts`.
 - GitHub data comes from the `gh` CLI on the user's machine, using its sign-in.
 
 ## Repo map
@@ -54,7 +55,7 @@ Run from the repo root.
 | `pnpm build` | Build packages that have a build (currently `@joc/web`) |
 
 - One package: `pnpm --filter @joc/server dev` (or `@joc/web`, etc.).
-- Server secrets live in `apps/server/.env` (git-ignored; template in `.env.example`: `MONGODB_URI`, `PORT`, `JOC_TOKEN`). Never commit, print, log or paste their values.
+- Server secrets live in `apps/server/.env` (git-ignored; template in `.env.example`: `MONGODB_URI`, `PORT`, `JOC_GITHUB_CLIENT_ID`, `JOC_GITHUB_CLIENT_SECRET`, `JOC_PUBLIC_URL`). Never commit, print, log or paste their values.
 
 ## Definition of done
 

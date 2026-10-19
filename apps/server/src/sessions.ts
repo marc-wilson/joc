@@ -1,9 +1,13 @@
 import { EventEmitter } from 'node:events';
 import { getDb } from '@joc/db';
 import type { Session, SessionReport } from '@joc/protocol';
+import { type Owner, sessionKey } from './owner.ts';
 
 interface SessionDoc {
+  /** `owner/sessionId` (see owner.ts). */
   _id: string;
+  owner: string;
+  sessionId: string;
   title?: string;
   name?: string;
   repo: string;
@@ -22,7 +26,9 @@ interface SessionDoc {
 const sessions = () => getDb().collection<SessionDoc>('sessions');
 
 function toSession({
-  _id,
+  _id: _,
+  owner: _o,
+  sessionId,
   createdAt: _c,
   reportedAt: _r,
   updatedAt,
@@ -31,31 +37,29 @@ function toSession({
   ...rest
 }: SessionDoc): Session {
   // Claude Code's own name beats the first-prompt fallback.
-  return { id: _id, ...rest, title: name ?? title, updatedAt: updatedAt.toISOString() };
+  return { id: sessionId, ...rest, title: name ?? title, updatedAt: updatedAt.toISOString() };
 }
 
-// Live fan-out within this process. A second server instance would miss these events, so the
-// deployment runs one replica until this moves to Mongo change streams.
+// Live fan-out within this process, one channel per owner. A second server instance would miss
+// these events, so the deployment runs one replica until this moves to Mongo change streams.
 const updates = new EventEmitter().setMaxListeners(0);
 
-export function onSessionUpdate(listener: (session: Session) => void): () => void {
-  updates.on('session', listener);
-  return () => updates.off('session', listener);
+export function onSessionUpdate(owner: Owner, listener: (session: Session) => void): () => void {
+  updates.on(`session:${owner}`, listener);
+  return () => updates.off(`session:${owner}`, listener);
 }
 
-export async function listSessions(): Promise<Session[]> {
+export async function listSessions(owner: Owner): Promise<Session[]> {
   // First-seen order, so the dashboard never reorders sessions as they update.
-  const docs = await sessions().find().sort({ createdAt: 1 }).toArray();
+  const docs = await sessions().find({ owner }).sort({ createdAt: 1 }).toArray();
   return docs.map(toSession);
 }
 
 /** Applies a report, or returns undefined if a newer one already landed. */
-export async function applyReport({
-  sessionId,
-  at,
-  title,
-  ...fields
-}: SessionReport): Promise<Session | undefined> {
+export async function applyReport(
+  owner: Owner,
+  { sessionId, at, title, ...fields }: SessionReport,
+): Promise<Session | undefined> {
   const now = new Date();
   // $literal keeps reported strings like "$ pnpm test" from being read as field paths.
   const set = Object.fromEntries(
@@ -68,11 +72,13 @@ export async function applyReport({
     doc = await sessions().findOneAndUpdate(
       // Only matches when this report is newer. For a stale report the upsert then tries to
       // insert a duplicate _id, which fails and the report is dropped below.
-      { _id: sessionId, reportedAt: { $lt: at } },
+      { _id: sessionKey(owner, sessionId), reportedAt: { $lt: at } },
       [
         {
           $set: {
             ...set,
+            owner: { $literal: owner },
+            sessionId: { $literal: sessionId },
             // A report without a state (a sync) keeps the stored one, `idle` for a new session.
             // It doesn't move `reportedAt` either, so a state report that fired before it but
             // lands after it still applies.
@@ -97,7 +103,7 @@ export async function applyReport({
   }
   if (!doc) throw new Error(`Session ${sessionId} was not saved`);
   const session = toSession(doc);
-  updates.emit('session', session);
+  updates.emit(`session:${owner}`, session);
   return session;
 }
 
