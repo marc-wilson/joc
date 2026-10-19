@@ -21,6 +21,8 @@ export {
   type ButtonProps,
   SegmentedControl,
   type SegmentedControlProps,
+  Switch,
+  type SwitchProps,
   type TabItem,
   Tabs,
   type TabsProps,
@@ -77,7 +79,7 @@ export {
   type SetupStatus,
 } from './history.tsx';
 export { Icon, type IconName, type IconProps } from './Icon.tsx';
-export { InboxRow, type InboxRowProps } from './inbox.tsx';
+export { type InboxMark, InboxRow, type InboxRowProps } from './inbox.tsx';
 export { Branch, Code, Emph } from './inline.tsx';
 export {
   EmptyState,
