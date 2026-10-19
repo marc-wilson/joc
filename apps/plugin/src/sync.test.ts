@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,7 +22,7 @@ const sessionId = 'sync-test-session';
 let root: string;
 let server: Server;
 let serverUrl: string;
-let received: { path: string; body: Record<string, unknown> }[];
+let received: { path: string; body: Record<string, unknown>; plugin?: string | string[] }[];
 let messagesStatus: number;
 let imagesStatus: number;
 const IMAGE_ID = 'c'.repeat(64);
@@ -30,13 +37,18 @@ before(async () => {
         // Images come as their raw bytes; the stand-in answers as the server would.
         received.push({
           path: req.url,
+          plugin: req.headers['x-joc-plugin'],
           body: { type: req.headers['content-type'], bytes: data.toString('latin1') },
         });
         res.statusCode = imagesStatus;
         res.end(JSON.stringify({ id: IMAGE_ID, type: 'image/png', bytes: data.length }));
         return;
       }
-      received.push({ path: req.url ?? '', body: JSON.parse(data.toString('utf8')) });
+      received.push({
+        path: req.url ?? '',
+        body: JSON.parse(data.toString('utf8')),
+        plugin: req.headers['x-joc-plugin'],
+      });
       res.statusCode = req.url === '/api/messages' ? messagesStatus : 200;
       res.end('{}');
     });
@@ -120,6 +132,14 @@ test('a sync reports without a state, and sends the backlog and the diff', async
   assert.equal('activity' in (report ?? {}), false);
   assert.deepEqual(texts(messages), ['Fix the login loop']);
   assert.match(String(changes?.diff), /\+two/);
+});
+
+test('every request names the plugin version from its manifest', async () => {
+  const manifest = join(import.meta.dirname, '..', '.claude-plugin', 'plugin.json');
+  const { version } = JSON.parse(readFileSync(manifest, 'utf8'));
+  await sync();
+  assert.ok(received.length > 0);
+  for (const r of received) assert.equal(r.plugin, version, r.path);
 });
 
 test('a sync with nothing new only refreshes the session', async () => {
