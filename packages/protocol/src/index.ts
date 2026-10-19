@@ -221,6 +221,8 @@ export const DeviceStart = z.object({
   /** What the person types at `verificationUri`, e.g. `WXYZ-4821`. */
   userCode: z.string(),
   verificationUri: z.string(),
+  /** `verificationUri` with the user code filled in, so the person only has to open it. */
+  verificationUriComplete: z.string(),
   /** Seconds until the codes expire. */
   expiresIn: z.number().int().positive(),
   /** Seconds to wait between polls. */
@@ -243,6 +245,14 @@ export type DeviceToken = z.infer<typeof DeviceToken>;
 /** `POST /api/devices/approve`, from the signed-in dashboard. */
 export const DeviceApproveRequest = z.object({ userCode: z.string().trim().min(1).max(20) });
 export type DeviceApproveRequest = z.infer<typeof DeviceApproveRequest>;
+
+/** `GET /api/devices/pending?code=`: the machine asking to be linked with that code. */
+export const PendingDevice = z.object({
+  name: z.string(),
+  /** When the machine started the link. */
+  requestedAt: z.iso.datetime(),
+});
+export type PendingDevice = z.infer<typeof PendingDevice>;
 
 /** A linked machine, as `GET /api/devices` lists it. */
 export const Device = z.object({

@@ -1,7 +1,7 @@
 // People and their credentials: GitHub users, browser sessions, and linked machines. Every secret
 // is stored as its SHA-256 hash, so the database alone can't sign anyone in.
 import { getDb } from '@joc/db';
-import type { Device, DeviceStart, DeviceToken, User } from '@joc/protocol';
+import type { Device, DeviceStart, DeviceToken, PendingDevice, User } from '@joc/protocol';
 import { type Owner, ownerFrom } from './owner.ts';
 import { hashSecret, newSecret } from './secrets.ts';
 
@@ -46,6 +46,7 @@ interface LinkDoc {
   _id: string;
   userCode: string;
   name: string;
+  createdAt: Date;
   expiresAt: Date;
   /** Set when a signed-in person enters the code. */
   userId?: string;
@@ -156,15 +157,24 @@ export function normalizeUserCode(typed: string): string {
 export async function startLink(name: string, publicUrl: string): Promise<DeviceStart> {
   await ensureIdentityIndexes();
   const deviceCode = newSecret();
-  const expiresAt = new Date(Date.now() + LINK_MINUTES * 60_000);
+  const createdAt = new Date();
+  const expiresAt = new Date(createdAt.getTime() + LINK_MINUTES * 60_000);
   for (;;) {
     const code = userCode();
     try {
-      await links().insertOne({ _id: hashSecret(deviceCode), userCode: code, name, expiresAt });
+      await links().insertOne({
+        _id: hashSecret(deviceCode),
+        userCode: code,
+        name,
+        createdAt,
+        expiresAt,
+      });
       return {
         deviceCode,
         userCode: code,
         verificationUri: `${publicUrl}/link`,
+        // The user code only, never the device code: the link is safe to show and to open.
+        verificationUriComplete: `${publicUrl}/link?code=${code}`,
         expiresIn: LINK_MINUTES * 60,
         interval: POLL_SECONDS,
       };
@@ -173,6 +183,16 @@ export async function startLink(name: string, publicUrl: string): Promise<Device
       if (!isDuplicateKey(error)) throw error;
     }
   }
+}
+
+/** The machine waiting on a code, so the person can see what they're about to link. */
+export async function pendingLink(typed: string): Promise<PendingDevice | undefined> {
+  const link = await links().findOne({
+    userCode: normalizeUserCode(typed),
+    userId: { $exists: false },
+    expiresAt: { $gt: new Date() },
+  });
+  return link ? { name: link.name, requestedAt: link.createdAt.toISOString() } : undefined;
 }
 
 /** The signed-in person entered a code; true when it matched a live, unclaimed link. */

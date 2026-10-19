@@ -33,6 +33,7 @@ import {
   endWebSession,
   getUser,
   listDevices,
+  pendingLink,
   pollLink,
   resolveDeviceToken,
   resolveWebSession,
@@ -170,6 +171,18 @@ export function createApp({ github, publicUrl }: AppOptions): Hono<Env> {
 
   // Approving and managing machines is for a signed-in person, never a machine's own token.
   const person = (c: Context<Env>) => c.get('via') !== 'device';
+
+  // Shares the approval limit, so codes can't be guessed through it either.
+  app.get('/api/devices/pending', async (c) => {
+    if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
+    if (!approvals.hit(c.get('owner'))) {
+      return c.json({ error: 'Too many attempts. Wait a few minutes.' }, 429);
+    }
+    const pending = await pendingLink(c.req.query('code') ?? '');
+    return pending
+      ? c.json(pending)
+      : c.json({ error: "That code didn't match, or it expired." }, 404);
+  });
 
   app.post('/api/devices/approve', async (c) => {
     if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
