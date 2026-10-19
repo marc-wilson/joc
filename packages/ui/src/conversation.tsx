@@ -3,8 +3,9 @@ import { CIMark } from './ci.tsx';
 import { Button } from './controls.tsx';
 import { cx } from './cx.ts';
 import { Icon } from './Icon.tsx';
-import { formatBytes } from './media.ts';
+import { attachedHint, formatBytes, imageTypeName } from './media.ts';
 import { StateDot } from './state.tsx';
+import { ImageViewer } from './viewer.tsx';
 
 export interface SlashPillProps {
   command: string;
@@ -86,6 +87,7 @@ export function Composer({
   const [empty, setEmpty] = useState(!value);
   const [images, setImages] = useState<Pasted[]>([]);
   const [notice, setNotice] = useState<string>();
+  const [viewing, setViewing] = useState<number>();
 
   // Previews hold object URLs; free whatever is left when the composer goes.
   const shown = useRef(images);
@@ -119,7 +121,12 @@ export function Composer({
   function removeImage(image: Pasted) {
     URL.revokeObjectURL(image.url);
     setImages((list) => list.filter((p) => p !== image));
+    setViewing(undefined);
   }
+
+  const imageName = (p: Pasted, i: number) => p.file.name || `Image ${i + 1}`;
+  const attached =
+    images.length && imageLimits ? attachedHint(images.length, imageLimits.max, !empty) : '';
 
   function submit() {
     const el = box.current;
@@ -131,13 +138,25 @@ export function Composer({
     );
     for (const p of images) URL.revokeObjectURL(p.url);
     setImages([]);
+    setViewing(undefined);
     setNotice(undefined);
     el.textContent = '';
     setEmpty(true);
   }
 
   return (
-    <div className={cx('joc-composer', disabled && 'is-disabled')}>
+    // biome-ignore lint/a11y/noStaticElementInteractions: dropping images is a shortcut for pasting them
+    <div
+      className={cx('joc-composer', disabled && 'is-disabled')}
+      onDragOver={(e) => {
+        if (imageLimits && !disabled && e.dataTransfer.types.includes('Files')) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        if (!imageLimits || disabled) return;
+        e.preventDefault();
+        addImages([...e.dataTransfer.files].filter((f) => f.type.startsWith('image/')));
+      }}
+    >
       {suggestions.length ? (
         <div className="joc-suggest" role="listbox" aria-label="Slash commands">
           <div className="joc-suggest__head">Commands</div>
@@ -163,21 +182,32 @@ export function Composer({
         </div>
       ) : null}
       {images.length ? (
-        <div className="joc-composer__box">
-          <div className="joc-row">
-            {images.map((p, i) => (
-              <Attachment
-                key={p.url}
-                name={p.file.name || `Image ${i + 1}`}
+        <ul className="joc-composer__tray" aria-label="Attached images">
+          {images.map((p, i) => (
+            <li key={p.url}>
+              <PastedImage
+                name={imageName(p, i)}
                 src={p.url}
                 size={formatBytes(p.file.size)}
-                width={160}
-                height={96}
+                type={p.file.type}
+                onOpen={() => setViewing(i)}
                 onRemove={() => removeImage(p)}
               />
-            ))}
-          </div>
-        </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {viewing !== undefined ? (
+        <ImageViewer
+          images={images.map((p, i) => ({
+            src: p.url,
+            name: imageName(p, i),
+            size: formatBytes(p.file.size),
+          }))}
+          index={viewing}
+          onIndex={setViewing}
+          onClose={() => setViewing(undefined)}
+        />
       ) : null}
       <div className="joc-composer__box">
         {command ? <SlashPill command={command} removable /> : null}
@@ -214,7 +244,7 @@ export function Composer({
       </div>
       <div className="joc-composer__bar">
         <span className="joc-composer__hint">
-          {notice || hint || (
+          {notice || attached || hint || (
             <>
               <kbd className="joc-kbd">↵</kbd> send <kbd className="joc-kbd">⇧↵</kbd> newline
             </>
@@ -399,8 +429,8 @@ export interface AttachmentProps {
   height?: number;
   /** Opens the full image in a new tab when it's clicked. */
   href?: string;
-  /** Shows a remove button, e.g. for an image waiting in the composer. */
-  onRemove?: () => void;
+  /** Makes the image a button, e.g. to open it full size. */
+  onOpen?: () => void;
   children?: ReactNode;
 }
 
@@ -413,7 +443,7 @@ export function Attachment({
   width,
   height,
   href,
-  onRemove,
+  onOpen,
   children,
 }: AttachmentProps) {
   const image = src ? <img src={src} alt={alt || name} /> : children;
@@ -423,7 +453,16 @@ export function Attachment({
       style={width ? { width } : undefined}
     >
       <div className="joc-attach__frame" style={height ? { height } : undefined}>
-        {href ? (
+        {onOpen ? (
+          <button
+            type="button"
+            className="joc-attach__open"
+            aria-label={`Open ${name} full size`}
+            onClick={onOpen}
+          >
+            {image}
+          </button>
+        ) : href ? (
           <a href={href} target="_blank" rel="noopener noreferrer">
             {image}
           </a>
@@ -434,17 +473,45 @@ export function Attachment({
       <figcaption className="joc-attach__cap">
         <span className="joc-attach__name">{name}</span>
         {size ? <span className="joc-attach__size">{size}</span> : null}
-        {onRemove ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            icon="x"
-            aria-label={`Remove ${name}`}
-            onClick={onRemove}
-          />
-        ) : null}
       </figcaption>
     </figure>
+  );
+}
+
+export interface PastedImageProps {
+  name: string;
+  src: string;
+  /** Its file size, already formatted, e.g. `1.2 MB`. */
+  size: string;
+  /** Its MIME type, e.g. `image/png`. */
+  type: string;
+  /** The thumbnail was clicked, e.g. to preview it full size. */
+  onOpen?: () => void;
+  onRemove?: () => void;
+}
+
+/** An image waiting in the composer: a thumbnail, its name, size and type, and a remove button. */
+export function PastedImage({ name, src, size, type, onOpen, onRemove }: PastedImageProps) {
+  return (
+    <div className="joc-pasted">
+      <button
+        type="button"
+        className="joc-pasted__thumb"
+        aria-label={`Preview ${name}`}
+        onClick={onOpen}
+      >
+        <img src={src} alt="" />
+      </button>
+      <div className="joc-pasted__text">
+        <span className="joc-pasted__name" title={name}>
+          {name}
+        </span>
+        <span className="joc-pasted__meta">
+          {size} · {imageTypeName(type)}
+        </span>
+      </div>
+      <Button variant="ghost" size="sm" icon="x" aria-label={`Remove ${name}`} onClick={onRemove} />
+    </div>
   );
 }
 

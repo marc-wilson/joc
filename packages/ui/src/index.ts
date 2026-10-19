@@ -39,6 +39,8 @@ export {
   type ComposerSuggestion,
   Message,
   type MessageProps,
+  PastedImage,
+  type PastedImageProps,
   QuestionCard,
   type QuestionCardProps,
   type QuestionOption,
