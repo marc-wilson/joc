@@ -141,16 +141,19 @@ test('transcript lines become conversation items', async () => {
   const { items, aiTitle } = parseLines(lines, '/work');
   assert.equal(aiTitle, 'Login loop fix');
   assert.deepEqual(
-    items.map((i) => [i.kind, 'text' in i ? i.text : 'summary' in i ? i.summary : '']),
+    items.map((i) => [
+      i.kind,
+      'text' in i ? i.text : 'summary' in i ? i.summary : 'args' in i ? i.args : '',
+    ]),
     [
       ['user', 'Fix the login loop'],
-      ['user', 'auth'],
+      ['command', 'auth'],
       ['claude', 'Reproduced it.'],
       ['tool_call', 'pnpm test'],
       ['tool_result', 'boom'],
     ],
   );
-  assert.equal(items[1]?.kind === 'user' && items[1].command, 'review');
+  assert.equal(items[1]?.kind === 'command' && items[1].name, 'review');
 });
 
 test('background shells, subagents and their task notifications are recognized', async () => {
