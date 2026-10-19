@@ -137,10 +137,64 @@ export type StreamEvent =
   /** The session's diff changed; fetch it from `/api/sessions/:id/changes`. */
   | { type: 'changes'; sessionId: string };
 
-/** `POST /api/login`: the shared token, pasted into the dashboard's sign-in screen. */
-export const LoginRequest = z.object({ token: z.string().min(1).max(1_000) });
-export type LoginRequest = z.infer<typeof LoginRequest>;
+/** A signed-in person, as the dashboard shows them. */
+export const User = z.object({
+  login: z.string(),
+  name: z.string().optional(),
+  avatarUrl: z.string().optional(),
+});
+export type User = z.infer<typeof User>;
 
-/** `GET /api/auth`: whether the server needs a token, and whether this request carried one. */
-export const AuthStatus = z.object({ required: z.boolean(), signedIn: z.boolean() });
+/** `GET /api/auth`: whether this browser is signed in, and as whom. */
+export const AuthStatus = z.object({
+  signedIn: z.boolean(),
+  user: User.optional(),
+  /** False only in local dev with no GitHub app configured, where everything is open. */
+  required: z.boolean(),
+});
 export type AuthStatus = z.infer<typeof AuthStatus>;
+
+// Linking a machine: its plugin starts a link and shows the code; the person enters the code at
+// /link while signed in; the plugin's poll then gets that machine's own token.
+
+/** `POST /api/devices/start`, from the plugin. */
+export const DeviceStartRequest = z.object({ name: z.string().trim().min(1).max(100) });
+export type DeviceStartRequest = z.infer<typeof DeviceStartRequest>;
+
+export const DeviceStart = z.object({
+  /** Secret: only the plugin that started the link holds it. */
+  deviceCode: z.string(),
+  /** What the person types at `verificationUri`, e.g. `WXYZ-4821`. */
+  userCode: z.string(),
+  verificationUri: z.string(),
+  /** Seconds until the codes expire. */
+  expiresIn: z.number().int().positive(),
+  /** Seconds to wait between polls. */
+  interval: z.number().int().positive(),
+});
+export type DeviceStart = z.infer<typeof DeviceStart>;
+
+/** `POST /api/devices/token`, the plugin's poll. */
+export const DeviceTokenRequest = z.object({ deviceCode: z.string().min(1).max(200) });
+export type DeviceTokenRequest = z.infer<typeof DeviceTokenRequest>;
+
+export const DeviceToken = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('pending') }),
+  z.object({ status: z.literal('expired') }),
+  /** Sent once: the machine's token and the account it now reports to. */
+  z.object({ status: z.literal('linked'), token: z.string(), login: z.string() }),
+]);
+export type DeviceToken = z.infer<typeof DeviceToken>;
+
+/** `POST /api/devices/approve`, from the signed-in dashboard. */
+export const DeviceApproveRequest = z.object({ userCode: z.string().trim().min(1).max(20) });
+export type DeviceApproveRequest = z.infer<typeof DeviceApproveRequest>;
+
+/** A linked machine, as `GET /api/devices` lists it. */
+export const Device = z.object({
+  id: z.string(),
+  name: z.string(),
+  createdAt: z.iso.datetime(),
+  lastSeenAt: z.iso.datetime(),
+});
+export type Device = z.infer<typeof Device>;
