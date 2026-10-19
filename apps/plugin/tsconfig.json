@@ -1,4 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["src"]
+  "include": ["src"],
+  // register.ts is a Claude Code hooks module: it runs in the engine, not Node, and its
+  // 'claude-code' types are written by the engine, so `claude plugin validate` checks it instead.
+  "exclude": ["src/register.ts"]
 }

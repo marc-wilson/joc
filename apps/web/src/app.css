@@ -1,0 +1,98 @@
+/* Layout glue for the app shell. Visual styling comes from @joc/ui; use its tokens only. */
+
+.app {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app .joc-app__body {
+  flex-wrap: nowrap;
+}
+
+.app-side__filter {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.app-side__list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.app-main__scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-6) var(--space-8);
+}
+
+.app-main__dock {
+  padding: var(--space-3) var(--space-8) var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.app-changes {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.app-changes__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-changes__scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+.app-changes__file {
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.app-changes__note {
+  margin: 0 0 var(--space-3);
+  color: var(--text-secondary);
+}
+
+.app-tasks {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.app-tasks > :last-child {
+  border-bottom: 0;
+}
+
+/* Markdown tables in messages. The design system's .joc-md has no table styles yet; these
+   belong there, so move them when it next syncs. */
+.app-md-table {
+  overflow-x: auto;
+  margin: 0 0 var(--space-3);
+}
+
+.app-md-table table {
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.app-md-table th,
+.app-md-table td {
+  padding: var(--space-1\.5, 6px) var(--space-3);
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.app-md-table th {
+  background: var(--bg-raised);
+  font-weight: 600;
+}

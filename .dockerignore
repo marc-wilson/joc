@@ -1,0 +1,15 @@
+# Keep the build context small and never send secrets to the daemon.
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/*.log
+**/.env
+**/.env.*
+!**/.env.example
+**/.DS_Store
+.git
+.github
+.idea
+k8s
+Dockerfile
+.dockerignore
