@@ -1,5 +1,6 @@
-import type { ConversationItem, Session } from '@joc/protocol';
+import { type ConversationItem, GitHubSnapshot, HistorySession, type Session } from '@joc/protocol';
 import { useEffect, useState } from 'react';
+import { z } from 'zod';
 import { apiFetch } from './auth.ts';
 import { type DiffFile, parseDiff } from './diff.ts';
 import { subscribe } from './stream.ts';
@@ -125,4 +126,46 @@ export function useChanges(sessionId: string | undefined): Changes {
   }, [sessionId]);
 
   return changes;
+}
+
+/** The person's pull requests, refetched whenever their plugin reports new ones. */
+export function useGitHub(): GitHubSnapshot | undefined {
+  const [github, setGitHub] = useState<GitHubSnapshot>();
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      apiFetch('/api/github')
+        .then(async (r) => {
+          if (r.ok && !cancelled) setGitHub(GitHubSnapshot.parse(await r.json()));
+        })
+        .catch(() => {});
+    const unsubscribe = subscribe((event) => {
+      if (event.type === 'github' || event.type === 'snapshot') void load();
+    });
+    void load();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+  return github;
+}
+
+const History = z.array(HistorySession);
+
+/** Past sessions, loaded once when the page opens, so the list holds still while it's read. */
+export function useHistory(): HistorySession[] | undefined {
+  const [history, setHistory] = useState<HistorySession[]>();
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch('/api/history')
+      .then(async (r) => {
+        if (r.ok && !cancelled) setHistory(History.parse(await r.json()));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return history;
 }

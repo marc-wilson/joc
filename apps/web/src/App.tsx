@@ -2,7 +2,6 @@ import type { Session } from '@joc/protocol';
 import {
   Composer,
   EmptyState,
-  NavBar,
   NewSessionButton,
   RepoGroupHeader,
   SessionHeader,
@@ -11,12 +10,14 @@ import {
   TextInput,
 } from '@joc/ui';
 import { Fragment, useState } from 'react';
-import { apiFetch, useAuth } from './auth.ts';
+import { apiFetch } from './auth.ts';
 import { BackgroundView } from './Background.tsx';
 import { backgroundTasks } from './background.ts';
 import { ChangesView } from './Changes.tsx';
 import { Conversation, type PendingPrompt } from './Conversation.tsx';
 import { useChanges, useConversation, useNow, useSessions } from './hooks.ts';
+import { Nav } from './Nav.tsx';
+import { plain } from './plain.ts';
 import { age } from './time.ts';
 
 // Repos in first-seen order, so groups never reorder as sessions update.
@@ -30,9 +31,11 @@ const UNTITLED = 'New session';
 
 export default function App() {
   const { sessions, connected } = useSessions();
-  const auth = useAuth();
   const now = useNow();
-  const [selectedId, setSelectedId] = useState<string>();
+  // A link like /?session=<id> (from a PR on the GitHub page) opens that session.
+  const [selectedId, setSelectedId] = useState(
+    () => new URLSearchParams(location.search).get('session') ?? undefined,
+  );
   const selected = sessions.find((s) => s.id === selectedId) ?? sessions[0];
   const needs = sessions.filter((s) => s.state === 'needs').length;
   const items = useConversation(selected?.id);
@@ -66,18 +69,7 @@ export default function App() {
 
   return (
     <div className="joc-app app">
-      <NavBar
-        items={[
-          { id: 'sessions', label: 'Sessions', href: '/', needs },
-          { id: 'github', label: 'GitHub' },
-          { id: 'history', label: 'History' },
-          { id: 'machines', label: 'Machines', href: '/link' },
-        ]}
-        value="sessions"
-        machine={connected ? 'Connected' : 'Reconnecting'}
-        machineOffline={!connected}
-        user={auth.status === 'signedIn' ? auth.user?.login : undefined}
-      />
+      <Nav page="sessions" needs={needs} connected={connected} />
       <div className="joc-app__body">
         {railed ? (
           <aside className="joc-app__side is-rail">
@@ -115,7 +107,7 @@ export default function App() {
                       title={s.title ?? UNTITLED}
                       branch={s.branch}
                       contextLeft={s.contextLeft}
-                      activity={s.activity}
+                      activity={s.activity && plain(s.activity)}
                       time={age(s.updatedAt, now)}
                       selected={s.id === selected?.id}
                       onSelect={() => setSelectedId(s.id)}
