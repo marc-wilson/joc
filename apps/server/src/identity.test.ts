@@ -30,7 +30,7 @@ const github: GitHubAuth = {
   authorizeUrl: (state) => `https://github.example/authorize?state=${state}`,
   profileFor: async (code) => people.get(code),
 };
-const app = createApp({ github, publicUrl: 'http://joc.test' });
+const app = createApp({ github, publicUrl: 'http://joc.test', pluginVersion: '1.0.0' });
 const ORIGIN = { host: 'joc.test', origin: 'http://joc.test' };
 
 /** The value a response set for a cookie. */

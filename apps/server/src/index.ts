@@ -3,6 +3,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { closeClient } from '@joc/db';
 import { createApp } from './app.ts';
 import { githubAuth } from './github.ts';
+import { readPluginVersion, webBuild } from './version.ts';
 
 const port = Number(process.env.PORT ?? 3000);
 const publicUrl = (process.env.JOC_PUBLIC_URL || `http://localhost:${port}`).replace(/\/$/, '');
@@ -19,9 +20,13 @@ if (!clientId || !clientSecret) {
 }
 
 const shutdown = new AbortController();
+// In production the server also serves the built dashboard, so everything is one origin.
+const webDist = process.env.WEB_DIST;
 
 const app = createApp({
   publicUrl,
+  pluginVersion: readPluginVersion(),
+  build: webBuild(webDist),
   shutdown: shutdown.signal,
   github:
     clientId && clientSecret
@@ -29,8 +34,6 @@ const app = createApp({
       : undefined,
 });
 
-// In production the server also serves the built dashboard, so everything is one origin.
-const webDist = process.env.WEB_DIST;
 if (webDist) {
   app.use('/*', serveStatic({ root: webDist }));
   app.get('*', serveStatic({ root: webDist, path: 'index.html' }));

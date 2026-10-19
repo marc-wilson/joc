@@ -47,6 +47,8 @@ RUN pnpm install --frozen-lockfile --prod --ignore-scripts --filter @joc/server.
 COPY packages/protocol/src packages/protocol/src
 COPY packages/db/src packages/db/src
 COPY apps/server/src apps/server/src
+# The plugin version machines should run: the server reads it at startup (src/version.ts).
+COPY apps/plugin/.claude-plugin/plugin.json apps/plugin/.claude-plugin/plugin.json
 COPY --from=web /workspace/apps/web/dist apps/web/dist
 
 ENV NODE_ENV=production \

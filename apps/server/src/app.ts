@@ -12,9 +12,11 @@ import {
   MarkReadRequest,
   MessagesReport,
   NotificationsReport,
+  PluginVersion,
   ProblemsReport,
   PromptRequest,
   type ReadsClaim,
+  type ServerVersion,
   SessionReport,
   type StreamEvent,
 } from '@joc/protocol';
@@ -65,6 +67,7 @@ import { claimPrompts, queuePrompt } from './prompts.ts';
 import { RateLimit } from './rate-limit.ts';
 import { newSecret, secretsEqual } from './secrets.ts';
 import { applyReport, listHistory, listSessions, onSessionUpdate } from './sessions.ts';
+import { isBehind, LATEST_HEADER, PLUGIN_HEADER } from './version.ts';
 
 export interface AppOptions {
   /** GitHub sign-in. Without it the server is open and everything belongs to `local`: for local
@@ -74,6 +77,10 @@ export interface AppOptions {
   publicUrl: string;
   /** Aborted when the server shuts down: live streams end so browsers reconnect elsewhere. */
   shutdown?: AbortSignal;
+  /** The plugin version machines should run (index.ts reads it from the plugin's manifest). */
+  pluginVersion: PluginVersion;
+  /** Names the dashboard build this server serves, so an open tab can tell it was replaced. */
+  build?: string;
 }
 
 /** How a request proved who it is: a browser session, a machine's token, or open local dev. */
@@ -87,6 +94,8 @@ const LOCAL = ownerFrom('local');
 export function createApp({
   github,
   publicUrl,
+  pluginVersion,
+  build,
   shutdown = new AbortController().signal,
 }: AppOptions): Hono<Env> {
   const app = new Hono<Env>();
@@ -98,11 +107,17 @@ export function createApp({
   // Generous: a session's backlog can carry a few dozen screenshots at once.
   const uploads = new RateLimit(600, 10 * 60_000);
 
+  /** The version the requesting plugin named; undefined for a browser, or a plugin too old to. */
+  const pluginOf = (c: Context) => {
+    const sent = PluginVersion.safeParse(c.req.header(PLUGIN_HEADER));
+    return sent.success ? sent.data : undefined;
+  };
+
   async function identify(c: Context): Promise<{ owner: Owner; via: Via } | undefined> {
     if (!github) return { owner: LOCAL, via: 'open' };
     const token = bearerToken(c);
     if (token) {
-      const owner = await resolveDeviceToken(token);
+      const owner = await resolveDeviceToken(token, pluginOf(c));
       return owner && { owner, via: 'device' };
     }
     const secret = sessionSecret(c);
@@ -156,6 +171,14 @@ export function createApp({
     return c.body(null, 204);
   });
 
+  // A plugin behind the version this server ships with hears which one, on every answer, so it
+  // can tell the person. Nothing is refused for it: an old plugin keeps working as it did.
+  app.use('/api/*', async (c, next) => {
+    await next();
+    const sent = pluginOf(c);
+    if (sent && isBehind(sent, pluginVersion)) c.header(LATEST_HEADER, pluginVersion);
+  });
+
   // ── Everything else under /api acts for one owner ──────────────────────────
 
   // A machine linking itself has no owner yet; the sign-in screen asks before it has one.
@@ -178,6 +201,8 @@ export function createApp({
     const user = who && who.via !== 'open' ? await getUser(who.owner) : undefined;
     return c.json({ required: !!github, signedIn: !!who, user } satisfies AuthStatus);
   });
+
+  app.get('/api/version', (c) => c.json({ plugin: pluginVersion, build } satisfies ServerVersion));
 
   // ── Linking machines ───────────────────────────────────────────────────────
 
@@ -223,7 +248,7 @@ export function createApp({
 
   app.get('/api/devices', async (c) => {
     if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
-    return c.json(await listDevices(c.get('owner')));
+    return c.json(await listDevices(c.get('owner'), pluginVersion));
   });
 
   app.delete('/api/devices/:id', async (c) => {

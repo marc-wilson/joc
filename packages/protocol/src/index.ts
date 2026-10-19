@@ -393,8 +393,32 @@ export const Device = z.object({
   name: z.string(),
   createdAt: z.iso.datetime(),
   lastSeenAt: z.iso.datetime(),
+  /** The plugin version the machine last sent; unset when it sent none or hasn't been seen. */
+  plugin: z.string().optional(),
+  /** Its plugin is behind the one JOC expects, or is too old to say its version. */
+  outdated: z.boolean(),
 });
 export type Device = z.infer<typeof Device>;
+
+// Plugin versions. The plugin names its own version (apps/plugin/.claude-plugin/plugin.json) in
+// the `x-joc-plugin` header of every request. When that's behind the version the server ships
+// with, the answer carries `x-joc-plugin-latest` with that version, so the plugin can say so.
+
+/** A plugin's `version`: `major.minor.patch`, with an optional `-prerelease`. */
+export const PluginVersion = z
+  .string()
+  .max(40)
+  .regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
+export type PluginVersion = z.infer<typeof PluginVersion>;
+
+/** `GET /api/version`: what this server expects and serves. */
+export const ServerVersion = z.object({
+  /** The plugin version this server ships with: the one every machine should run. */
+  plugin: PluginVersion,
+  /** Names the dashboard build the server serves; changes when it's deployed. Unset in dev. */
+  build: z.string().optional(),
+});
+export type ServerVersion = z.infer<typeof ServerVersion>;
 
 // What went wrong in a machine's plugin. The plugin never shows a failure in the session; it
 // keeps a short local record (`/joc-status` reads it) and sends it here once the server answers.
