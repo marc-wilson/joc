@@ -77,6 +77,7 @@ export {
   type SetupStatus,
 } from './history.tsx';
 export { Icon, type IconName, type IconProps } from './Icon.tsx';
+export { InboxRow, type InboxRowProps } from './inbox.tsx';
 export { Branch, Code, Emph } from './inline.tsx';
 export {
   EmptyState,
