@@ -10,9 +10,16 @@ spec:
   # miss events published on the other one. Scale out only once the server moves to
   # Mongo change streams.
   replicas: 1
-  # Recreate rather than RollingUpdate keeps it to one pod during deploys too.
+  # A deploy starts the new pod first and stops the old one only once the new one is ready, so
+  # there's no downtime. For those few seconds two pods serve: a dashboard streaming from the
+  # old pod doesn't hear reports landing on the new one until the old pod ends its stream on
+  # SIGTERM; the browser then reconnects to the new pod, whose snapshot catches it up. Every
+  # write goes to MongoDB, so nothing is lost.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: joc-app
@@ -21,6 +28,8 @@ spec:
       labels:
         app: joc-app
     spec:
+      # Covers the preStop pause (10s) plus the server's own shutdown (at most 10s).
+      terminationGracePeriodSeconds: 30
       containers:
         - name: joc
           image: '{{ .Values.image_repository }}:{{ required "image_tag is required (the commit SHA)" .Values.image_tag }}'
@@ -53,15 +62,28 @@ spec:
               memory: 128Mi
             limits:
               memory: 384Mi
-          livenessProbe:
+          # A new pod takes traffic only once it reaches MongoDB, so a release that can't
+          # never replaces the running one. After that, readiness doesn't depend on MongoDB:
+          # a database blip shouldn't take the only pod out of the Service.
+          startupProbe:
             httpGet:
-              path: /health
+              path: /health/db
               port: 3000
-            initialDelaySeconds: 5
-            periodSeconds: 20
+            periodSeconds: 2
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /health
               port: 3000
-            initialDelaySeconds: 2
-            periodSeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            periodSeconds: 20
+          lifecycle:
+            # Keep serving while the pod leaves the Service and the ingress stops routing to it;
+            # SIGTERM comes after this pause.
+            preStop:
+              sleep:
+                seconds: 10
