@@ -113,9 +113,10 @@ One workflow, `.github/workflows/ci.yml`, with two jobs:
   `latest` and the commit SHA to ACR, then runs `helm upgrade --install` of the chart in `k8s/`
   into namespace `joc` on AKS, in the `production` environment.
 - The chart runs exactly one replica (live updates fan out in-process) behind
-  `joc.marcswilson.com`. `MONGODB_URI`, `JOC_GITHUB_CLIENT_ID` and `JOC_GITHUB_CLIENT_SECRET` are
-  secrets in the GitHub `production` environment; the chart turns them into the `joc-secrets`
-  Kubernetes secret at deploy time, and the deploy fails if any is empty.
+  `joc.marcswilson.com`. `MONGODB_URI` and `JOC_GITHUB_CLIENT_SECRET` are secrets, and
+  `JOC_GITHUB_CLIENT_ID` a variable (it's public), in the GitHub `production` environment; the
+  chart turns them into the `joc-secrets` Kubernetes secret at deploy time, and the deploy fails
+  if any is empty.
 - Every `/api/*` route acts for one user: a browser signed in with GitHub (an HttpOnly session
   cookie) or a linked machine (its own bearer token). Everything stored belongs to that user.
   `/health` and `/health/db` stay open for the probes.
