@@ -78,6 +78,9 @@ function sync(extra: Record<string, unknown> = {}): Promise<void> {
   const child = spawn(process.execPath, [hookScript], {
     env: {
       ...process.env,
+      // Nothing real: no credentials, no GitHub stamp, no `gh` read.
+      HOME: root,
+      JOC_GITHUB: '0',
       JOC_URL: serverUrl,
       CLAUDE_CONFIG_DIR: join(root, 'config'),
       CLAUDE_PLUGIN_DATA: join(root, 'data'),

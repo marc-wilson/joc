@@ -10,13 +10,14 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type { ChangesReport, MessagesReport, SessionReport } from '@joc/protocol';
 import { changesHash, collectChanges, lastSentHash, rememberSent } from './changes.ts';
 import { contextLeft } from './context.ts';
-import { connection } from './credentials.ts';
+import { connection, readCredentials } from './credentials.ts';
 import { branchOf, repoOf } from './git.ts';
+import { githubDue, readGitHub } from './github.ts';
 import { eventFields, type HookInput } from './report.ts';
 import { findTranscript, type Parsed, parseLines, readNewLines } from './transcript.ts';
 
 const at = Date.now();
-const { url: serverUrl, token } = connection();
+const { url: serverUrl, token } = connection(process.env, readCredentials());
 const BATCH = 500;
 
 async function readStdin(): Promise<string> {
@@ -75,6 +76,7 @@ async function main() {
       repo: repoOf(input.cwd),
       branch: branchOf(input.cwd),
       machine: hostname().replace(/\.local$/, ''),
+      cwd: input.cwd,
       contextLeft: ending ? undefined : contextLeft(input.transcript_path),
       ...fields,
       name: fields.name ?? conversation.aiTitle,
@@ -92,16 +94,25 @@ async function main() {
   }
   conversation.commit();
 
-  // The diff, once per turn, when a session starts and on each sync, and only when it changed.
   if (event === 'Stop' || event === 'SessionStart' || syncing) {
-    const changes = collectChanges(input.cwd);
-    if (!changes) return;
-    const hash = changesHash(changes);
-    if (hash === lastSentHash(input.session_id)) return;
-    const report: ChangesReport = { sessionId: input.session_id, at, ...changes };
-    const response = await post('/api/changes', report, 10_000);
-    if (response.ok) rememberSent(input.session_id, hash);
+    await sendChanges(input);
   }
+  // The person's pull requests, from whichever session's sync comes due first. JOC_GITHUB=0
+  // keeps them on this machine.
+  if ((syncing || event === 'SessionStart') && process.env.JOC_GITHUB !== '0' && githubDue()) {
+    await post('/api/github', readGitHub(at), 10_000);
+  }
+}
+
+/** The diff, once per turn, when a session starts and on each sync, and only when it changed. */
+async function sendChanges(input: HookInput) {
+  const changes = collectChanges(input.cwd);
+  if (!changes) return;
+  const hash = changesHash(changes);
+  if (hash === lastSentHash(input.session_id)) return;
+  const report: ChangesReport = { sessionId: input.session_id, at, ...changes };
+  const response = await post('/api/changes', report, 10_000);
+  if (response.ok) rememberSent(input.session_id, hash);
 }
 
 main()
