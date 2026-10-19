@@ -7,15 +7,26 @@ import { ConversationItem, Session } from '@joc/protocol';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { z } from 'zod';
 import { createApp } from './app.ts';
-import { requestToken } from './auth.ts';
-import { ownerFrom } from './owner.ts';
+import type { GitHubAuth } from './github.ts';
+import { createDeviceToken, signInGitHubUser } from './identity.ts';
+
+type Who = 'alice' | 'bob';
 
 let mongo: MongoMemoryServer;
+const tokens = new Map<Who, string>();
 
 before(async () => {
   mongo = await MongoMemoryServer.create();
   process.env.MONGODB_URI = mongo.getUri();
   process.env.MONGODB_DB = 'joc_isolation_test';
+  // Real identities: two GitHub users, each with one linked machine.
+  for (const [who, id] of [
+    ['alice', 1],
+    ['bob', 2],
+  ] as const) {
+    const owner = await signInGitHubUser({ id, login: who });
+    tokens.set(who, await createDeviceToken(owner, `${who}-laptop`));
+  }
 });
 
 after(async () => {
@@ -23,17 +34,11 @@ after(async () => {
   await mongo.stop();
 });
 
-const owners = new Map([
-  ['alice-token', ownerFrom('alice')],
-  ['bob-token', ownerFrom('bob')],
-]);
-
-const app = createApp({
-  resolveOwner: (c) => {
-    const token = requestToken(c);
-    return token ? owners.get(token) : undefined;
-  },
-});
+const github: GitHubAuth = {
+  authorizeUrl: () => 'https://github.example/authorize',
+  profileFor: async () => undefined,
+};
+const app = createApp({ github, publicUrl: 'http://joc.test' });
 
 const Sessions = z.array(Session);
 const Items = z.array(ConversationItem);
@@ -42,8 +47,7 @@ const Claimed = z.object({ prompts: z.array(z.object({ id: z.string(), text: z.s
 const read = async <T>(res: Response, schema: z.ZodType<T>): Promise<T> =>
   schema.parse(await res.json());
 
-type Who = 'alice' | 'bob';
-const auth = (who: Who) => ({ authorization: `Bearer ${who}-token` });
+const auth = (who: Who) => ({ authorization: `Bearer ${tokens.get(who)}` });
 
 function call(who: Who, path: string, body?: unknown) {
   return app.request(path, {
