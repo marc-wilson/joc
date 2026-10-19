@@ -1,4 +1,8 @@
+# The deploy sets image_tag to the commit SHA; the repository and pull policy are overridable to
+# try the chart on a local cluster with a locally built image.
+image_repository: marcswilsoncontainers.azurecr.io/joc
 image_tag: # auto-injected
+image_pull_policy: Always
 # Where the dashboard is reached; GitHub sends sign-ins back to <public_url>/auth/github/callback.
 public_url: https://joc.marcswilson.com
 # Filled from the `production` environment's GitHub secrets by the CI deploy job, through
