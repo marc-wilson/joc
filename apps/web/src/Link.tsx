@@ -1,5 +1,5 @@
 import { Device, MachineProblem, PendingDevice, type ProblemKind } from '@joc/protocol';
-import { Button, EmptyState, SectionHeader, SetupCheck, TextInput } from '@joc/ui';
+import { Button, EmptyState, SectionHeader, SetupCheck, Tag, TextInput } from '@joc/ui';
 import { type FormEvent, useEffect, useState } from 'react';
 import { z } from 'zod';
 import { apiFetch, signOut, useAuth } from './auth.ts';
@@ -50,6 +50,13 @@ function ProblemCheck({ problem }: { problem: MachineProblem }) {
       }
     />
   );
+}
+
+/** Which plugin a machine runs, as far as JOC knows. */
+function pluginLabel(device: Device): string {
+  if (device.plugin) return `plugin ${device.plugin}`;
+  // It reported without naming a version: a plugin from before versions were sent.
+  return device.outdated ? 'older plugin' : 'plugin not seen yet';
 }
 
 async function errorText(res: Response | undefined): Promise<string> {
@@ -204,8 +211,9 @@ export function LinkPage() {
             {devices.map((d) => (
               <li key={d.id} className="app-machines__row">
                 <span className="app-machines__name">{d.name}</span>
+                {d.outdated ? <Tag>Out of date</Tag> : null}
                 <span className="app-machines__meta">
-                  linked {ago(d.createdAt)} · last seen {ago(d.lastSeenAt)}
+                  {pluginLabel(d)} · linked {ago(d.createdAt)} · last seen {ago(d.lastSeenAt)}
                 </span>
                 <Button variant="ghost" size="sm" onClick={() => void revoke(d.id)}>
                   Revoke
