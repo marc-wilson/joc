@@ -8,9 +8,12 @@ import {
   GitHubReport,
   ImageId,
   MAX_IMAGE_BYTES,
+  MarkReadRequest,
   MessagesReport,
+  NotificationsReport,
   ProblemsReport,
   PromptRequest,
+  type ReadsClaim,
   SessionReport,
   type StreamEvent,
 } from '@joc/protocol';
@@ -47,6 +50,14 @@ import {
 } from './identity.ts';
 import { findImages, getImage, saveImage } from './images.ts';
 import { addMessages, listMessages, onMessages } from './messages.ts';
+import {
+  claimReads,
+  getNotifications,
+  markAllRead,
+  markRead,
+  onNotifications,
+  saveNotifications,
+} from './notifications.ts';
 import { type Owner, ownerFrom } from './owner.ts';
 import { listProblems, saveProblems } from './problems.ts';
 import { claimPrompts, queuePrompt } from './prompts.ts';
@@ -256,6 +267,37 @@ export function createApp({ github, publicUrl }: AppOptions): Hono<Env> {
 
   app.get('/api/github', async (c) => c.json(await getGitHub(c.get('owner'))));
 
+  // ── GitHub notifications: read by the plugin, marked read from the dashboard ─
+
+  app.post('/api/notifications', async (c) => {
+    const parsed = NotificationsReport.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    // 202 for a stale report: accepted, but a newer one already won.
+    return (await saveNotifications(c.get('owner'), parsed.data))
+      ? c.json({ ok: true })
+      : c.body(null, 202);
+  });
+
+  app.get('/api/notifications', async (c) => c.json(await getNotifications(c.get('owner'))));
+
+  app.post('/api/notifications/read', async (c) => {
+    const parsed = MarkReadRequest.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    await markRead(c.get('owner'), parsed.data.ids);
+    return c.body(null, 204);
+  });
+
+  app.post('/api/notifications/read-all', async (c) => {
+    await markAllRead(c.get('owner'));
+    return c.body(null, 204);
+  });
+
+  // A machine's plugin takes the queue; a browser has no `gh` to mark them with.
+  app.post('/api/notifications/reads/claim', async (c) => {
+    if (c.get('via') === 'session') return c.json({ error: 'Forbidden' }, 403);
+    return c.json({ ids: await claimReads(c.get('owner')) } satisfies ReadsClaim);
+  });
+
   app.post('/api/messages', async (c) => {
     const parsed = MessagesReport.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
@@ -353,6 +395,7 @@ export function createApp({ github, publicUrl }: AppOptions): Hono<Env> {
           onMessages(owner, (sessionId, items) => publish({ type: 'messages', sessionId, items })),
           onChanges(owner, (sessionId) => publish({ type: 'changes', sessionId })),
           onGitHub(owner, () => publish({ type: 'github' })),
+          onNotifications(owner, () => publish({ type: 'notifications' })),
         ];
         stream.onAbort(() => {
           for (const unsubscribe of unsubscribers) unsubscribe();
