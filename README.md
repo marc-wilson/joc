@@ -103,11 +103,13 @@ Run from the repo root.
 JOC ships as one image, `marcswilsoncontainers.azurecr.io/joc`: the server serves the API and
 the built dashboard (`WEB_DIST`) on port 3000, so everything is same-origin.
 
-- **CI** (`.github/workflows/ci.yml`, pull requests): `pnpm check`, `pnpm typecheck`,
-  `pnpm build` and commitlint over the PR's commits.
-- **Release** (`.github/workflows/release.yml`, push to `main`): builds the `Dockerfile` for
-  `linux/arm64`, pushes `latest` and the commit SHA, then runs `helm upgrade --install` of the
-  chart in `k8s/` into namespace `joc` on AKS (`production` environment).
+One workflow, `.github/workflows/ci.yml`, with two jobs:
+
+- **check** (every PR and push): `pnpm check`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and
+  on PRs commitlint over the title and every commit. `main` requires it to pass.
+- **deploy** (pushes to `main`, after check): builds the `Dockerfile` for `linux/arm64`, pushes
+  `latest` and the commit SHA to ACR, then runs `helm upgrade --install` of the chart in `k8s/`
+  into namespace `joc` on AKS, in the `production` environment.
 - The chart runs exactly one replica (live updates fan out in-process) behind
   `joc.marcswilson.com`. `MONGODB_URI` and `JOC_TOKEN` are secrets in the GitHub `production`
   environment; the chart turns them into the `joc-secrets` Kubernetes secret at deploy time,
