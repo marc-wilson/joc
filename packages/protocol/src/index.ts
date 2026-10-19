@@ -262,3 +262,63 @@ export const Device = z.object({
   lastSeenAt: z.iso.datetime(),
 });
 export type Device = z.infer<typeof Device>;
+
+// What went wrong in a machine's plugin. The plugin never shows a failure in the session; it
+// keeps a short local record (`/joc-status` reads it) and sends it here once the server answers.
+
+/**
+ * - `unreachable`: no answer from the server (down, offline, timed out).
+ * - `unauthorized`: the server refused the machine's token (revoked, or never linked).
+ * - `rejected`: the server refused one of the plugin's own requests (4xx), e.g. an invalid report.
+ * - `server-error`: the server failed on a request (5xx).
+ * - `crash`: the plugin itself failed.
+ */
+export const ProblemKind = z.enum([
+  'unreachable',
+  'unauthorized',
+  'rejected',
+  'server-error',
+  'crash',
+]);
+export type ProblemKind = z.infer<typeof ProblemKind>;
+
+/** One problem, folded: the same kind in the same place counts up instead of repeating. */
+export const PluginProblem = z.object({
+  kind: ProblemKind,
+  /**
+   * What failed: the server's address for `unreachable` and `unauthorized`, the API path for
+   * `rejected` and `server-error` (`/api/messages`), the part of the plugin for `crash` (`hook`,
+   * `module`).
+   */
+  where: z.string().min(1).max(100),
+  /** The latest occurrence, one line: the error's message or what the server said. */
+  detail: z.string().max(500),
+  /** When this run of it started and last happened, ms since epoch. */
+  firstAt: z.number().int().positive(),
+  lastAt: z.number().int().positive(),
+  count: z.number().int().positive(),
+  /** When a later attempt worked again; unset while it's still happening. */
+  resolvedAt: z.number().int().positive().optional(),
+});
+export type PluginProblem = z.infer<typeof PluginProblem>;
+
+/** `POST /api/problems`, from a machine's plugin. */
+export const ProblemsReport = z.object({
+  /** The machine's host name, as session reports carry it. */
+  machine: z.string().trim().min(1).max(100),
+  problems: z.array(PluginProblem).min(1).max(20),
+});
+export type ProblemsReport = z.infer<typeof ProblemsReport>;
+
+/** A machine's problem, as `GET /api/problems` lists it for the Machines page. */
+export const MachineProblem = z.object({
+  machine: z.string(),
+  kind: ProblemKind,
+  where: z.string(),
+  detail: z.string(),
+  firstAt: z.iso.datetime(),
+  lastAt: z.iso.datetime(),
+  count: z.number().int().positive(),
+  resolvedAt: z.iso.datetime().optional(),
+});
+export type MachineProblem = z.infer<typeof MachineProblem>;
