@@ -2,3 +2,4 @@
 @import "@fontsource-variable/geist-mono";
 @import "./styles/tokens.css";
 @import "./styles/components.css";
+@import "./banner.css";

@@ -1,0 +1,50 @@
+/* Banner. Not in the JOC design system yet: move it into styles/components.css when the design
+   system has it, and delete this file. Tokens only. */
+
+.joc-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-primary);
+}
+
+.joc-banner__lead {
+  flex: none;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.joc-banner__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.joc-banner__title {
+  font-weight: 550;
+}
+
+.joc-banner__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--text-secondary);
+}
+
+.joc-banner__body .joc-cmd {
+  height: 32px;
+}
+
+.joc-banner__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
