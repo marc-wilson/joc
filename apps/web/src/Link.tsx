@@ -1,5 +1,5 @@
-import { Device, PendingDevice } from '@joc/protocol';
-import { Button, EmptyState, SectionHeader, TextInput } from '@joc/ui';
+import { Device, MachineProblem, PendingDevice, type ProblemKind } from '@joc/protocol';
+import { Button, EmptyState, SectionHeader, SetupCheck, TextInput } from '@joc/ui';
 import { type FormEvent, useEffect, useState } from 'react';
 import { z } from 'zod';
 import { apiFetch, signOut, useAuth } from './auth.ts';
@@ -12,6 +12,44 @@ const ErrorBody = z.object({ error: z.string() });
 async function fetchDevices(): Promise<Device[] | undefined> {
   const res = await apiFetch('/api/devices').catch(() => undefined);
   return res?.ok ? Devices.parse(await res.json()) : undefined;
+}
+
+const Problems = z.array(MachineProblem);
+
+async function fetchProblems(): Promise<MachineProblem[] | undefined> {
+  // Unreachable: the section stays hidden, as for any other failed load.
+  const res = await apiFetch('/api/problems').catch(() => undefined);
+  return res?.ok ? Problems.parse(await res.json()) : undefined;
+}
+
+const PROBLEM_TITLE: Record<ProblemKind, string> = {
+  unreachable: "Couldn't reach JOC",
+  unauthorized: 'Token refused',
+  rejected: 'Request refused',
+  'server-error': 'JOC failed on a request',
+  crash: 'Plugin error',
+};
+
+/** One plugin problem: what, on which machine, how often, and whether it's over. */
+function ProblemCheck({ problem }: { problem: MachineProblem }) {
+  const times = problem.count === 1 ? 'once' : `${problem.count} times`;
+  const when = problem.resolvedAt
+    ? `worked again ${ago(problem.resolvedAt)}`
+    : `last ${ago(problem.lastAt)}`;
+  return (
+    <SetupCheck
+      status={problem.resolvedAt ? 'ok' : 'missing'}
+      title={`${PROBLEM_TITLE[problem.kind]} on ${problem.machine}`}
+      detail={`${problem.where}: ${problem.detail}. ${times}, ${when}.`}
+      command={
+        problem.resolvedAt
+          ? undefined
+          : problem.kind === 'unauthorized'
+            ? '/joc-login'
+            : '/joc-status'
+      }
+    />
+  );
 }
 
 async function errorText(res: Response | undefined): Promise<string> {
@@ -27,6 +65,7 @@ export function LinkPage() {
   const auth = useAuth();
   const user = auth.status === 'signedIn' ? auth.user : undefined;
   const [devices, setDevices] = useState<Device[]>();
+  const [problems, setProblems] = useState<MachineProblem[]>();
   const [code, setCode] = useState(codeFromUrl);
   // The machine behind a code from the URL, shown before anything is linked.
   const [pending, setPending] = useState<PendingDevice>();
@@ -38,6 +77,7 @@ export function LinkPage() {
 
   useEffect(() => {
     void fetchDevices().then((list) => list && setDevices(list));
+    void fetchProblems().then((list) => list && setProblems(list));
     const fromUrl = codeFromUrl();
     if (!fromUrl) return;
     void apiFetch(`/api/devices/pending?code=${encodeURIComponent(fromUrl)}`)
@@ -175,6 +215,21 @@ export function LinkPage() {
           </ul>
         ) : devices ? (
           <EmptyState compact title="No machines yet" body="Link one with /joc-login." />
+        ) : null}
+
+        {problems?.length ? (
+          <>
+            <SectionHeader
+              title="Plugin problems"
+              count={problems.length}
+              description="What your machines' plugins couldn't do, sent once they reach JOC again. A machine that can't reach JOC at all says why with /joc-status."
+            />
+            <div className="app-problems">
+              {problems.map((p) => (
+                <ProblemCheck key={`${p.machine} ${p.kind} ${p.where}`} problem={p} />
+              ))}
+            </div>
+          </>
         ) : null}
       </main>
     </div>
