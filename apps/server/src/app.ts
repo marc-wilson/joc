@@ -6,6 +6,8 @@ import {
   DeviceStartRequest,
   DeviceTokenRequest,
   GitHubReport,
+  ImageId,
+  MAX_IMAGE_BYTES,
   MessagesReport,
   ProblemsReport,
   PromptRequest,
@@ -13,6 +15,7 @@ import {
   type StreamEvent,
 } from '@joc/protocol';
 import { type Context, Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
 import {
   bearerToken,
@@ -42,6 +45,7 @@ import {
   signInGitHubUser,
   startLink,
 } from './identity.ts';
+import { findImages, getImage, saveImage } from './images.ts';
 import { addMessages, listMessages, onMessages } from './messages.ts';
 import { type Owner, ownerFrom } from './owner.ts';
 import { listProblems, saveProblems } from './problems.ts';
@@ -73,6 +77,8 @@ export function createApp({ github, publicUrl }: AppOptions): Hono<Env> {
   const linkStarts = new RateLimit(10, 10 * 60_000);
   const linkPolls = new RateLimit(600, 10 * 60_000);
   const approvals = new RateLimit(10, 10 * 60_000);
+  // Generous: a session's backlog can carry a few dozen screenshots at once.
+  const uploads = new RateLimit(600, 10 * 60_000);
 
   async function identify(c: Context): Promise<{ owner: Owner; via: Via } | undefined> {
     if (!github) return { owner: LOCAL, via: 'open' };
@@ -276,9 +282,13 @@ export function createApp({ github, publicUrl }: AppOptions): Hono<Env> {
 
   // From the dashboard: queue a prompt for the session.
   app.post('/api/sessions/:id/prompts', async (c) => {
+    const owner = c.get('owner');
     const parsed = PromptRequest.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
-    const id = await queuePrompt(c.get('owner'), c.req.param('id'), parsed.data.text);
+    // Only the owner's own images, so a prompt can't hand another person's to their session.
+    const images = await findImages(owner, parsed.data.images ?? []);
+    if (!images) return c.json({ error: 'No such image' }, 400);
+    const id = await queuePrompt(owner, c.req.param('id'), parsed.data.text, images);
     return c.json({ id }, 201);
   });
 
@@ -286,6 +296,41 @@ export function createApp({ github, publicUrl }: AppOptions): Hono<Env> {
   app.post('/api/sessions/:id/prompts/claim', async (c) =>
     c.json({ prompts: await claimPrompts(c.get('owner'), c.req.param('id')) }),
   );
+
+  // ── Images: pasted in the dashboard, or in a session's conversation ─────────
+
+  // The raw bytes, with their type as the Content-Type. Named by the hash of the bytes.
+  app.post(
+    '/api/images',
+    bodyLimit({
+      maxSize: MAX_IMAGE_BYTES,
+      onError: (c) => c.json({ error: 'Images can be up to 5 MB' }, 413),
+    }),
+    async (c) => {
+      const owner = c.get('owner');
+      if (!uploads.hit(owner)) return c.json({ error: 'Too many requests' }, 429);
+      const bytes = new Uint8Array(await c.req.arrayBuffer());
+      const saved = await saveImage(owner, c.req.header('content-type'), bytes);
+      if (saved.ok) return c.json(saved.image, 201);
+      return saved.status === 413
+        ? c.json({ error: 'Images can be up to 5 MB' }, 413)
+        : c.json({ error: 'Only PNG, JPEG, GIF and WebP images' }, 415);
+    },
+  );
+
+  app.get('/api/images/:id', async (c) => {
+    const id = ImageId.safeParse(c.req.param('id'));
+    const image = id.success ? await getImage(c.get('owner'), id.data) : undefined;
+    if (!image) return c.json({ error: 'No such image' }, 404);
+    return c.body(image.data, 200, {
+      'content-type': image.type,
+      'x-content-type-options': 'nosniff',
+      // An id always names the same bytes, but only this person may see them.
+      'cache-control': 'private, max-age=31536000, immutable',
+      // Opened on its own, the image can run nothing.
+      'content-security-policy': "default-src 'none'; sandbox",
+    });
+  });
 
   app.get('/api/stream', (c) =>
     streamSSE(

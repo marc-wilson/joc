@@ -4,9 +4,11 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { closeClient, getDb } from '@joc/db';
 import {
+  ClaimedPrompt,
   ConversationItem,
   GitHubSnapshot,
   HistorySession,
+  ImageRef,
   MachineProblem,
   Session,
 } from '@joc/protocol';
@@ -51,7 +53,7 @@ const app = createApp({ github, publicUrl: 'http://joc.test' });
 
 const Sessions = z.array(Session);
 const Items = z.array(ConversationItem);
-const Claimed = z.object({ prompts: z.array(z.object({ id: z.string(), text: z.string() })) });
+const Claimed = z.object({ prompts: z.array(ClaimedPrompt) });
 
 const read = async <T>(res: Response, schema: z.ZodType<T>): Promise<T> =>
   schema.parse(await res.json());
@@ -91,6 +93,8 @@ test('every API route needs an owner', async () => {
     ['POST', '/api/github'],
     ['GET', '/api/problems'],
     ['POST', '/api/problems'],
+    ['POST', '/api/images'],
+    ['GET', `/api/images/${'0'.repeat(64)}`],
   ] as const) {
     const res = await app.request(path, { method });
     assert.equal(res.status, 401, `${method} ${path}`);
@@ -307,4 +311,68 @@ test("a machine's problems are shown only to its owner, and only to a signed-in 
     body: JSON.stringify({ machine: 'alice-laptop', problems: [problem] }),
   });
   assert.equal(fromBrowser.status, 403);
+});
+
+/** A tiny made-up PNG: the signature, then bytes of its own. */
+const png = (fill: string) =>
+  new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...Buffer.from(fill)]);
+
+const upload = (who: Who, bytes: Uint8Array) =>
+  app.request('/api/images', {
+    method: 'POST',
+    headers: { ...auth(who), 'content-type': 'image/png' },
+    body: bytes,
+  });
+
+test('images are served only to their owner', async () => {
+  const alices = png('alice screenshot');
+  const res = await upload('alice', alices);
+  assert.equal(res.status, 201);
+  const { id } = await read(res, ImageRef);
+
+  const own = await call('alice', `/api/images/${id}`);
+  assert.equal(own.status, 200);
+  assert.deepEqual(new Uint8Array(await own.arrayBuffer()), alices);
+  assert.equal((await call('bob', `/api/images/${id}`)).status, 404);
+});
+
+test("another owner can't overwrite an image or send it in a prompt", async () => {
+  const alices = png('alice only');
+  const { id } = await read(await upload('alice', alices), ImageRef);
+
+  // Bob can't name an id to write to: the same bytes make his own copy, other bytes another id.
+  const same = await read(await upload('bob', alices), ImageRef);
+  assert.equal(same.id, id);
+  const other = await read(await upload('bob', png('bob was here')), ImageRef);
+  assert.notEqual(other.id, id);
+  const alice = await call('alice', `/api/images/${id}`);
+  assert.deepEqual(new Uint8Array(await alice.arrayBuffer()), alices);
+
+  // Nor can he queue a prompt with an image of Alice's he never uploaded.
+  const secret = await read(await upload('alice', png('alice secret')), ImageRef);
+  const prompt = await call('bob', '/api/sessions/shared-id/prompts', {
+    text: 'Look',
+    images: [secret.id],
+  });
+  assert.equal(prompt.status, 400);
+});
+
+test("a prompt's images reach only their owner's plugin", async () => {
+  const image = await read(await upload('alice', png('for the session')), ImageRef);
+  const queued = await call('alice', '/api/sessions/img-session/prompts', {
+    text: '',
+    images: [image.id],
+  });
+  assert.equal(queued.status, 201);
+
+  const bob = await read(await call('bob', '/api/sessions/img-session/prompts/claim', {}), Claimed);
+  const alice = await read(
+    await call('alice', '/api/sessions/img-session/prompts/claim', {}),
+    Claimed,
+  );
+  assert.deepEqual(bob.prompts, []);
+  assert.deepEqual(
+    alice.prompts.map((p) => p.images),
+    [[image]],
+  );
 });
