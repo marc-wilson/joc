@@ -17,7 +17,8 @@ Claude Code session ── plugin ──▶ server ──▶ web dashboard (live
 - Nothing reaches into the user's machine. A new session starts because a running session's plugin picks up the request.
 - Hosted, for many people at once. A browser signs in with GitHub (an HttpOnly session cookie); a machine links with `/joc-login` and gets its own bearer token. Every request resolves to one owner. Without a GitHub app configured (local dev only) everything is open and belongs to `local`; production refuses to start that way.
 - **Isolation is the rule:** every store function takes an `Owner` first (apps/server/src/owner.ts), records are keyed `owner/session`, and live updates fan out per owner. Never query a collection without the owner. A new route gets a case in `apps/server/src/isolation.test.ts`.
-- GitHub data comes from the `gh` CLI on the user's machine, using its sign-in.
+- GitHub data comes from the `gh` CLI on the user's machine, using its sign-in: pull requests (apps/plugin/src/github.ts) and unread notifications for the Inbox (apps/plugin/src/notifications.ts), each read once per machine via a stamp file under `~/.claude/joc/`. Marking a notification read is a per-owner queue on the server that the next machine to read takes and runs with `gh`.
+- Plugin switches in Claude Code's environment: `JOC_GITHUB=0` (no `gh` reads at all), `JOC_NOTIFY=0` (no native notifications; register.ts raises them with `$.ui.notify`, deduped machine-wide in `~/.claude/joc/notified.json`).
 - The plugin never shows a failure in the session. It records it in its local problem log (`apps/plugin/src/problems.ts`, `~/.claude/joc/status.json`), which `/joc-status` reads and which goes to `POST /api/problems` for the Machines page once the server answers. A new plugin request records its outcome there too.
 
 ## Repo map
