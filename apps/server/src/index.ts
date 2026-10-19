@@ -1,24 +1,28 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { createApp } from './app.ts';
-import { requestToken, tokenMatches } from './auth.ts';
-import { ownerFrom } from './owner.ts';
+import { githubAuth } from './github.ts';
 
-// One shared token for the hosted site, so everything it stores belongs to one owner. Unset in
-// local dev, where everything is open and belongs to `local`.
-const token = process.env.JOC_TOKEN || undefined;
-if (!token) {
-  console.warn('JOC_TOKEN is not set: the API is open to anyone who can reach this server.');
+const port = Number(process.env.PORT ?? 3000);
+const publicUrl = (process.env.JOC_PUBLIC_URL || `http://localhost:${port}`).replace(/\/$/, '');
+const clientId = process.env.JOC_GITHUB_CLIENT_ID;
+const clientSecret = process.env.JOC_GITHUB_CLIENT_SECRET;
+
+// Without GitHub sign-in the server is open to anyone who reaches it: fine on a laptop, never
+// in production.
+if (!clientId || !clientSecret) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('JOC_GITHUB_CLIENT_ID and JOC_GITHUB_CLIENT_SECRET are required in production');
+  }
+  console.warn('GitHub sign-in is not configured: the API is open, as local development.');
 }
-const shared = ownerFrom('shared');
-const local = ownerFrom('local');
 
 const app = createApp({
-  token,
-  resolveOwner: (c) => {
-    if (!token) return local;
-    return tokenMatches(requestToken(c), token) ? shared : undefined;
-  },
+  publicUrl,
+  github:
+    clientId && clientSecret
+      ? githubAuth({ clientId, clientSecret, redirectUri: `${publicUrl}/auth/github/callback` })
+      : undefined,
 });
 
 // In production the server also serves the built dashboard, so everything is one origin.
@@ -27,8 +31,6 @@ if (webDist) {
   app.use('/*', serveStatic({ root: webDist }));
   app.get('*', serveStatic({ root: webDist, path: 'index.html' }));
 }
-
-const port = Number(process.env.PORT ?? 3000);
 
 serve({ fetch: app.fetch, port }, (info) => {
   console.log(`JOC server listening on http://localhost:${info.port}`);
