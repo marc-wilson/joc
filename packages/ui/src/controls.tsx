@@ -116,6 +116,41 @@ export function TextInput({
   );
 }
 
+export interface SwitchProps {
+  label: string;
+  /** One line on what it turns on. */
+  description?: string;
+  checked: boolean;
+  disabled?: boolean;
+  /** Shown instead of the description, e.g. why it can't be turned on. */
+  hint?: string;
+  onChange?: (checked: boolean) => void;
+}
+
+/** A one-line on/off setting: switch, label, what it does, and On or Off. */
+export function Switch({ label, description, checked, disabled, hint, onChange }: SwitchProps) {
+  const id = `sw-${label.replace(/\W+/g, '-').toLowerCase()}`;
+  return (
+    <div className={cx('joc-switchbar', disabled && 'is-disabled')}>
+      <input
+        id={id}
+        className="joc-switch"
+        type="checkbox"
+        role="switch"
+        aria-checked={checked}
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange?.(e.currentTarget.checked)}
+      />
+      <label htmlFor={id} className="joc-switchbar__label label-strong">
+        {label}
+      </label>
+      <span className="joc-switchbar__desc meta">{hint ?? description}</span>
+      <span className="joc-switchbar__state meta">{checked ? 'On' : 'Off'}</span>
+    </div>
+  );
+}
+
 export interface SegmentedControlProps {
   options: { id: string; label: string }[];
   value?: string;
