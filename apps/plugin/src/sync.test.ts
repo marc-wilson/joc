@@ -17,15 +17,26 @@ let server: Server;
 let serverUrl: string;
 let received: { path: string; body: Record<string, unknown> }[];
 let messagesStatus: number;
+let imagesStatus: number;
+const IMAGE_ID = 'c'.repeat(64);
 
 before(async () => {
   server = createServer((req, res) => {
-    let data = '';
-    req.on('data', (chunk) => {
-      data += chunk;
-    });
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
     req.on('end', () => {
-      received.push({ path: req.url ?? '', body: JSON.parse(data) });
+      const data = Buffer.concat(chunks);
+      if (req.url === '/api/images') {
+        // Images come as their raw bytes; the stand-in answers as the server would.
+        received.push({
+          path: req.url,
+          body: { type: req.headers['content-type'], bytes: data.toString('latin1') },
+        });
+        res.statusCode = imagesStatus;
+        res.end(JSON.stringify({ id: IMAGE_ID, type: 'image/png', bytes: data.length }));
+        return;
+      }
+      received.push({ path: req.url ?? '', body: JSON.parse(data.toString('utf8')) });
       res.statusCode = req.url === '/api/messages' ? messagesStatus : 200;
       res.end('{}');
     });
@@ -43,6 +54,7 @@ let transcript: string;
 beforeEach(() => {
   received = [];
   messagesStatus = 200;
+  imagesStatus = 201;
   root = mkdtempSync(join(tmpdir(), 'joc-sync-test-'));
   cwd = join(root, 'atlas-web');
   mkdirSync(cwd);
@@ -157,4 +169,69 @@ test('findTranscript looks in the project folder, then searches the others', () 
   } finally {
     delete process.env.CLAUDE_CONFIG_DIR;
   }
+});
+
+/** A user message with a pasted image: a tiny made-up PNG, base64, as Claude Code keeps it. */
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x68, 0x69]);
+function pasted(uuid: string, text: string): string {
+  const content = [
+    ...(text ? [{ type: 'text', text }] : []),
+    {
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: PNG.toString('base64') },
+    },
+  ];
+  return `${JSON.stringify({ type: 'user', uuid, timestamp: '2026-10-18T10:01:00.000Z', message: { content } })}\n`;
+}
+
+const sentItems = () =>
+  (received.find((r) => r.path === '/api/messages')?.body.items ?? []) as {
+    id: string;
+    text: string;
+    images?: unknown[];
+  }[];
+
+test('a pasted image is uploaded as its bytes before the message that shows it', async () => {
+  appendFileSync(transcript, pasted('u2', 'Why is this red?'));
+  await sync();
+  assert.deepEqual(paths(), ['/api/reports', '/api/images', '/api/messages', '/api/changes']);
+  const upload = received[1]?.body;
+  assert.equal(upload?.type, 'image/png');
+  assert.equal(upload?.bytes, PNG.toString('latin1'));
+  assert.deepEqual(sentItems().at(-1), {
+    id: 'u2:0',
+    at: '2026-10-18T10:01:00.000Z',
+    kind: 'user',
+    text: 'Why is this red?',
+    images: [{ id: IMAGE_ID, type: 'image/png', bytes: PNG.length }],
+  });
+});
+
+test('an image the server refuses is left out, and a message of only that is dropped', async () => {
+  imagesStatus = 415;
+  appendFileSync(transcript, pasted('u2', 'Kept text'));
+  appendFileSync(transcript, pasted('u3', ''));
+  await sync();
+  assert.deepEqual(
+    sentItems().map((i) => [i.id, i.text, i.images]),
+    [
+      ['u1', 'Fix the login loop', undefined],
+      ['u2:0', 'Kept text', undefined],
+    ],
+  );
+});
+
+test('an image the server could not take now holds the messages for the next sync', async () => {
+  imagesStatus = 503;
+  appendFileSync(transcript, pasted('u2', 'Later'));
+  await sync();
+  // The 503 is a problem for the Machines page, sent because the report got through.
+  assert.deepEqual(paths(), ['/api/reports', '/api/images', '/api/problems']);
+  imagesStatus = 201;
+  received = [];
+  await sync();
+  assert.deepEqual(
+    sentItems().map((i) => i.id),
+    ['u1', 'u2:0'],
+  );
 });

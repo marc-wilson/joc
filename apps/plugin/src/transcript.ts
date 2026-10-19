@@ -11,7 +11,8 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ConversationItem } from '@joc/protocol';
+import type { ConversationItem, ImageRef } from '@joc/protocol';
+import { imageType, MAX_IMAGES, takeImageLines } from './images.ts';
 import { firstLine, toolLabel, toolTarget } from './report.ts';
 
 // The transcript format isn't documented and may change. Everything here reads it defensively:
@@ -19,6 +20,9 @@ import { firstLine, toolLabel, toolTarget } from './report.ts';
 
 /** Never send more than this much of a transcript in one go (e.g. the first read of a long one). */
 const MAX_READ_BYTES = 1024 * 1024;
+/** A line can be far longer: pasted images ride inside it, base64. One cut at the start of the
+ * read is still taken whole, up to this size. */
+const MAX_LINE_BYTES = 64 * 1024 * 1024;
 
 const cut = (text: string, max: number) =>
   text.length > max ? `${text.slice(0, max - 1)}…` : text;
@@ -57,8 +61,13 @@ export function readNewLines(sessionId: string, transcriptPath: string): NewLine
     const size = fstatSync(fd).size;
     let start = readOffset(file);
     if (start > size) start = 0; // The transcript was replaced.
-    const skipPartial = size - start > MAX_READ_BYTES;
-    if (skipPartial) start = size - MAX_READ_BYTES;
+    let skipPartial = false;
+    if (size - start > MAX_READ_BYTES) {
+      const cut = size - MAX_READ_BYTES;
+      const line = lineStart(fd, cut, Math.max(start, size - MAX_LINE_BYTES), start);
+      skipPartial = line === undefined;
+      start = line ?? cut;
+    }
     const buffer = Buffer.alloc(size - start);
     readSync(fd, buffer, 0, buffer.length, start);
     // Only whole lines: a line still being written is picked up next time.
@@ -71,6 +80,22 @@ export function readNewLines(sessionId: string, transcriptPath: string): NewLine
   } finally {
     closeSync(fd);
   }
+}
+
+/**
+ * Where the line holding byte `at` starts, looking back no further than `floor`; undefined when
+ * it starts before that. `start` is a known line start (the last read position).
+ */
+function lineStart(fd: number, at: number, floor: number, start: number): number | undefined {
+  const chunk = Buffer.alloc(64 * 1024);
+  for (let end = at; end > floor; ) {
+    const from = Math.max(floor, end - chunk.length);
+    readSync(fd, chunk, 0, end - from, from);
+    const newline = chunk.subarray(0, end - from).lastIndexOf(0x0a);
+    if (newline >= 0) return from + newline + 1;
+    end = from;
+  }
+  return floor === start ? start : undefined;
 }
 
 /**
@@ -109,6 +134,8 @@ interface Entry {
 type Block = Record<string, unknown> & { type?: string };
 
 const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
+
+const isBlock = (v: unknown): v is Block => !!v && typeof v === 'object' && !Array.isArray(v);
 
 function resultText(content: unknown): string {
   if (typeof content === 'string') return content;
@@ -167,14 +194,53 @@ function startedTask(result: unknown): string | undefined {
   return id ? cut(id, 200) : undefined;
 }
 
+/** An image pasted into a prompt, still to be uploaded and added to its item's `images`. */
+export interface TranscriptImage {
+  itemId: string;
+  /** The type Claude Code recorded; the server checks it against the bytes. */
+  type: ImageRef['type'];
+  /** The bytes, base64. */
+  data: string;
+}
+
+/** The base64 images among a user message's blocks, as many as a message may carry. */
+function pastedImages(content: Block[]): Omit<TranscriptImage, 'itemId'>[] {
+  return content
+    .flatMap((block) => {
+      const source = block.type === 'image' ? block.source : undefined;
+      if (!isBlock(source)) return [];
+      const { type: kind, media_type, data } = source;
+      const type = imageType(media_type);
+      return kind === 'base64' && type && typeof data === 'string' ? [{ type, data }] : [];
+    })
+    .slice(0, MAX_IMAGES);
+}
+
+type UserItem = Extract<ConversationItem, { kind: 'user' }>;
+
+/** A user item, with the images JOC named in its text shown as images instead. */
+function userItem(id: string, at: string, text: string): UserItem {
+  const taken = takeImageLines(text);
+  return {
+    id,
+    at,
+    kind: 'user',
+    text: cut(taken.text, 20_000),
+    ...(taken.images.length ? { images: taken.images } : {}),
+  };
+}
+
 export interface Parsed {
   items: ConversationItem[];
+  /** Pasted images, for the items above that showed them. */
+  images: TranscriptImage[];
   /** The latest title Claude Code generated, if one was in these lines. */
   aiTitle?: string;
 }
 
 export function parseLines(lines: string[], cwd: string): Parsed {
   const items: ConversationItem[] = [];
+  const images: TranscriptImage[] = [];
   let aiTitle: string | undefined;
   for (const line of lines) {
     let entry: Entry;
@@ -216,13 +282,14 @@ export function parseLines(lines: string[], cwd: string): Parsed {
         });
       } else if (!content.startsWith('<')) {
         // Other tagged strings are Claude Code's own bookkeeping (command output, caveats).
-        items.push({ id: entry.uuid, at, kind: 'user', text: cut(content, 20_000) });
+        items.push(userItem(entry.uuid, at, content));
       }
       continue;
     }
     if (!Array.isArray(content)) continue;
     // The structured result belongs to the entry, so only trust it for a single result.
     const results = content.filter((b: Block) => b.type === 'tool_result').length;
+    const firstItem = items.length;
 
     content.forEach((block: Block, i) => {
       const id = `${entry.uuid}:${i}`;
@@ -268,9 +335,21 @@ export function parseLines(lines: string[], cwd: string): Parsed {
         });
       } else if (entry.type === 'user' && block.type === 'text' && str(block.text)?.trim()) {
         const text = str(block.text) ?? '';
-        if (!text.startsWith('<')) items.push({ id, at, kind: 'user', text: cut(text, 20_000) });
+        if (!text.startsWith('<')) items.push(userItem(id, at, text));
       }
     });
+
+    // Pasted images go with the message's first text, or make an item of their own.
+    const pasted = entry.type === 'user' ? pastedImages(content) : [];
+    if (pasted.length) {
+      let host = items.slice(firstItem).find((i) => i.kind === 'user');
+      if (!host) {
+        host = { id: `${entry.uuid}:images`, at, kind: 'user', text: '' };
+        items.push(host);
+      }
+      const itemId = host.id;
+      images.push(...pasted.map((image) => ({ ...image, itemId })));
+    }
   }
-  return { items, aiTitle: firstLine(aiTitle, 200) };
+  return { items, images, aiTitle: firstLine(aiTitle, 200) };
 }

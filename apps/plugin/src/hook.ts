@@ -8,12 +8,19 @@
 // without changing its state.
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { ChangesReport, MessagesReport, ProblemsReport, SessionReport } from '@joc/protocol';
+import type {
+  ChangesReport,
+  ImageRef,
+  MessagesReport,
+  ProblemsReport,
+  SessionReport,
+} from '@joc/protocol';
 import { changesHash, collectChanges, lastSentHash, rememberSent } from './changes.ts';
 import { contextLeft } from './context.ts';
 import { connection, readCredentials } from './credentials.ts';
 import { branchOf, repoOf } from './git.ts';
 import { githubDue, readGitHub } from './github.ts';
+import { imageType, isImageId } from './images.ts';
 import {
   applyOutcomes,
   errorDetail,
@@ -25,7 +32,13 @@ import {
 } from './problems.ts';
 import { eventFields, type HookInput } from './report.ts';
 import { updateStatus } from './status.ts';
-import { findTranscript, type Parsed, parseLines, readNewLines } from './transcript.ts';
+import {
+  findTranscript,
+  type Parsed,
+  parseLines,
+  readNewLines,
+  type TranscriptImage,
+} from './transcript.ts';
 
 const at = Date.now();
 const { url: serverUrl, token } = connection(process.env, readCredentials());
@@ -44,6 +57,8 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+const auth = (): Record<string, string> => (token ? { authorization: `Bearer ${token}` } : {});
+
 /** Sends to the server; undefined when it didn't answer. Never throws. */
 async function post(path: string, body: unknown, timeoutMs: number): Promise<Response | undefined> {
   if (unreachable) return undefined;
@@ -52,7 +67,7 @@ async function post(path: string, body: unknown, timeoutMs: number): Promise<Res
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...auth(),
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
@@ -72,7 +87,57 @@ async function post(path: string, body: unknown, timeoutMs: number): Promise<Res
 
 type NewConversation = Parsed & { commit: () => void };
 
-const nothingNew: NewConversation = { items: [], commit: () => {} };
+const nothingNew: NewConversation = { items: [], images: [], commit: () => {} };
+
+/**
+ * Uploads pasted images and adds them to their items. False when the server couldn't take them
+ * now, so nothing is sent and the next hook tries again; an image it refuses (too big, not an
+ * image) is left out. An item that was only refused images is dropped.
+ */
+async function attachImages(conversation: NewConversation): Promise<boolean> {
+  const byId = new Map(conversation.items.map((item) => [item.id, item]));
+  for (const image of conversation.images) {
+    const item = byId.get(image.itemId);
+    if (item?.kind !== 'user') continue;
+    const stored = await uploadImage(image);
+    if (stored === 'retry') return false;
+    if (stored) item.images = [...(item.images ?? []), stored];
+  }
+  conversation.items = conversation.items.filter(
+    (item) => item.kind !== 'user' || item.text !== '' || item.images?.length,
+  );
+  return true;
+}
+
+async function uploadImage(image: TranscriptImage): Promise<ImageRef | undefined | 'retry'> {
+  if (unreachable) return 'retry';
+  let res: Response;
+  try {
+    res = await fetch(`${serverUrl}/api/images`, {
+      method: 'POST',
+      headers: { 'content-type': image.type, ...auth() },
+      body: Buffer.from(image.data, 'base64'),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (error) {
+    unreachable = true;
+    const detail = errorDetail(error);
+    outcomes.push({ ok: false, kind: 'unreachable', where: serverUrl, detail, at: Date.now() });
+    return 'retry';
+  }
+  // A refused image is left out on purpose, so only other answers count as problems.
+  if ([400, 413, 415].includes(res.status)) return undefined;
+  outcomes.push(
+    responseOutcome({ status: res.status, body: '' }, '/api/images', serverUrl, Date.now()),
+  );
+  if (!res.ok) return 'retry';
+  const body: unknown = await res.json();
+  if (!body || typeof body !== 'object' || !('id' in body) || !('type' in body)) return undefined;
+  const type = imageType(body.type);
+  if (!isImageId(body.id) || !type) return undefined;
+  const bytes = 'bytes' in body && typeof body.bytes === 'number' ? body.bytes : undefined;
+  return { id: body.id, type, ...(bytes ? { bytes } : {}) };
+}
 
 function newConversation(input: HookInput): NewConversation {
   if (!input.transcript_path) return nothingNew;
@@ -116,6 +181,8 @@ async function main() {
     await post('/api/reports', report, timeout);
   }
 
+  // The images first, so the dashboard can show them as soon as their messages arrive.
+  if (!(await attachImages(conversation))) return; // Keep the old position to try again.
   for (let i = 0; i < conversation.items.length; i += BATCH) {
     const batch: MessagesReport = {
       sessionId: input.session_id,
