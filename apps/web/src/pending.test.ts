@@ -23,3 +23,12 @@ test('a prompt is delivered once its text and images are in the conversation', (
   assert.equal(delivered(items, prompt('Fix the login loop', [image])), false);
   assert.equal(delivered(items, prompt('', [image])), false);
 });
+
+test('a slash command is delivered once the session has run it', () => {
+  const items: ConversationItem[] = [
+    { id: 'c1', at, kind: 'command', name: 'compact', args: 'keep the auth notes' },
+  ];
+  assert.equal(delivered(items, prompt('/compact   keep the auth notes')), true);
+  assert.equal(delivered(items, prompt('/compact')), false);
+  assert.equal(delivered(items, prompt('/compact keep the auth notes', [image])), false);
+});
