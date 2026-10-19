@@ -109,9 +109,9 @@ the built dashboard (`WEB_DIST`) on port 3000, so everything is same-origin.
   `linux/arm64`, pushes `latest` and the commit SHA, then runs `helm upgrade --install` of the
   chart in `k8s/` into namespace `joc` on AKS (`production` environment).
 - The chart runs exactly one replica (live updates fan out in-process) behind
-  `joc.marcswilson.com`. `MONGODB_URI` and `JOC_TOKEN` come from the `joc-secrets` Kubernetes
-  secret, which is created by hand and never by the chart. Both keys must exist or the pod won't
-  start.
+  `joc.marcswilson.com`. `MONGODB_URI` and `JOC_TOKEN` are secrets in the GitHub `production`
+  environment; the chart turns them into the `joc-secrets` Kubernetes secret at deploy time,
+  and the deploy fails if either is empty.
 - With `JOC_TOKEN` set, every `/api/*` route needs it: the plugin sends it as a bearer token,
   the browser signs in once and keeps it in an HttpOnly cookie. `/health` and `/health/db` stay
   open for the probes.

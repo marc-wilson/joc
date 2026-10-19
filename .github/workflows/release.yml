@@ -14,10 +14,13 @@ concurrency:
 permissions:
   contents: read
 
+# Every secret lives in the `production` environment, so both jobs run in it.
+
 jobs:
   # ─── joc → ACR ────────────────────────────────────────────────────────────
   push:
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - uses: actions/checkout@v7
 
@@ -62,9 +65,14 @@ jobs:
           cluster-name: marcswilson-cluster
 
       - name: Deploy joc
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          JOC_TOKEN: ${{ secrets.JOC_TOKEN }}
         run: |
+          envsubst < k8s/values.yaml | \
           helm upgrade --install joc k8s \
-          --history-max 5 \
-          --namespace joc \
-          --create-namespace \
-          --set image_tag=${{ github.sha }}
+            -f - \
+            --history-max 5 \
+            --namespace joc \
+            --create-namespace \
+            --set image_tag=${{ github.sha }}

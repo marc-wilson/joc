@@ -1,1 +1,5 @@
 image_tag: # auto-injected
+# Filled from the `production` environment's GitHub secrets by the release workflow, through
+# envsubst. Never commit values.
+mongodb_uri: "${MONGODB_URI}"
+joc_token: "${JOC_TOKEN}"

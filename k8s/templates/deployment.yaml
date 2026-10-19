@@ -31,7 +31,7 @@ spec:
             - name: MONGODB_URI
               valueFrom:
                 secretKeyRef:
-                  # Created by hand, never by this chart.
+                  # From templates/secret.yaml, filled from GitHub secrets at deploy time.
                   name: joc-secrets
                   key: MONGODB_URI
             # The shared token for the API and dashboard. Required: without it the site is open.
