@@ -5,11 +5,12 @@ import {
   CodeBlock,
   EmptyState,
   formatBytes,
+  ImageViewer,
   Message,
   SlashPill,
   Thread,
 } from '@joc/ui';
-import { isValidElement, type ReactNode, useLayoutEffect, useRef } from 'react';
+import { isValidElement, type ReactNode, useLayoutEffect, useRef, useState } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { commandLine } from './commands.ts';
@@ -48,48 +49,66 @@ const markdown: Components = {
   h2: ({ children }) => <h3>{children}</h3>,
 };
 
-/** A message's images, each opening full size in a new tab. Served by the API, never inlined. */
-function Images({ images }: { images: ImageRef[] }) {
+const imageSrc = (image: ImageRef) => `/api/images/${image.id}`;
+const imageName = (i: number) => `Image ${i + 1}`;
+const imageSize = (image: ImageRef) => (image.bytes ? formatBytes(image.bytes) : undefined);
+
+/** The images a message is showing full size, and which of them. */
+interface Viewing {
+  images: ImageRef[];
+  index: number;
+}
+
+/** A message's images after it on the right: one large, several as a row of smaller ones. Each
+ * opens full size in the viewer. Served by the API, never inlined. */
+function Images({ images, onOpen }: { images: ImageRef[]; onOpen: (index: number) => void }) {
+  const one = images.length === 1;
   return (
-    <div className="joc-row">
-      {images.map((image, i) => {
-        const src = `/api/images/${image.id}`;
-        return (
-          <Attachment
-            key={image.id}
-            name={`Image ${i + 1}`}
-            src={src}
-            href={src}
-            size={image.bytes ? formatBytes(image.bytes) : undefined}
-            width={240}
-            height={160}
-          />
-        );
-      })}
+    <div className="app-msg-images">
+      {images.map((image, i) => (
+        <Attachment
+          key={image.id}
+          name={imageName(i)}
+          src={imageSrc(image)}
+          size={imageSize(image)}
+          width={one ? 480 : 216}
+          height={one ? 270 : 132}
+          onOpen={() => onOpen(i)}
+        />
+      ))}
     </div>
   );
 }
 
-/** A prompt's text and images; just the text when there are none, as before images. */
+/** A prompt: its text in a bubble, then its images. */
 function UserMessage({
+  time,
   text,
   command,
   images,
+  onOpen,
 }: {
+  time: string;
   text: string;
   command?: string;
   images: ImageRef[];
+  onOpen: (viewing: Viewing) => void;
 }) {
-  const words = (
-    <>
-      {command ? <SlashPill command={command} /> : null} {text}
-    </>
-  );
-  if (!images.length) return words;
+  const words = Boolean(text || command);
   return (
     <>
-      {text || command ? <p>{words}</p> : null}
-      <Images images={images} />
+      {words ? (
+        <Message from="user" time={time}>
+          {command ? <SlashPill command={command} /> : null} {text}
+        </Message>
+      ) : null}
+      {images.length ? (
+        <div>
+          <Images images={images} onOpen={(index) => onOpen({ images, index })} />
+          {/* Images alone still say when they were sent. */}
+          {words ? null : <div className="joc-msg__time joc-msg__time--user">{time}</div>}
+        </div>
+      ) : null}
     </>
   );
 }
@@ -104,6 +123,7 @@ interface Props {
 export function Conversation({ items, pending, state }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  const [viewing, setViewing] = useState<Viewing>();
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -134,13 +154,14 @@ export function Conversation({ items, pending, state }: Props) {
             switch (item.kind) {
               case 'user':
                 return (
-                  <Message key={item.id} from="user" time={time(item.at)}>
-                    <UserMessage
-                      text={item.text}
-                      command={item.command}
-                      images={item.images ?? []}
-                    />
-                  </Message>
+                  <UserMessage
+                    key={item.id}
+                    time={time(item.at)}
+                    text={item.text}
+                    command={item.command}
+                    images={item.images ?? []}
+                    onOpen={setViewing}
+                  />
                 );
               case 'command':
                 return (
@@ -194,13 +215,13 @@ export function Conversation({ items, pending, state }: Props) {
             }
           })}
           {pending.map((p) => (
-            <Message
+            <UserMessage
               key={p.id}
-              from="user"
               time={p.failed ? 'Not sent' : 'Waiting for the session'}
-            >
-              <UserMessage text={p.text} images={p.images} />
-            </Message>
+              text={p.text}
+              images={p.images}
+              onOpen={setViewing}
+            />
           ))}
         </Thread>
       ) : (
@@ -209,6 +230,18 @@ export function Conversation({ items, pending, state }: Props) {
           body="Messages show here as the session works. Earlier history from before the plugin was installed may be partial."
         />
       )}
+      {viewing ? (
+        <ImageViewer
+          images={viewing.images.map((image, i) => ({
+            src: imageSrc(image),
+            name: imageName(i),
+            size: imageSize(image),
+          }))}
+          index={viewing.index}
+          onIndex={(index) => setViewing({ ...viewing, index })}
+          onClose={() => setViewing(undefined)}
+        />
+      ) : null}
     </div>
   );
 }
