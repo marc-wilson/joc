@@ -71,11 +71,11 @@ export interface GraphNode {
   commits?: { nodes?: { commit?: { statusCheckRollup?: Rollup } }[] };
 }
 
-const REVIEW: Record<string, PullRequest['review']> = {
-  APPROVED: 'Approved',
-  CHANGES_REQUESTED: 'Changes requested',
-  REVIEW_REQUIRED: 'Review requested',
-};
+const REVIEW = new Map<string, PullRequest['review']>([
+  ['APPROVED', 'Approved'],
+  ['CHANGES_REQUESTED', 'Changes requested'],
+  ['REVIEW_REQUIRED', 'Review requested'],
+]);
 
 const PASSED = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 
@@ -113,7 +113,7 @@ export function toPullRequest(node: GraphNode): PullRequest | undefined {
     draft: node.isDraft === true,
     additions: node.additions ?? 0,
     deletions: node.deletions ?? 0,
-    review: node.reviewDecision ? REVIEW[node.reviewDecision] : undefined,
+    review: node.reviewDecision ? REVIEW.get(node.reviewDecision) : undefined,
     ci,
     ciDetail: total ? `${passed}/${total}` : undefined,
   };
