@@ -61,7 +61,7 @@ function start(): () => void {
       // case, unless the server no longer takes our cookie: then the sign-in screen takes over.
       if (source?.readyState !== EventSource.CLOSED) return;
       retry = setTimeout(async () => {
-        if ((await checkAuth()) === 'signedIn' && !stopped) connect();
+        if ((await checkAuth()).status === 'signedIn' && !stopped) connect();
       }, 2000);
     };
   }

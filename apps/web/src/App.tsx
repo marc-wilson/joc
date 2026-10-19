@@ -11,7 +11,7 @@ import {
   TextInput,
 } from '@joc/ui';
 import { Fragment, useState } from 'react';
-import { apiFetch } from './auth.ts';
+import { apiFetch, useAuth } from './auth.ts';
 import { BackgroundView } from './Background.tsx';
 import { backgroundTasks } from './background.ts';
 import { ChangesView } from './Changes.tsx';
@@ -30,6 +30,7 @@ const UNTITLED = 'New session';
 
 export default function App() {
   const { sessions, connected } = useSessions();
+  const auth = useAuth();
   const now = useNow();
   const [selectedId, setSelectedId] = useState<string>();
   const selected = sessions.find((s) => s.id === selectedId) ?? sessions[0];
@@ -67,13 +68,15 @@ export default function App() {
     <div className="joc-app app">
       <NavBar
         items={[
-          { id: 'sessions', label: 'Sessions', needs },
+          { id: 'sessions', label: 'Sessions', href: '/', needs },
           { id: 'github', label: 'GitHub' },
           { id: 'history', label: 'History' },
+          { id: 'machines', label: 'Machines', href: '/link' },
         ]}
         value="sessions"
         machine={connected ? 'Connected' : 'Reconnecting'}
         machineOffline={!connected}
+        user={auth.status === 'signedIn' ? auth.user?.login : undefined}
       />
       <div className="joc-app__body">
         {railed ? (
@@ -192,7 +195,7 @@ export default function App() {
           ) : (
             <EmptyState
               title="No live sessions"
-              body="Install the JOC plugin in Claude Code, then start a session."
+              body="Install the JOC plugin in Claude Code, link this machine with /joc-login, then start a session."
               command="/plugin marketplace add marc-wilson/joc"
             />
           )}
