@@ -4,14 +4,37 @@
 // Every SYNC_MS this module runs hook.ts with a `Sync` event, so a session shows up without
 // activity (e.g. open before the plugin loaded), a backlog the server missed while down gets
 // sent, and the diff refreshes when files change outside Claude.
-import type { EngineInterface, Register } from 'claude-code';
+//
+// Nothing here ever shows an error in the session. What fails goes to the plugin's local problem
+// log (problems.ts), which `/joc-status` reads on demand.
+import type { EngineInterface, HttpResponse, Register } from 'claude-code';
+import {
+  age,
+  applyOutcomes,
+  describeProblem,
+  errorDetail,
+  exitDetail,
+  formatStatus,
+  type Outcome,
+  type PluginStatus,
+  parseStatus,
+  responseOutcome,
+  STATUS_PATH,
+} from './problems.ts';
 
 const POLL_MS = 2000;
 const SYNC_MS = 30_000;
 const SYNC_TIMEOUT_MS = 60_000;
+const CHECK_TIMEOUT_MS = 5000;
 const DEFAULT_SERVER = 'https://joc.marcswilson.com';
 /** Under the home folder; src/credentials.ts reads the same file for the command hooks. */
 const CREDENTIALS = '.claude/joc/credentials.json';
+/** The prompt poll's path in the problem log, the same for every session. */
+const CLAIM_PATH = '/api/sessions/{id}/prompts/claim';
+/** Outcomes held between writes to the log; a poll every 2s makes 15 per write. */
+const MAX_PENDING = 200;
+/** Problems `/joc-status` lists. */
+const SHOWN_PROBLEMS = 8;
 
 interface Credentials {
   url: string;
@@ -31,18 +54,69 @@ function pluginData(root: string): string | undefined {
   return `${config}/plugins/data/${`${plugin}@${marketplace}`.replace(/[^\w-]/g, '-')}`;
 }
 
-/** Runs `task` unless its last run is still going; never throws. */
-function oneAtATime(task: () => Promise<unknown>): () => void {
+/** Runs `task` unless its last run is still going; never throws, `failed` hears why instead. */
+function oneAtATime(
+  task: () => Promise<unknown>,
+  failed: (error: unknown) => void = () => {},
+): () => void {
   let busy = false;
   return () => {
     if (busy) return;
     busy = true;
     task()
-      .catch(() => {}) // The server being down must never bother the session.
+      // Never to the session: the server being down, or a bug here, must not bother it.
+      .catch(failed)
       .finally(() => {
         busy = false;
       });
   };
+}
+
+const crash = (where: string, detail: string): Outcome => ({
+  ok: false,
+  kind: 'crash',
+  where,
+  detail,
+  at: Date.now(),
+});
+
+async function homePath($: EngineInterface, path: string): Promise<string | undefined> {
+  const home = await $.env.get('HOME');
+  return home ? `${home}/${path}` : undefined;
+}
+
+async function readStatusText($: EngineInterface): Promise<string | undefined> {
+  const path = await homePath($, STATUS_PATH);
+  return path && (await $.fs.exists(path)) ? $.fs.read(path) : undefined;
+}
+
+/**
+ * This module's side of the problem log: outcomes are noted as they happen and written together
+ * (`writeOutcomes`) every sync, so a poll every 2s isn't a file write every 2s.
+ */
+function problemLog() {
+  let pending: Outcome[] = [];
+  return {
+    note(outcome: Outcome) {
+      pending = [...pending, outcome].slice(-MAX_PENDING);
+    },
+    take(): Outcome[] {
+      const taken = pending;
+      pending = [];
+      return taken;
+    },
+  };
+}
+
+async function writeOutcomes($: EngineInterface, outcomes: Outcome[]): Promise<void> {
+  if (!outcomes.length) return;
+  const path = await homePath($, STATUS_PATH);
+  if (!path) return;
+  // Read late and written whole, as hook.ts does; a hook writing at the same moment can lose its
+  // change, which only costs a line of diagnostics.
+  const before = await readStatusText($);
+  const after = formatStatus(applyOutcomes(parseStatus(before), outcomes));
+  if (after !== before) await $.fs.write(path, after);
 }
 
 /** A parsed JSON body's field, or undefined. The module has no zod: it's dependency-free. */
@@ -53,10 +127,7 @@ function field(body: unknown, key: string): unknown {
 
 const text = (value: unknown) => (typeof value === 'string' ? value : undefined);
 
-async function credentialsPath($: EngineInterface): Promise<string | undefined> {
-  const home = await $.env.get('HOME');
-  return home ? `${home}/${CREDENTIALS}` : undefined;
-}
+const credentialsPath = ($: EngineInterface) => homePath($, CREDENTIALS);
 
 async function readCredentials($: EngineInterface): Promise<Credentials | undefined> {
   const path = await credentialsPath($);
@@ -154,11 +225,75 @@ async function logout($: EngineInterface): Promise<string> {
   return 'JOC: this machine is unlinked. To revoke its token on the server too, remove it under Machines in the dashboard.';
 }
 
+/** What the server says about this machine's connection, in a sentence. */
+async function checkServer($: EngineInterface): Promise<string> {
+  const { url, headers } = await connection($);
+  const timeout = $.clock.sleep(CHECK_TIMEOUT_MS).then(() => undefined);
+  let res: HttpResponse | undefined;
+  try {
+    res = await Promise.race([$.http.fetch(`${url}/api/auth`, { headers }), timeout]);
+  } catch (error) {
+    return `Can't reach it: ${errorDetail(error)}`;
+  }
+  if (!res) return `Can't reach it: no answer in ${CHECK_TIMEOUT_MS / 1000}s.`;
+  if (!res.ok) return `It answers, but with HTTP ${res.status}.`;
+  let body: unknown;
+  try {
+    body = JSON.parse(res.text);
+  } catch {
+    // Something else is at that address.
+    return 'It answers, but not as a JOC server does. Check the address.';
+  }
+  if (field(body, 'required') === false) return 'Reachable. An open local server: no sign-in.';
+  const login = text(field(field(body, 'user'), 'login'));
+  if (field(body, 'signedIn') === true) return `Reachable. Reporting as @${login ?? 'you'}.`;
+  if (headers.authorization) {
+    return "Reachable, but it refused this machine's token (revoked, or from another server). Run /joc-login to link it again.";
+  }
+  return "Reachable, but this machine isn't linked. Run /joc-login.";
+}
+
+/** `/joc-status`: where this machine reports, whether that works, and what went wrong lately. */
+async function status($: EngineInterface): Promise<string> {
+  const now = Date.now();
+  // An unreadable link file counts as no link, as it does for reporting.
+  const linked = await readCredentials($).catch(() => undefined);
+  const { url } = await connection($);
+  const source = (await $.env.get('JOC_URL'))
+    ? 'from JOC_URL'
+    : linked
+      ? 'linked with /joc-login'
+      : 'not linked: the local dev default';
+  // A broken log reads as an empty one, as everywhere else.
+  const log: PluginStatus = parseStatus(await readStatusText($).catch(() => undefined));
+  const problems = log.problems.slice(-SHOWN_PROBLEMS).reverse();
+  return [
+    'JOC status',
+    '',
+    `  Server  ${url} (${source})`,
+    `          ${await checkServer($)}`,
+    `  Last report the server took: ${log.lastOkAt ? `${age(now - log.lastOkAt)} ago` : 'none recorded'}`,
+    '',
+    problems.length
+      ? `Recent problems, newest first (from ~/${STATUS_PATH}):`
+      : `No problems recorded in ~/${STATUS_PATH}.`,
+    ...problems.map((p) => describeProblem(p, now)),
+  ].join('\n');
+}
+
 export const register: Register = (on) => {
+  const log = problemLog();
+  const failedIn = (where: string) => (error: unknown) =>
+    log.note(crash(where, errorDetail(error)));
+
   on('session.start', async ($, e, next) => {
     const result = await next(e);
     await $.command.register({ name: 'joc-login', description: 'Link this machine to JOC' });
     await $.command.register({ name: 'joc-logout', description: 'Unlink this machine from JOC' });
+    await $.command.register({
+      name: 'joc-status',
+      description: "Check this machine's link to JOC and its recent problems",
+    });
     const root = $.plugin.root.replace(/\/+$/, '').replace(/\/\.claude-plugin$/, '');
 
     // Every session, as the command hooks report every session. hook.ts finds the server and
@@ -170,13 +305,23 @@ export const register: Register = (on) => {
         session_id: await $.session.id(),
         cwd: await $.session.cwd(),
       };
-      await $.process.run(['node', `${root}/src/hook.ts`], {
-        stdin: JSON.stringify(event),
-        // An empty value makes hook.ts use its own folder rather than one this process has.
-        env: { CLAUDE_PLUGIN_ROOT: root, CLAUDE_PLUGIN_DATA: pluginData(root) ?? '' },
-        timeoutMs: SYNC_TIMEOUT_MS,
-      });
-    });
+      // hook.ts records its own problems; this catches the ones where it can't run at all (Node
+      // missing, a syntax error after an edit), which it then can't tell anyone about.
+      try {
+        const run = await $.process.run(['node', `${root}/src/hook.ts`], {
+          stdin: JSON.stringify(event),
+          // An empty value makes hook.ts use its own folder rather than one this process has.
+          env: { CLAUDE_PLUGIN_ROOT: root, CLAUDE_PLUGIN_DATA: pluginData(root) ?? '' },
+          timeoutMs: SYNC_TIMEOUT_MS,
+        });
+        if (run.exitCode !== 0) log.note(crash('hook', exitDetail(run.exitCode, run.stderr)));
+      } catch (error) {
+        log.note(crash('hook', errorDetail(error)));
+      }
+      // This module got round to a sync: an error it had before is over.
+      log.note({ ok: true, where: 'module', at: Date.now() });
+      await writeOutcomes($, log.take());
+    }, failedIn('module'));
     $.clock.after(1, sync);
     $.clock.every(SYNC_MS, sync);
 
@@ -186,9 +331,19 @@ export const register: Register = (on) => {
     async function takePrompts() {
       const { url, headers } = await connection($);
       const sessionId = await $.session.id();
-      const res = await $.http.fetch(
-        `${url}/api/sessions/${encodeURIComponent(sessionId)}/prompts/claim`,
-        { method: 'POST', headers },
+      let res: HttpResponse;
+      try {
+        res = await $.http.fetch(
+          `${url}/api/sessions/${encodeURIComponent(sessionId)}/prompts/claim`,
+          { method: 'POST', headers },
+        );
+      } catch (error) {
+        const detail = errorDetail(error);
+        log.note({ ok: false, kind: 'unreachable', where: url, detail, at: Date.now() });
+        return;
+      }
+      log.note(
+        responseOutcome({ status: res.status, body: res.text }, CLAIM_PATH, url, Date.now()),
       );
       if (!res.ok) return;
       const prompts = field(JSON.parse(res.text), 'prompts');
@@ -200,10 +355,16 @@ export const register: Register = (on) => {
       }
     }
 
-    $.clock.every(POLL_MS, oneAtATime(takePrompts));
+    $.clock.every(POLL_MS, oneAtATime(takePrompts, failedIn('module')));
     return result;
   });
 
   on('command.run', { command: 'joc-login' }, async ($, e) => ({ text: await login($, e.args) }));
   on('command.run', { command: 'joc-logout' }, async ($) => ({ text: await logout($) }));
+  on('command.run', { command: 'joc-status' }, async ($) => {
+    // So the answer includes what this session noted since its last sync. A failed write only
+    // leaves those out.
+    await writeOutcomes($, log.take()).catch(() => {});
+    return { text: await status($) };
+  });
 };
