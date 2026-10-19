@@ -10,13 +10,13 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type { ChangesReport, MessagesReport, SessionReport } from '@joc/protocol';
 import { changesHash, collectChanges, lastSentHash, rememberSent } from './changes.ts';
 import { contextLeft } from './context.ts';
+import { connection } from './credentials.ts';
 import { branchOf, repoOf } from './git.ts';
 import { eventFields, type HookInput } from './report.ts';
 import { findTranscript, type Parsed, parseLines, readNewLines } from './transcript.ts';
 
 const at = Date.now();
-const serverUrl = (process.env.JOC_URL ?? 'http://localhost:3000').replace(/\/$/, '');
-const token = process.env.JOC_TOKEN;
+const { url: serverUrl, token } = connection();
 const BATCH = 500;
 
 async function readStdin(): Promise<string> {
