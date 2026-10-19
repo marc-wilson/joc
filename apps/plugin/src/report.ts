@@ -17,6 +17,8 @@ export interface HookInput {
   message?: string;
   last_assistant_message?: string;
   background_tasks?: unknown[];
+  /** On a Sync from register.ts: whether its session can show a native notification. */
+  can_notify?: boolean;
 }
 
 /** The part of a report decided by the hook event alone. */
