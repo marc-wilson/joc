@@ -21,9 +21,11 @@ pnpm install
 cp apps/server/.env.example apps/server/.env
 ```
 
-Set `MONGODB_URI` in `apps/server/.env` (`PORT` is optional, default `3000`). Leave
-`JOC_TOKEN` empty for local dev so the API stays open; set it to try the sign-in screen, and
-give the plugin the same value as `JOC_TOKEN`. `.env` is
+Set `MONGODB_URI` in `apps/server/.env` (`PORT` is optional, default `3000`). Leave the GitHub
+settings empty for local dev so the API stays open. To try sign-in, create a separate GitHub OAuth
+app for development with callback `http://localhost:5173/auth/github/callback`, and set
+`JOC_GITHUB_CLIENT_ID`, `JOC_GITHUB_CLIENT_SECRET` and `JOC_PUBLIC_URL=http://localhost:5173`.
+Then run `/joc-login http://localhost:5173` in Claude Code to link your machine to it. `.env` is
 git-ignored; never commit it.
 
 `pnpm install` also installs the `commit-msg` git hook (see [Commits](#commits)).

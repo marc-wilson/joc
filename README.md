@@ -12,8 +12,8 @@ you can comment on and send back to Claude.
 screens, the plugin and the server's session API are in progress. Nothing is usable end to end
 yet.
 
-The plan is a hosted site with no sign-up. For now one shared token (`JOC_TOKEN`) guards the
-whole site: the plugin sends it with every report, and the dashboard asks for it once.
+It's hosted at [joc.marcswilson.com](https://joc.marcswilson.com): sign in with GitHub, link each
+machine with `/joc-login` in Claude Code, and you see only your own sessions.
 
 ## How it fits together
 
@@ -65,7 +65,8 @@ pnpm dev
 | ------------- | -------- | ----------------------------------------------------- |
 | `MONGODB_URI` | yes      | Any MongoDB connection string, e.g. an Atlas cluster  |
 | `PORT`        | no       | Server port, defaults to `3000`                       |
-| `JOC_TOKEN`   | no       | Shared token for the API; unset means open (dev only) |
+| `JOC_GITHUB_CLIENT_ID`, `JOC_GITHUB_CLIENT_SECRET` | no | A GitHub OAuth app for sign-in; unset means open (dev only) |
+| `JOC_PUBLIC_URL` | no | Where the dashboard is reached, for the OAuth callback (dev: `http://localhost:5173`) |
 
 `pnpm dev` starts the server (http://localhost:3000) and the Vite dev server for the dashboard
 (it prints its URL, usually http://localhost:5173). Check the database connection:
@@ -75,9 +76,10 @@ curl http://localhost:3000/health/db   # {"ok":true}
 ```
 
 To try the plugin in Claude Code, add this repo as a marketplace with
-`/plugin marketplace add <path-or-repo>` and install `joc` from it. The plugin reads `JOC_URL`
-(default `http://localhost:3000`) and, if the server has one, `JOC_TOKEN` from the environment
-Claude Code runs in.
+`/plugin marketplace add <path-or-repo>` and install `joc` from it. Run `/joc-login` to link the
+machine to a JOC server (`https://joc.marcswilson.com` unless you pass another URL); its token is
+kept in `~/.claude/joc/credentials.json`. Without a link the plugin reports to
+`http://localhost:3000`. `JOC_URL` and `JOC_TOKEN` in Claude Code's environment override both.
 
 ## Scripts
 
@@ -111,12 +113,12 @@ One workflow, `.github/workflows/ci.yml`, with two jobs:
   `latest` and the commit SHA to ACR, then runs `helm upgrade --install` of the chart in `k8s/`
   into namespace `joc` on AKS, in the `production` environment.
 - The chart runs exactly one replica (live updates fan out in-process) behind
-  `joc.marcswilson.com`. `MONGODB_URI` and `JOC_TOKEN` are secrets in the GitHub `production`
-  environment; the chart turns them into the `joc-secrets` Kubernetes secret at deploy time,
-  and the deploy fails if either is empty.
-- With `JOC_TOKEN` set, every `/api/*` route needs it: the plugin sends it as a bearer token,
-  the browser signs in once and keeps it in an HttpOnly cookie. `/health` and `/health/db` stay
-  open for the probes.
+  `joc.marcswilson.com`. `MONGODB_URI`, `JOC_GITHUB_CLIENT_ID` and `JOC_GITHUB_CLIENT_SECRET` are
+  secrets in the GitHub `production` environment; the chart turns them into the `joc-secrets`
+  Kubernetes secret at deploy time, and the deploy fails if any is empty.
+- Every `/api/*` route acts for one user: a browser signed in with GitHub (an HttpOnly session
+  cookie) or a linked machine (its own bearer token). Everything stored belongs to that user.
+  `/health` and `/health/db` stay open for the probes.
 
 Build and run the image locally:
 
