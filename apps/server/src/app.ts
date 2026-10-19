@@ -7,6 +7,7 @@ import {
   DeviceTokenRequest,
   GitHubReport,
   MessagesReport,
+  ProblemsReport,
   PromptRequest,
   SessionReport,
   type StreamEvent,
@@ -43,6 +44,7 @@ import {
 } from './identity.ts';
 import { addMessages, listMessages, onMessages } from './messages.ts';
 import { type Owner, ownerFrom } from './owner.ts';
+import { listProblems, saveProblems } from './problems.ts';
 import { claimPrompts, queuePrompt } from './prompts.ts';
 import { RateLimit } from './rate-limit.ts';
 import { newSecret, secretsEqual } from './secrets.ts';
@@ -205,6 +207,20 @@ export function createApp({ github, publicUrl }: AppOptions): Hono<Env> {
     return (await revokeDevice(c.get('owner'), c.req.param('id')))
       ? c.body(null, 204)
       : c.json({ error: 'No such machine' }, 404);
+  });
+
+  // What went wrong in a machine's plugin: sent by the plugin, read on the Machines page.
+  app.post('/api/problems', async (c) => {
+    if (c.get('via') === 'session') return c.json({ error: 'Forbidden' }, 403);
+    const parsed = ProblemsReport.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    await saveProblems(c.get('owner'), parsed.data);
+    return c.body(null, 204);
+  });
+
+  app.get('/api/problems', async (c) => {
+    if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
+    return c.json(await listProblems(c.get('owner')));
   });
 
   // ── Sessions ───────────────────────────────────────────────────────────────

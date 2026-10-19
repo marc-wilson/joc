@@ -3,17 +3,25 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { closeClient, getDb } from '@joc/db';
-import { ConversationItem, GitHubSnapshot, HistorySession, Session } from '@joc/protocol';
+import {
+  ConversationItem,
+  GitHubSnapshot,
+  HistorySession,
+  MachineProblem,
+  Session,
+} from '@joc/protocol';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { z } from 'zod';
 import { createApp } from './app.ts';
 import type { GitHubAuth } from './github.ts';
-import { createDeviceToken, signInGitHubUser } from './identity.ts';
+import { createDeviceToken, createWebSession, signInGitHubUser } from './identity.ts';
 
 type Who = 'alice' | 'bob';
 
 let mongo: MongoMemoryServer;
 const tokens = new Map<Who, string>();
+/** Each person's browser session, for the routes only a signed-in person may use. */
+const cookies = new Map<Who, string>();
 
 before(async () => {
   mongo = await MongoMemoryServer.create();
@@ -26,6 +34,7 @@ before(async () => {
   ] as const) {
     const owner = await signInGitHubUser({ id, login: who });
     tokens.set(who, await createDeviceToken(owner, `${who}-laptop`));
+    cookies.set(who, `joc_session=${await createWebSession(owner)}`);
   }
 });
 
@@ -80,6 +89,8 @@ test('every API route needs an owner', async () => {
     ['GET', '/api/history'],
     ['GET', '/api/github'],
     ['POST', '/api/github'],
+    ['GET', '/api/problems'],
+    ['POST', '/api/problems'],
   ] as const) {
     const res = await app.request(path, { method });
     assert.equal(res.status, 401, `${method} ${path}`);
@@ -253,4 +264,47 @@ test('history is per owner, and a silent session leaves the live list but stays 
     bobs.some((s) => s.title === 'Old one' || s.title === 'Alice'),
     false,
   );
+});
+
+test("a machine's problems are shown only to its owner, and only to a signed-in person", async () => {
+  const problem = {
+    kind: 'rejected',
+    where: '/api/messages',
+    detail: 'HTTP 400: items.0.text: Invalid input',
+    firstAt: clock,
+    lastAt: clock,
+    count: 2,
+  };
+  const sent = await call('alice', '/api/problems', {
+    machine: 'alice-laptop',
+    problems: [problem],
+  });
+  assert.equal(sent.status, 204);
+  assert.equal((await call('alice', '/api/problems', { machine: 'x', problems: [] })).status, 400);
+  // An older version of the same problem, arriving late, doesn't win.
+  const older = { ...problem, lastAt: clock - 1, count: 1 };
+  await call('alice', '/api/problems', { machine: 'alice-laptop', problems: [older] });
+
+  const asPerson = (who: Who) =>
+    app.request('/api/problems', { headers: { cookie: cookies.get(who) ?? '' } });
+  const alice = await read(await asPerson('alice'), z.array(MachineProblem));
+  const bob = await read(await asPerson('bob'), z.array(MachineProblem));
+  assert.deepEqual(
+    alice.map((p) => [p.machine, p.kind, p.where, p.count]),
+    [['alice-laptop', 'rejected', '/api/messages', 2]],
+  );
+  assert.deepEqual(bob, []);
+  // A machine's token reports problems but can't read them; a browser can't report them.
+  assert.equal((await call('alice', '/api/problems')).status, 403);
+  const fromBrowser = await app.request('/api/problems', {
+    method: 'POST',
+    headers: {
+      cookie: cookies.get('alice') ?? '',
+      host: 'joc.test',
+      origin: 'http://joc.test',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ machine: 'alice-laptop', problems: [problem] }),
+  });
+  assert.equal(fromBrowser.status, 403);
 });
