@@ -21,9 +21,16 @@ export const Session = z.object({
   contextLeft: z.number().min(0).max(100).optional(),
   machine: z.string().optional(),
   model: z.string().optional(),
+  /** The folder the session runs in, for resuming it later. */
+  cwd: z.string().optional(),
+  startedAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
 export type Session = z.infer<typeof Session>;
+
+/** A past session for the History page: a session plus how many messages it has. */
+export const HistorySession = Session.extend({ messages: z.number().int().nonnegative() });
+export type HistorySession = z.infer<typeof HistorySession>;
 
 /**
  * What the plugin sends on each hook event. Fields left out keep their last value; `title` is
@@ -48,8 +55,53 @@ export const SessionReport = z.object({
   contextLeft: z.number().min(0).max(100).optional(),
   machine: z.string().max(200).optional(),
   model: z.string().max(100).optional(),
+  cwd: z.string().max(1000).optional(),
 });
 export type SessionReport = z.infer<typeof SessionReport>;
+
+/** An open pull request, as the plugin reads it through the `gh` CLI. */
+export const PullRequest = z.object({
+  number: z.number().int().positive(),
+  title: z.string().max(500),
+  url: z.url(),
+  /** `owner/name`, matching Session.repo. */
+  repo: z.string().max(200),
+  /** The head branch, matching Session.branch. */
+  branch: z.string().max(300),
+  author: z.string().max(100),
+  updatedAt: z.iso.datetime(),
+  draft: z.boolean(),
+  additions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+  review: z.enum(['Approved', 'Changes requested', 'Review requested']).optional(),
+  ci: CIStatus,
+  /** Finished checks over all checks, e.g. `9/14`. */
+  ciDetail: z.string().max(20).optional(),
+});
+export type PullRequest = z.infer<typeof PullRequest>;
+
+/** What the plugin reads from GitHub for its person, about once a minute. */
+export const GitHubReport = z.object({
+  at: z.number().int().positive(),
+  /** Whether `gh` could answer: missing and signed-out machines say so instead of sending PRs. */
+  status: z.enum(['ok', 'not-installed', 'signed-out', 'error']),
+  reviewRequested: z.array(PullRequest).max(100),
+  mine: z.array(PullRequest).max(100),
+});
+export type GitHubReport = z.infer<typeof GitHubReport>;
+
+/** `GET /api/github`: the latest report, or `none` before any machine has sent one. */
+export const GitHubSnapshot = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('none') }),
+  z.object({
+    state: z.literal('reported'),
+    status: GitHubReport.shape.status,
+    reviewRequested: z.array(PullRequest),
+    mine: z.array(PullRequest),
+    updatedAt: z.iso.datetime(),
+  }),
+]);
+export type GitHubSnapshot = z.infer<typeof GitHubSnapshot>;
 
 /** How a background task (shell command or subagent) ended. */
 export const TaskStatus = z.enum(['completed', 'failed', 'killed']);
@@ -135,7 +187,9 @@ export type StreamEvent =
   | { type: 'session'; session: Session }
   | { type: 'messages'; sessionId: string; items: ConversationItem[] }
   /** The session's diff changed; fetch it from `/api/sessions/:id/changes`. */
-  | { type: 'changes'; sessionId: string };
+  | { type: 'changes'; sessionId: string }
+  /** New GitHub data; fetch it from `/api/github`. */
+  | { type: 'github' };
 
 /** A signed-in person, as the dashboard shows them. */
 export const User = z.object({
