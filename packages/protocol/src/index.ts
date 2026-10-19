@@ -138,10 +138,31 @@ export const ConversationItem = z.discriminatedUnion('kind', [
     ...itemBase,
     kind: z.literal('user'),
     text: z.string().max(20_000),
-    /** Set when the prompt was a slash command, e.g. `review`. */
+    /**
+     * Set when the prompt was a slash command, e.g. `review`. Plugins before 0.3.0 sent commands
+     * this way; newer ones send a `command` item instead.
+     */
     command: z.string().max(100).optional(),
     /** Images sent with the prompt, served by `GET /api/images/:id`. */
     images: z.array(ImageRef).max(MAX_IMAGES_PER_MESSAGE).optional(),
+  }),
+  /** A slash command run in the session, typed there or sent from the dashboard. */
+  z.object({
+    ...itemBase,
+    kind: z.literal('command'),
+    /** Without its slash, e.g. `compact` or `harbor:deploy`. */
+    name: z.string().min(1).max(100),
+    /** Everything after the name; empty when there was nothing. */
+    args: z.string().max(20_000),
+  }),
+  /** What a command printed, or why it couldn't run. Shown with the command it belongs to. */
+  z.object({
+    ...itemBase,
+    kind: z.literal('command_output'),
+    /** The id of its `command` item, when the transcript says. */
+    commandId: z.string().max(200).optional(),
+    text: z.string().max(5_000),
+    isError: z.boolean(),
   }),
   z.object({ ...itemBase, kind: z.literal('claude'), text: z.string().max(50_000) }),
   z.object({
