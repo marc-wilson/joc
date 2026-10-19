@@ -2,6 +2,8 @@ name: CI
 
 on:
   pull_request:
+    # `edited` reruns the checks when only the title changes.
+    types: [opened, synchronize, reopened, edited]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -35,6 +37,12 @@ jobs:
       - run: pnpm build
 
       - run: pnpm test
+
+      # The title becomes the commit message of a squash merge, so it follows the same rules.
+      - name: Lint PR title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s\n' "$TITLE" | pnpm exec commitlint
 
       - name: Lint commit messages
         run: >-

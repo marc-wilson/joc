@@ -68,7 +68,8 @@ Before committing:
 Full rules are in `CONTRIBUTING.md`. In short:
 
 - Conventional Commits, enforced by commitlint (`@commitlint/config-conventional`) via a `commit-msg` hook installed by `simple-git-hooks`.
-- Scope optional; if used, one of: `web`, `server`, `plugin`, `protocol`, `db`, `ui`, `repo`, `deps`, `docs`.
+- Always `type(scope): description`. Scope is required, one of: `web`, `server`, `plugin`, `protocol`, `db`, `ui`, `repo`, `deps`, `docs`.
+- PR titles follow the same format; CI checks them.
 - Subject: imperative, lower case, no trailing period. Example: `feat(server): stream session reports over sse`.
 - One concern per commit.
 

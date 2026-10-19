@@ -82,7 +82,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/). A `
 
 - **Type**: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`, `perf`, `style`,
   `revert`.
-- **Scope**: optional, but if you use one it must be one of:
+- **Scope**: required, one of:
 
   | Scope      | Covers                         |
   | ---------- | ------------------------------ |
@@ -105,7 +105,7 @@ feat(web): show session list grouped by repo
 fix(server): close SSE stream when the client disconnects
 chore(deps): bump hono
 refactor(protocol): split session schemas into their own module
-docs: explain the plugin marketplace setup
+docs(plugin): explain the plugin marketplace setup
 ```
 
 **Breaking changes** get a `!` after the type/scope and a `BREAKING CHANGE:` footer:
@@ -141,7 +141,7 @@ Rebase on `main` to stay current, and keep branches small enough to merge in a d
 - **Green locally**: `pnpm check && pnpm typecheck && pnpm test && pnpm build` passes.
 - **Screenshots for UI changes**, in both the dark and light themes.
 - **Describe the why**, not just the what, and link the issue if there is one.
-- PR titles follow the same Conventional Commits format as commits.
+- PR titles follow the same `type(scope): description` format as commits; CI checks them.
 
 ## UI rules
 
