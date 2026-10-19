@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: joc-deployment
-  namespace: joc
+  namespace: {{ .Release.Namespace }}
   labels:
     app: joc-app
 spec:
@@ -23,8 +23,8 @@ spec:
     spec:
       containers:
         - name: joc
-          image: 'marcswilsoncontainers.azurecr.io/joc:{{ .Values.image_tag }}'
-          imagePullPolicy: Always
+          image: '{{ .Values.image_repository }}:{{ required "image_tag is required (the commit SHA)" .Values.image_tag }}'
+          imagePullPolicy: {{ .Values.image_pull_policy }}
           ports:
             - containerPort: 3000
           env:
