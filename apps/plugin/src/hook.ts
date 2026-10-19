@@ -5,7 +5,8 @@
 //
 // Besides Claude Code's own hook events it takes `Sync`, which register.ts sends every 30s:
 // it catches the server up (the conversation backlog, the diff) and refreshes the session
-// without changing its state.
+// without changing its state. Only a sync prints anything: the GitHub notifications for
+// register.ts to show.
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type {
@@ -21,6 +22,7 @@ import { connection, readCredentials } from './credentials.ts';
 import { branchOf, repoOf } from './git.ts';
 import { githubDue, readGitHub } from './github.ts';
 import { imageType, isImageId } from './images.ts';
+import { syncNotifications } from './notifications.ts';
 import {
   applyOutcomes,
   errorDetail,
@@ -200,6 +202,15 @@ async function main() {
   // keeps them on this machine.
   if ((syncing || event === 'SessionStart') && process.env.JOC_GITHUB !== '0' && githubDue()) {
     await post('/api/github', readGitHub(at), 10_000);
+  }
+  // The notifications feed, only on a sync: register.ts reads this script's output and shows
+  // what it prints as native notifications (a command hook's output would go to Claude).
+  if (syncing && process.env.JOC_GITHUB !== '0') {
+    const alerts = await syncNotifications(post, at, input.can_notify === true);
+    if (alerts.length && process.env.JOC_NOTIFY !== '0') {
+      const line = `${JSON.stringify({ notify: alerts })}\n`;
+      await new Promise((resolve) => process.stdout.write(line, resolve));
+    }
   }
 }
 

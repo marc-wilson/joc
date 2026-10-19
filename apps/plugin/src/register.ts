@@ -3,7 +3,8 @@
 // session's state and conversation is done by the command hooks in hooks.json (src/hook.ts).
 // Every SYNC_MS this module runs hook.ts with a `Sync` event, so a session shows up without
 // activity (e.g. open before the plugin loaded), a backlog the server missed while down gets
-// sent, and the diff refreshes when files change outside Claude.
+// sent, and the diff refreshes when files change outside Claude. What a sync prints is GitHub
+// news to raise as a native notification (src/notifications.ts); JOC_NOTIFY=0 keeps it quiet.
 //
 // Nothing here ever shows an error in the session. What fails goes to the plugin's local problem
 // log (problems.ts), which `/joc-status` reads on demand.
@@ -219,6 +220,41 @@ async function login($: EngineInterface, args: string): Promise<string> {
   ].join('\n');
 }
 
+/** Past this many at once, one notification says how many instead. */
+const NOTIFY_MAX = 3;
+
+/**
+ * Shows the GitHub news a sync printed (src/notifications.ts): review requests, mentions, failed
+ * CI. hook.ts already kept it to what this machine hasn't notified, and to one session's sync.
+ */
+async function notify($: EngineInterface, stdout: string) {
+  const alerts = stdout
+    .split('\n')
+    .filter((line) => line.startsWith('{'))
+    .flatMap((line) => {
+      let list: unknown;
+      try {
+        list = field(JSON.parse(line), 'notify');
+      } catch {
+        // Not one of hook.ts's lines: nothing to show.
+        return [];
+      }
+      return Array.isArray(list) ? list : [];
+    })
+    .flatMap((alert) => {
+      const title = text(field(alert, 'title'));
+      const body = text(field(alert, 'text'));
+      return title && body ? [{ title, body }] : [];
+    });
+  if (alerts.length > NOTIFY_MAX) {
+    await $.ui.notify(`${alerts.length} new on GitHub need you. See the Inbox in JOC.`, {
+      title: 'JOC',
+    });
+    return;
+  }
+  for (const { title, body } of alerts) await $.ui.notify(body, { title });
+}
+
 async function logout($: EngineInterface): Promise<string> {
   const path = await credentialsPath($);
   if (!path || !(await $.fs.exists(path))) return "JOC: this machine isn't linked.";
@@ -357,6 +393,8 @@ export const register: Register = (on) => {
         hook_event_name: 'Sync',
         session_id: await $.session.id(),
         cwd: await $.session.cwd(),
+        // A -p run has no terminal to notify in, so it leaves GitHub's news for one that does.
+        can_notify: e.isInteractive,
       };
       // hook.ts records its own problems; this catches the ones where it can't run at all (Node
       // missing, a syntax error after an edit), which it then can't tell anyone about.
@@ -368,6 +406,7 @@ export const register: Register = (on) => {
           timeoutMs: SYNC_TIMEOUT_MS,
         });
         if (run.exitCode !== 0) log.note(crash('hook', exitDetail(run.exitCode, run.stderr)));
+        else await notify($, run.stdout);
       } catch (error) {
         log.note(crash('hook', errorDetail(error)));
       }
