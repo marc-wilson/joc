@@ -427,8 +427,6 @@ export interface AttachmentProps {
   size?: string;
   width?: number;
   height?: number;
-  /** Opens the full image in a new tab when it's clicked. */
-  href?: string;
   /** Makes the image a button, e.g. to open it full size. */
   onOpen?: () => void;
   children?: ReactNode;
@@ -442,7 +440,6 @@ export function Attachment({
   size,
   width,
   height,
-  href,
   onOpen,
   children,
 }: AttachmentProps) {
@@ -462,10 +459,6 @@ export function Attachment({
           >
             {image}
           </button>
-        ) : href ? (
-          <a href={href} target="_blank" rel="noopener noreferrer">
-            {image}
-          </a>
         ) : (
           image
         )}
