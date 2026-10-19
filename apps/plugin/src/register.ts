@@ -95,6 +95,8 @@ async function login($: EngineInterface, args: string): Promise<string> {
   const deviceCode = text(field(start, 'deviceCode'));
   const userCode = text(field(start, 'userCode'));
   const verificationUri = text(field(start, 'verificationUri'));
+  // Servers from before the ready-made link send only the bare page.
+  const linkUrl = text(field(start, 'verificationUriComplete')) ?? verificationUri;
   const interval = Number(field(start, 'interval')) || 2;
   const expiresIn = Number(field(start, 'expiresIn')) || 600;
   if (!deviceCode || !userCode || !verificationUri) return `JOC: ${url} sent an unexpected reply.`;
@@ -136,11 +138,11 @@ async function login($: EngineInterface, args: string): Promise<string> {
   );
 
   return [
-    `To link this machine to JOC, open ${verificationUri} and enter:`,
+    'To link this machine to JOC, open:',
     '',
-    `    ${userCode}`,
+    `    ${linkUrl}`,
     '',
-    `The code expires in ${Math.round(expiresIn / 60)} minutes.`,
+    `and check the page shows the code ${userCode}. It expires in ${Math.round(expiresIn / 60)} minutes.`,
   ].join('\n');
 }
 
