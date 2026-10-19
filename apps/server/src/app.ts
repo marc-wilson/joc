@@ -5,6 +5,7 @@ import {
   DeviceApproveRequest,
   DeviceStartRequest,
   DeviceTokenRequest,
+  GitHubReport,
   MessagesReport,
   PromptRequest,
   SessionReport,
@@ -25,6 +26,7 @@ import {
 } from './auth.ts';
 import { getChanges, onChanges, saveChanges } from './changes.ts';
 import type { GitHubAuth } from './github.ts';
+import { getGitHub, onGitHub, saveGitHub } from './github-data.ts';
 import {
   approveLink,
   createWebSession,
@@ -43,7 +45,7 @@ import { type Owner, ownerFrom } from './owner.ts';
 import { claimPrompts, queuePrompt } from './prompts.ts';
 import { RateLimit } from './rate-limit.ts';
 import { newSecret, secretsEqual } from './secrets.ts';
-import { applyReport, listSessions, onSessionUpdate } from './sessions.ts';
+import { applyReport, listHistory, listSessions, onSessionUpdate } from './sessions.ts';
 
 export interface AppOptions {
   /** GitHub sign-in. Without it the server is open and everything belongs to `local`: for local
@@ -204,6 +206,21 @@ export function createApp({ github, publicUrl }: AppOptions): Hono<Env> {
 
   app.get('/api/sessions', async (c) => c.json(await listSessions(c.get('owner'))));
 
+  app.get('/api/history', async (c) => c.json(await listHistory(c.get('owner'))));
+
+  // ── GitHub, as the person's plugin reads it through `gh` ────────────────────
+
+  app.post('/api/github', async (c) => {
+    const parsed = GitHubReport.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    // 202 for a stale report: accepted, but a newer one already won.
+    return (await saveGitHub(c.get('owner'), parsed.data))
+      ? c.json({ ok: true })
+      : c.body(null, 202);
+  });
+
+  app.get('/api/github', async (c) => c.json(await getGitHub(c.get('owner'))));
+
   app.post('/api/messages', async (c) => {
     const parsed = MessagesReport.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
@@ -261,6 +278,7 @@ export function createApp({ github, publicUrl }: AppOptions): Hono<Env> {
           onSessionUpdate(owner, (session) => publish({ type: 'session', session })),
           onMessages(owner, (sessionId, items) => publish({ type: 'messages', sessionId, items })),
           onChanges(owner, (sessionId) => publish({ type: 'changes', sessionId })),
+          onGitHub(owner, () => publish({ type: 'github' })),
         ];
         stream.onAbort(() => {
           for (const unsubscribe of unsubscribers) unsubscribe();

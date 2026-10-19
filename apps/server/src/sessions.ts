@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { getDb } from '@joc/db';
-import type { Session, SessionReport } from '@joc/protocol';
+import type { HistorySession, Session, SessionReport } from '@joc/protocol';
+import { countMessages } from './messages.ts';
 import { type Owner, sessionKey } from './owner.ts';
 
 interface SessionDoc {
@@ -17,6 +18,7 @@ interface SessionDoc {
   contextLeft?: number;
   machine?: string;
   model?: string;
+  cwd?: string;
   createdAt: Date;
   updatedAt: Date;
   /** `at` of the last report with a state applied. */
@@ -29,16 +31,25 @@ function toSession({
   _id: _,
   owner: _o,
   sessionId,
-  createdAt: _c,
+  createdAt,
   reportedAt: _r,
   updatedAt,
   name,
   title,
   ...rest
 }: SessionDoc): Session {
-  // Claude Code's own name beats the first-prompt fallback.
-  return { id: sessionId, ...rest, title: name ?? title, updatedAt: updatedAt.toISOString() };
+  return {
+    id: sessionId,
+    ...rest,
+    // Claude Code's own name beats the first-prompt fallback.
+    title: name ?? title,
+    startedAt: createdAt.toISOString(),
+    updatedAt: updatedAt.toISOString(),
+  };
 }
+
+/** A live session syncs every 30s, so an hour of silence means it's gone. */
+const LIVE_MS = 60 * 60_000;
 
 // Live fan-out within this process, one channel per owner. A second server instance would miss
 // these events, so the deployment runs one replica until this moves to Mongo change streams.
@@ -49,10 +60,27 @@ export function onSessionUpdate(owner: Owner, listener: (session: Session) => vo
   return () => updates.off(`session:${owner}`, listener);
 }
 
-export async function listSessions(owner: Owner): Promise<Session[]> {
-  // First-seen order, so the dashboard never reorders sessions as they update.
-  const docs = await sessions().find({ owner }).sort({ createdAt: 1 }).toArray();
+/**
+ * The owner's live sessions, in first-seen order so the dashboard never reorders them. Sessions
+ * silent for an hour drop out here, which the dashboard reads only when it (re)connects: a row
+ * never vanishes while someone is looking. They stay in the history.
+ */
+export async function listSessions(owner: Owner, now = Date.now()): Promise<Session[]> {
+  const docs = await sessions()
+    .find({ owner, updatedAt: { $gt: new Date(now - LIVE_MS) } })
+    .sort({ createdAt: 1 })
+    .toArray();
   return docs.map(toSession);
+}
+
+/** Every session the owner has had, most recently active first, with message counts. */
+export async function listHistory(owner: Owner, limit = 200): Promise<HistorySession[]> {
+  const docs = await sessions().find({ owner }).sort({ updatedAt: -1 }).limit(limit).toArray();
+  const counts = await countMessages(
+    owner,
+    docs.map((d) => d.sessionId),
+  );
+  return docs.map((d) => ({ ...toSession(d), messages: counts.get(d.sessionId) ?? 0 }));
 }
 
 /** Applies a report, or returns undefined if a newer one already landed. */
