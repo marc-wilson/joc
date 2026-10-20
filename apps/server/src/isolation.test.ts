@@ -25,6 +25,7 @@ import {
   ReadsClaim,
   ReviewSettings,
   Session,
+  SessionCommands,
   SessionSettings,
 } from '@joc/protocol';
 import { MongoMemoryServer } from 'mongodb-memory-server';
@@ -103,9 +104,11 @@ test('every API route needs an owner', async () => {
     ['GET', '/api/sessions/s/messages'],
     ['GET', '/api/sessions/s/tasks/t/messages'],
     ['GET', '/api/sessions/s/changes'],
+    ['GET', '/api/sessions/s/commands'],
     ['POST', '/api/reports'],
     ['POST', '/api/messages'],
     ['POST', '/api/changes'],
+    ['POST', '/api/commands'],
     ['POST', '/api/sessions/s/prompts'],
     ['POST', '/api/sessions/s/prompts/claim'],
     ['GET', '/api/history'],
@@ -248,6 +251,32 @@ test('diffs stay with their owner', async () => {
   });
   assert.equal((await call('alice', '/api/sessions/alice-diff/changes')).status, 200);
   assert.equal((await call('bob', '/api/sessions/alice-diff/changes')).status, 404);
+});
+
+test('slash commands stay with their owner', async () => {
+  const commands = (name: string) => [
+    { name, description: 'Review a pull request', argumentHint: '<pr>', source: 'project' },
+  ];
+  const listOf = async (who: Who, id: string) =>
+    (await read(await call(who, `/api/sessions/${id}/commands`), SessionCommands)).commands.map(
+      (c) => c.name,
+    );
+  const sent = { sessionId: 'shared-cmds', at: ++clock };
+  assert.equal(
+    (await call('alice', '/api/commands', { ...sent, commands: commands('alice-review') })).status,
+    200,
+  );
+  assert.equal(
+    (await call('bob', '/api/commands', { ...sent, commands: commands('bob-review') })).status,
+    200,
+  );
+  assert.deepEqual(await listOf('alice', 'shared-cmds'), ['alice-review']);
+  assert.deepEqual(await listOf('bob', 'shared-cmds'), ['bob-review']);
+  assert.equal((await call('bob', '/api/sessions/alice-only-cmds/commands')).status, 404);
+  // An older list than the stored one is dropped.
+  const stale = { sessionId: 'shared-cmds', at: sent.at - 1, commands: commands('old') };
+  assert.equal((await call('alice', '/api/commands', stale)).status, 202);
+  assert.deepEqual(await listOf('alice', 'shared-cmds'), ['alice-review']);
 });
 
 test("prompts reach only their owner's plugin", async () => {
@@ -1197,6 +1226,8 @@ test('a session is deleted only by its owner, from a browser, and only once it e
   });
   const firstDiff = { sessionId: GONE, at: ++clock, base: 'main', diff: '', truncated: false };
   assert.equal((await call('alice', '/api/changes', firstDiff)).status, 200);
+  const commands = { sessionId: GONE, at: ++clock, commands: [] };
+  assert.equal((await call('alice', '/api/commands', commands)).status, 200);
   await call('alice', '/api/reports', report(GONE, { ...alice, state: 'offline' }));
   const pin = await app.request('/api/prefs', {
     method: 'PATCH',
@@ -1248,6 +1279,7 @@ test('a session is deleted only by its owner, from a browser, and only once it e
   );
   assert.deepEqual(await read(await call('alice', `/api/sessions/${GONE}/messages`), Items), []);
   assert.equal((await call('alice', `/api/sessions/${GONE}/changes`)).status, 404);
+  assert.equal((await call('alice', `/api/sessions/${GONE}/commands`)).status, 404);
   assert.equal((await call('alice', `/api/images/${image.id}`)).status, 404);
   assert.equal((await call('alice', `/api/images/${shared.id}`)).status, 200);
   const prefs = await read(await asPerson('alice', '/api/prefs'), PrefsSnapshot);
