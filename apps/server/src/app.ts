@@ -2,8 +2,13 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { getClient } from '@joc/db';
 import {
   AlertIdsRequest,
+  AnswerClaim,
+  type AnswerRefused,
+  AnswerRequest,
   type AuthStatus,
+  answerFits,
   ChangesReport,
+  type ClaimedAnswer,
   DeviceApproveRequest,
   DeviceStartRequest,
   DeviceTokenRequest,
@@ -26,11 +31,14 @@ import {
   SessionReport,
   SessionSettings,
   type StreamEvent,
+  Waiting,
+  WaitingDone,
 } from '@joc/protocol';
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
 import { clearAlerts, listAlerts, onAlerts, readAlerts } from './alerts.ts';
+import { dropAnswer, saveAnswer, waitForAnswer } from './answers.ts';
 import {
   bearerToken,
   clearSessionCookie,
@@ -78,11 +86,13 @@ import { RateLimit } from './rate-limit.ts';
 import { newSecret, secretsEqual } from './secrets.ts';
 import {
   applyReport,
+  endWaiting,
   getLiveSession,
   listHistory,
   listSessions,
   listStaleSessions,
   onSessionUpdate,
+  setWaiting,
 } from './sessions.ts';
 import {
   getReviewSettings,
@@ -467,6 +477,72 @@ export function createApp({
   app.post('/api/sessions/:id/prompts/claim', async (c) =>
     c.json({ prompts: await claimPrompts(c.get('owner'), c.req.param('id')) }),
   );
+
+  // ── Answers: a question or permission request answered from the dashboard ──
+  // The session's plugin says what it waits on and holds a poll open for the answer, while Claude
+  // Code asks in the terminal too. The first answer wins; the plugin says when the wait is over.
+
+  // From the session's plugin: what it waits on now. A browser can't make a session wait.
+  app.post('/api/sessions/:id/waiting', async (c) => {
+    if (c.get('via') === 'session') return c.json({ error: 'Forbidden' }, 403);
+    const parsed = Waiting.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    return (await setWaiting(c.get('owner'), c.req.param('id'), parsed.data))
+      ? c.body(null, 204)
+      : c.json({ error: 'No such session' }, 404);
+  });
+
+  // From the session's plugin: the wait is over, answered here, in Claude Code, or neither.
+  app.post('/api/sessions/:id/waiting/:waitingId/done', async (c) => {
+    if (c.get('via') === 'session') return c.json({ error: 'Forbidden' }, 403);
+    const parsed = WaitingDone.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    const owner = c.get('owner');
+    const { id, waitingId } = c.req.param();
+    const ended = await endWaiting(owner, id, waitingId, parsed.data.by);
+    // An answer nobody took came too late: it's dropped.
+    await dropAnswer(owner, id, waitingId);
+    return ended ? c.body(null, 204) : c.json({ error: 'No such wait' }, 404);
+  });
+
+  // From the dashboard: answer what the session waits on. Only a person answers, never a machine.
+  app.post('/api/sessions/:id/answers', async (c) => {
+    if (c.get('via') === 'device') return c.json({ error: 'Forbidden' }, 403);
+    const parsed = AnswerRequest.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    const owner = c.get('owner');
+    const { waitingId, answer } = parsed.data;
+    const session = await getLiveSession(owner, c.req.param('id'));
+    if (!session) return c.json({ error: 'No such live session' }, 404);
+    const { waiting, answered } = session;
+    if (waiting?.id !== waitingId) {
+      const by = answered?.id === waitingId ? answered.by : undefined;
+      const refused: AnswerRefused = { error: 'It was already answered', answeredBy: by };
+      return c.json(refused, 409);
+    }
+    if (!answerFits(waiting, answer)) return c.json({ error: "That doesn't answer it" }, 400);
+    if (!(await saveAnswer(owner, session.id, waitingId, answer))) {
+      const refused: AnswerRefused = { error: 'It was already answered', answeredBy: 'joc' };
+      return c.json(refused, 409);
+    }
+    return c.body(null, 202);
+  });
+
+  // From the session's plugin: take the answer, waiting up to `waitMs` for one.
+  app.post('/api/sessions/:id/answers/claim', async (c) => {
+    if (c.get('via') === 'session') return c.json({ error: 'Forbidden' }, 403);
+    const parsed = AnswerClaim.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    const { waitingId, waitMs = 0 } = parsed.data;
+    const answer = await waitForAnswer(
+      c.get('owner'),
+      c.req.param('id'),
+      waitingId,
+      waitMs,
+      AbortSignal.any([c.req.raw.signal, shutdown]),
+    );
+    return c.json({ answer: answer ?? null } satisfies ClaimedAnswer);
+  });
 
   // ── New sessions, started beside a running one ─────────────────────────────
 

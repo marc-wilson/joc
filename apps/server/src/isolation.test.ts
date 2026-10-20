@@ -5,6 +5,8 @@ import { after, before, test } from 'node:test';
 import { closeClient, getDb } from '@joc/db';
 import {
   Alert,
+  AnswerRefused,
+  ClaimedAnswer,
   ClaimedLaunch,
   ClaimedPrompt,
   ConversationItem,
@@ -128,6 +130,10 @@ test('every API route needs an owner', async () => {
     ['PUT', '/api/settings/review'],
     ['POST', '/api/sessions/s/launches/claim'],
     ['POST', '/api/launches/l/result'],
+    ['POST', '/api/sessions/s/waiting'],
+    ['POST', '/api/sessions/s/waiting/w/done'],
+    ['POST', '/api/sessions/s/answers'],
+    ['POST', '/api/sessions/s/answers/claim'],
   ] as const) {
     const res = await app.request(path, { method });
     assert.equal(res.status, 401, `${method} ${path}`);
@@ -991,4 +997,120 @@ test("preferences are each owner's own, only a signed-in person's, and heard onl
   });
   assert.equal(patched.status, 403);
   assert.equal((await asPerson('alice', { diffMode: 'sideways' })).status, 400);
+});
+
+/** A POST from a person's signed-in browser. */
+const fromBrowser = (who: Who, path: string, body: unknown) =>
+  app.request(path, {
+    method: 'POST',
+    headers: {
+      cookie: cookies.get(who) ?? '',
+      host: 'joc.test',
+      origin: 'http://joc.test',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+test("a session's waits are answered only by its owner, in a browser, and taken only by their plugin", async () => {
+  const sessionOf = async (who: Who, id: string) =>
+    (await read(await call(who, '/api/sessions'), Sessions)).find((s) => s.id === id);
+  const claim = async (who: Who, id: string, waitingId: string, waitMs = 0) =>
+    read(
+      await call(who, `/api/sessions/${id}/answers/claim`, { waitingId, waitMs }),
+      ClaimedAnswer,
+    );
+  const question = {
+    kind: 'question',
+    id: 'wait-alice-q1',
+    questions: [
+      {
+        question: 'Which sender domain should I use?',
+        options: [{ label: 'mail.atlas.dev' }, { label: 'atlas.dev' }],
+        multiSelect: false,
+      },
+    ],
+  };
+  const answer = {
+    kind: 'question',
+    answers: { 'Which sender domain should I use?': 'atlas.dev' },
+  };
+
+  // The same session id for both; Alice's plugin says it waits on a question.
+  await call('alice', '/api/reports', report('shared-wait', { state: 'needs' }));
+  await call('bob', '/api/reports', report('shared-wait', { state: 'needs' }));
+  const heard = await listen('bob', async () => {
+    assert.equal((await call('alice', '/api/sessions/shared-wait/waiting', question)).status, 204);
+  });
+  assert.doesNotMatch(heard, /wait-alice-q1/);
+  assert.equal((await sessionOf('alice', 'shared-wait'))?.waiting?.id, 'wait-alice-q1');
+  assert.equal((await sessionOf('bob', 'shared-wait'))?.waiting, undefined);
+  // A browser can't make a session wait, and a plugin can't report a wait on a session it hasn't.
+  const waitFromBrowser = await fromBrowser('alice', '/api/sessions/shared-wait/waiting', question);
+  assert.equal(waitFromBrowser.status, 403);
+  assert.equal((await call('alice', '/api/sessions/nope/waiting', question)).status, 404);
+
+  // Bob can't answer Alice's wait, a machine can't answer at all, and a wrong answer is refused.
+  const to = '/api/sessions/shared-wait/answers';
+  const body = { waitingId: 'wait-alice-q1', answer };
+  assert.equal((await fromBrowser('bob', to, body)).status, 409);
+  assert.equal((await call('alice', to, body)).status, 403);
+  const wrong = { waitingId: 'wait-alice-q1', answer: { kind: 'permission', allow: true } };
+  assert.equal((await fromBrowser('alice', to, wrong)).status, 400);
+
+  // Alice's plugin holds its poll open; her answer from the browser lands in it at once.
+  const polling = claim('alice', 'shared-wait', 'wait-alice-q1', 5000);
+  const started = Date.now();
+  assert.equal((await fromBrowser('alice', to, body)).status, 202);
+  assert.deepEqual((await polling).answer, answer);
+  assert.ok(Date.now() - started < 2000, 'the held poll hears the answer at once');
+  // Taken once; a second answer is refused; Bob's plugin never sees it.
+  assert.equal((await claim('alice', 'shared-wait', 'wait-alice-q1')).answer, null);
+  assert.equal((await fromBrowser('alice', to, body)).status, 409);
+  assert.equal((await claim('bob', 'shared-wait', 'wait-alice-q1')).answer, null);
+  // A browser can't take answers or end a wait; Bob's plugin can't end Alice's.
+  const claimed = await fromBrowser('alice', '/api/sessions/shared-wait/answers/claim', {
+    waitingId: 'wait-alice-q1',
+  });
+  assert.equal(claimed.status, 403);
+  const done = '/api/sessions/shared-wait/waiting/wait-alice-q1/done';
+  assert.equal((await fromBrowser('alice', done, { by: 'joc' })).status, 403);
+  assert.equal((await call('bob', done, { by: 'joc' })).status, 404);
+  assert.equal((await call('alice', done, { by: 'joc' })).status, 204);
+  const answered = await sessionOf('alice', 'shared-wait');
+  assert.equal(answered?.waiting, undefined);
+  assert.deepEqual(answered?.answered, { id: 'wait-alice-q1', by: 'joc' });
+});
+
+test('a JOC answer that comes after Claude Code was answered is dropped, and says so', async () => {
+  const permission = {
+    kind: 'permission',
+    id: 'wait-alice-p1',
+    tool: 'Bash',
+    summary: 'pnpm prisma migrate reset',
+  };
+  const to = '/api/sessions/alice-race/answers';
+  const body = { waitingId: 'wait-alice-p1', answer: { kind: 'permission', allow: true } };
+  await call('alice', '/api/reports', report('alice-race', { state: 'needs' }));
+  await call('alice', '/api/sessions/alice-race/waiting', permission);
+
+  // Alice answers in the browser, but the terminal won before the plugin took it.
+  assert.equal((await fromBrowser('alice', to, body)).status, 202);
+  const done = '/api/sessions/alice-race/waiting/wait-alice-p1/done';
+  assert.equal((await call('alice', done, { by: 'claude-code' })).status, 204);
+  const claimed = await call('alice', '/api/sessions/alice-race/answers/claim', {
+    waitingId: 'wait-alice-p1',
+  });
+  assert.equal((await read(claimed, ClaimedAnswer)).answer, null);
+
+  // Answering again now says Claude Code answered it.
+  const late = await fromBrowser('alice', to, body);
+  assert.equal(late.status, 409);
+  assert.equal((await read(late, AnswerRefused)).answeredBy, 'claude-code');
+
+  // A session that ends waits on nothing.
+  await call('alice', '/api/sessions/alice-race/waiting', { ...permission, id: 'wait-alice-p2' });
+  await call('alice', '/api/reports', report('alice-race', { state: 'offline' }));
+  const sessions = await read(await call('alice', '/api/sessions'), Sessions);
+  assert.equal(sessions.find((s) => s.id === 'alice-race')?.waiting, undefined);
 });

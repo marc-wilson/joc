@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { getDb } from '@joc/db';
 import {
+  type AnsweredBy,
   DROP_AFTER_MS,
   type DropAfter,
   type HistorySession,
@@ -9,6 +10,7 @@ import {
   type Session,
   type SessionReport,
   type StaleSession,
+  type Waiting,
 } from '@joc/protocol';
 import { alertOnSession } from './alerts.ts';
 import { countMessages } from './messages.ts';
@@ -41,6 +43,10 @@ interface SessionDoc {
   reportedAt: number;
   /** The state before the last report, so the report's alert (alerts.ts) knows what changed. */
   previousState?: Session['state'];
+  /** What it waits on you for, while its plugin takes answers from the dashboard. */
+  waiting?: Waiting;
+  /** The last wait that ended, and who answered it. */
+  answered?: Session['answered'];
 }
 
 const sessions = () => getDb().collection<SessionDoc>('sessions');
@@ -178,6 +184,8 @@ export async function applyReport(
             createdAt: { $ifNull: ['$createdAt', now] },
             // A session keeps the title from its first prompt.
             ...(title ? { title: { $ifNull: ['$title', { $literal: title }] } } : {}),
+            // A session that ended waits on nothing.
+            ...(fields.state === 'offline' ? { waiting: '$$REMOVE' } : {}),
           },
         },
       ],
@@ -192,6 +200,48 @@ export async function applyReport(
   updates.emit(`session:${owner}`, session);
   if (fields.state) await alertOnSession(owner, doc.previousState, { ...session, sessionId });
   return session;
+}
+
+/**
+ * Records what the session waits on, from its plugin. False when the owner has no such session:
+ * a wait is reported after the session's first report.
+ */
+export async function setWaiting(
+  owner: Owner,
+  sessionId: string,
+  waiting: Waiting,
+): Promise<boolean> {
+  const doc = await sessions().findOneAndUpdate(
+    { _id: sessionKey(owner, sessionId), owner },
+    { $set: { waiting } },
+    { returnDocument: 'after' },
+  );
+  if (!doc) return false;
+  updates.emit(`session:${owner}`, toSession(doc));
+  return true;
+}
+
+/**
+ * Ends the session's wait `waitingId`, and says who answered it when someone did. False when the
+ * session doesn't wait on it (any more).
+ */
+export async function endWaiting(
+  owner: Owner,
+  sessionId: string,
+  waitingId: string,
+  by?: AnsweredBy,
+): Promise<boolean> {
+  const doc = await sessions().findOneAndUpdate(
+    { _id: sessionKey(owner, sessionId), owner, 'waiting.id': waitingId },
+    {
+      $unset: { waiting: '' },
+      ...(by ? { $set: { answered: { id: waitingId, by } } } : {}),
+    },
+    { returnDocument: 'after' },
+  );
+  if (!doc) return false;
+  updates.emit(`session:${owner}`, toSession(doc));
+  return true;
 }
 
 function isDuplicateKey(error: unknown): boolean {
