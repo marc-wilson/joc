@@ -3,6 +3,7 @@ import {
   ImageRef,
   MAX_IMAGE_BYTES,
   MAX_IMAGES_PER_MESSAGE,
+  MAX_PREF_ITEMS,
   type Session,
 } from '@joc/protocol';
 import {
@@ -13,15 +14,17 @@ import {
   NewSessionButton,
   OverflowMenu,
   RepoGroupHeader,
+  ReviewSessionRow,
   SessionHeader,
   SessionListFooter,
   SessionListNote,
   SessionRail,
   SessionRow,
+  SortBar,
   TextInput,
   TextLink,
 } from '@joc/ui';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { apiFetch } from './auth.ts';
 import { BackgroundView } from './Background.tsx';
 import { backgroundTasks, runningCount, runningLine } from './background.ts';
@@ -29,12 +32,14 @@ import { ChangesView } from './Changes.tsx';
 import { Conversation } from './Conversation.tsx';
 import { DeleteDialog } from './DeleteSessions.tsx';
 import { cantDelete, deletionLine, deletionOf, machineLive, removedLine } from './deletes.ts';
+import { useHeldOrder } from './held-order.ts';
 import {
   useChanges,
   useCmdlistMax,
   useCommands,
   useConversation,
   useDeletes,
+  useGitHub,
   useHistory,
   useNow,
   useReadWhileViewing,
@@ -47,10 +52,19 @@ import { useNoteData } from './note-data.ts';
 import { delivered, type PendingPrompt } from './pending.ts';
 import { plain } from './plain.ts';
 import { updatePrefs, usePrefs } from './prefs.ts';
+import { reviewGone, reviewRowText } from './review-rows.ts';
 import { isQuiet, keepNote, matchesFilter } from './session-list.ts';
-import { groupSessions, PINNED_GROUP } from './sessions.ts';
+import {
+  activeAt,
+  arrangeGroups,
+  groupSessions,
+  PINNED_GROUP,
+  REVIEWS_GROUP,
+  reviewDone,
+  SORT_OPTIONS,
+} from './sessions.ts';
 import { sessionSuggestions } from './slash-commands.ts';
-import { age } from './time.ts';
+import { age, clock } from './time.ts';
 import { toggled } from './toggled.ts';
 
 const UNTITLED = 'New session';
@@ -72,6 +86,22 @@ function activityOf(s: Session, now: number): string | undefined {
 /** "Quiet 6m" for a session whose machine stopped reporting, in place of its time. */
 const quietOf = (s: Session, now: number) =>
   isQuiet(s, now) ? `Quiet ${age(s.updatedAt, now)}` : undefined;
+
+/** A row in the live list, faded while a re-sort moves it. */
+function ListItem({ moving, children }: { moving?: 'leaving' | 'arriving'; children: ReactNode }) {
+  return (
+    <div className={moving ? `joc-slist__item is-${moving}` : 'joc-slist__item'} role="none">
+      {children}
+    </div>
+  );
+}
+
+/** The row's time: the clock it started at under First seen, else how long ago it last acted. */
+function timeOf(s: Session, sort: string, now: number): string {
+  if (sort === 'seen') return clock(s.startedAt, now);
+  if (sort === 'activity') return age(new Date(activeAt(s)).toISOString(), now);
+  return age(s.updatedAt, now);
+}
 
 /** `/` jumps to the session filter, unless the person is already typing somewhere. */
 function useFilterShortcut() {
@@ -187,9 +217,69 @@ export default function App() {
   const [listOpen, setListOpen] = useState(false);
   // You can also fold it on any tab; that choice, the groups you folded and the sessions you
   // pinned to the top (in the order you pinned them) are remembered.
-  const { listFolded, foldedGroups: folded, pinned } = usePrefs();
+  const {
+    listFolded,
+    foldedGroups: folded,
+    pinned,
+    sessionSort: sort,
+    dismissedReviews: dismissed,
+  } = usePrefs();
   const railed = listFolded || (tab === 'changes' && !listOpen);
-  const groups = groupSessions(shown, pinned);
+  const github = useGitHub();
+  const prs = github?.state === 'reported' ? [...github.reviewRequested, ...github.mine] : [];
+  // The list holds its order while the pointer or keyboard focus is in it, or its sort menu is
+  // open; it re-sorts once it's left alone (see held-order.ts).
+  const [pointerIn, setPointerIn] = useState(false);
+  const [focusIn, setFocusIn] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
+  const held = pointerIn || focusIn || sortOpen;
+  // Finished reviews you cleared, or that finished a while ago, leave the list.
+  const target = groupSessions(
+    shown.filter((s) => !reviewGone(s, dismissed, now)),
+    pinned,
+    sort,
+  );
+  const targetIds = target.flatMap((g) => g.sessions.map((s) => s.id));
+  /** The groups as shown for a held order: a review due to leave stays until the next settle. */
+  const arrange = (order: string[]) => {
+    const due = new Set(targetIds);
+    const keep = new Set(order);
+    const list = shown.filter(
+      (s) => due.has(s.id) || (keep.has(s.id) && !dismissed.includes(s.id)),
+    );
+    return arrangeGroups(groupSessions(list, pinned, sort), order);
+  };
+  const resort = useHeldOrder(
+    targetIds,
+    (order) => arrange(order).flatMap((g) => g.sessions.map((s) => s.id)),
+    held,
+    // Applied at once: you asked for these.
+    [sort, filter, pinned.join(), dismissed.join()].join('|'),
+  );
+  const groups = arrange(resort.order);
+  const moving = (id: string) =>
+    resort.leaving.has(id) ? 'leaving' : resort.arriving.has(id) ? 'arriving' : undefined;
+  const reviewGroup = groups.find((g) => g.id === REVIEWS_GROUP);
+  const finishedReviews = reviewGroup?.sessions.filter(reviewDone) ?? [];
+  const reviewRow = (s: Session) => {
+    const text = reviewRowText(s, prs, activityOf(s, now), now);
+    return text
+      ? {
+          id: s.id,
+          state: s.state,
+          done: text.done,
+          title: text.title,
+          pr: text.pr,
+          prTitle: text.prTitle,
+          activity: text.activity,
+          time: text.time,
+          outcome: s.review?.outcome,
+          selected: s.id === selected?.id && !gone,
+        }
+      : undefined;
+  };
+  const dismiss = (ids: string[]) =>
+    updatePrefs({ dismissedReviews: [...dismissed, ...ids].slice(-MAX_PREF_ITEMS) });
   const [pending, setPending] = useState<PendingPrompt[]>([]);
   // A sent prompt shows until the session's own transcript has it.
   const waiting = pending.filter((p) => p.sessionId === selected?.id && !delivered(items, p));
@@ -231,17 +321,21 @@ export default function App() {
         {railed ? (
           <aside className="joc-app__side is-rail">
             <SessionRail
-              groups={groups.map((g) => ({
-                repo: g.label,
-                pinned: g.id === PINNED_GROUP,
-                sessions: g.sessions.map((s) => ({
-                  id: s.id,
-                  state: s.state,
-                  title: s.title ?? UNTITLED,
-                  quiet: quietOf(s, now),
-                  selected: s.id === selected?.id,
-                })),
-              }))}
+              reviews={(reviewGroup?.sessions ?? []).flatMap((s) => reviewRow(s) ?? [])}
+              onSelectReview={(r) => r.id && setSelectedId(r.id)}
+              groups={groups
+                .filter((g) => g.id !== REVIEWS_GROUP)
+                .map((g) => ({
+                  repo: g.label,
+                  pinned: g.id === PINNED_GROUP,
+                  sessions: g.sessions.map((s) => ({
+                    id: s.id,
+                    state: s.state,
+                    title: s.title ?? UNTITLED,
+                    quiet: quietOf(s, now),
+                    selected: s.id === selected?.id,
+                  })),
+                }))}
               onExpand={() => {
                 updatePrefs({ listFolded: false });
                 setListOpen(true);
@@ -250,7 +344,16 @@ export default function App() {
             />
           </aside>
         ) : (
-          <aside className="joc-app__side">
+          <aside
+            className="joc-app__side"
+            onPointerEnter={() => setPointerIn(true)}
+            onPointerLeave={() => setPointerIn(false)}
+            // Keyboard focus holds the order; a click that leaves focus on a row doesn't.
+            onFocus={(e) => setFocusIn(e.target.matches(':focus-visible'))}
+            onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget)) setFocusIn(false);
+            }}
+          >
             <div className="app-side__filter">
               <TextInput
                 id={FILTER_ID}
@@ -268,15 +371,37 @@ export default function App() {
                 onClick={() => updatePrefs({ listFolded: true })}
               />
             </div>
+            <SortBar
+              value={sort}
+              options={SORT_OPTIONS}
+              onChange={(sessionSort) => updatePrefs({ sessionSort })}
+              held={held}
+              waiting={resort.waiting}
+              note="Applies to every repo group"
+              onOpenChange={setSortOpen}
+              // A no-break space every other time, so each settle is read out again.
+              announcement={
+                resort.settles ? `Sessions re-sorted${resort.settles % 2 ? '' : ' '}` : undefined
+              }
+            />
             <div className="app-side__list" role="listbox" aria-label="Sessions">
               {groups.map((g) => (
                 <Fragment key={g.id}>
                   <RepoGroupHeader
                     repo={g.label}
+                    kind={g.id === REVIEWS_GROUP ? 'reviews' : 'repo'}
                     count={g.sessions.length}
                     needs={g.sessions.filter((s) => s.state === 'needs').length}
                     pinned={g.id === PINNED_GROUP}
                     collapsed={folded.includes(g.id)}
+                    action={
+                      g.id === REVIEWS_GROUP && finishedReviews.length
+                        ? {
+                            label: `Clear ${finishedReviews.length} finished`,
+                            onClick: () => dismiss(finishedReviews.map((s) => s.id)),
+                          }
+                        : undefined
+                    }
                     onToggle={() =>
                       updatePrefs({ foldedGroups: toggled(folded, g.id, !folded.includes(g.id)) })
                     }
@@ -284,25 +409,39 @@ export default function App() {
                   {/* Pinned never folds: its header isn't a toggle. */}
                   {g.id !== PINNED_GROUP && folded.includes(g.id) ? null : (
                     <>
-                      {g.sessions.map((s) => (
-                        <SessionRow
-                          key={s.id}
-                          state={s.state}
-                          title={s.title ?? UNTITLED}
-                          branch={s.branch}
-                          worktree={s.worktree}
-                          contextLeft={s.contextLeft}
-                          activity={activityOf(s, now)}
-                          time={age(s.updatedAt, now)}
-                          quiet={quietOf(s, now)}
-                          selected={s.id === selected?.id && !gone}
-                          removed={deleted.has(s.id) ? removedLine(s.machine) : undefined}
-                          pinned={g.id === PINNED_GROUP}
-                          onSelect={() => setSelectedId(s.id)}
-                          onPinChange={(on) => updatePrefs({ pinned: toggled(pinned, s.id, on) })}
-                        />
-                      ))}
-                      {filtering || g.id === PINNED_GROUP ? null : (
+                      {g.sessions.map((s) => {
+                        const review = g.id === REVIEWS_GROUP ? reviewRow(s) : undefined;
+                        return (
+                          <ListItem key={s.id} moving={moving(s.id)}>
+                            {review ? (
+                              <ReviewSessionRow
+                                {...review}
+                                onSelect={() => setSelectedId(s.id)}
+                                onDismiss={review.done ? () => dismiss([s.id]) : undefined}
+                              />
+                            ) : (
+                              <SessionRow
+                                state={s.state}
+                                title={s.title ?? UNTITLED}
+                                branch={s.branch}
+                                worktree={s.worktree}
+                                contextLeft={s.contextLeft}
+                                activity={activityOf(s, now)}
+                                time={timeOf(s, sort, now)}
+                                quiet={quietOf(s, now)}
+                                selected={s.id === selected?.id && !gone}
+                                removed={deleted.has(s.id) ? removedLine(s.machine) : undefined}
+                                pinned={g.id === PINNED_GROUP}
+                                onSelect={() => setSelectedId(s.id)}
+                                onPinChange={(on) =>
+                                  updatePrefs({ pinned: toggled(pinned, s.id, on) })
+                                }
+                              />
+                            )}
+                          </ListItem>
+                        );
+                      })}
+                      {filtering || g.id === PINNED_GROUP || g.id === REVIEWS_GROUP ? null : (
                         <NewSessionButton repo={g.label} onClick={() => setNewIn(g.label)} />
                       )}
                     </>
