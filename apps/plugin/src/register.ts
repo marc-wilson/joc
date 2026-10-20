@@ -55,6 +55,13 @@ const LAUNCH_PATH = '/api/sessions/{id}/launches/claim';
 const LAUNCH_POLL_MS = 5000;
 /** `claude --bg` returns once the session is running. */
 const LAUNCH_TIMEOUT_MS = 60_000;
+/** The delete poll's: ended sessions on this machine to delete, asked for in the dashboard. */
+const DELETE_PATH = '/api/deletes/claim';
+const DELETE_POLL_MS = 10_000;
+/** A poll or a result that gets no answer by then is given up on; the next poll tries again. */
+const DELETE_HTTP_TIMEOUT_MS = 10_000;
+/** delete-session.ts asks `claude agents` twice and may run `claude rm`, which removes a worktree. */
+const DELETE_TIMEOUT_MS = 120_000;
 /** Outcomes held between writes to the log; a poll every 2s makes 15 per write. */
 const MAX_PENDING = 200;
 /** Problems `/joc-status` lists. */
@@ -194,6 +201,54 @@ async function connection($: EngineInterface) {
     ...(token ? { authorization: `Bearer ${token}` } : {}),
   };
   return { url: url.replace(/\/$/, ''), headers };
+}
+
+/** `fetch` that gives up after `ms`: undefined then, as when the server can't be reached. */
+async function fetchWithin(
+  $: EngineInterface,
+  ms: number,
+  url: string,
+  init: { method?: string; headers?: Record<string, string>; body?: string },
+): Promise<HttpResponse | undefined> {
+  const timeout = $.clock.sleep(ms).then(() => undefined);
+  return Promise.race([$.http.fetch(url, init), timeout]);
+}
+
+let machineName: Promise<string | undefined> | undefined;
+
+/**
+ * This machine's name as hook.ts reports it on every session (Node's `os.hostname()` less
+ * `.local`), so the server can hand it the deletes of sessions that ran here. Read once.
+ */
+function thisMachine($: EngineInterface): Promise<string | undefined> {
+  machineName ??= $.process
+    .run(['hostname'], { timeoutMs: CHECK_TIMEOUT_MS })
+    .then((run) => run.stdout.trim().replace(/\.local$/, '') || undefined)
+    .catch(() => undefined);
+  return machineName;
+}
+
+/** What delete-session.ts printed: `{ ok, removed?, detail? }`, or undefined. */
+function deleteOutcome(
+  stdout: string,
+): { ok: boolean; removed?: string[]; detail?: string } | undefined {
+  let body: unknown;
+  try {
+    body = JSON.parse(stdout);
+  } catch {
+    return undefined;
+  }
+  const ok = field(body, 'ok');
+  if (typeof ok !== 'boolean') return undefined;
+  const removed = field(body, 'removed');
+  const detail = text(field(body, 'detail'));
+  return {
+    ok,
+    ...(Array.isArray(removed)
+      ? { removed: removed.flatMap((r) => text(r) ?? []).slice(0, 200) }
+      : {}),
+    ...(detail ? { detail: detail.slice(0, 1000) } : {}),
+  };
 }
 
 /** `/joc-login [url]`: links this machine. The person approves the code in a signed-in browser. */
@@ -635,6 +690,69 @@ export const register: Register = (on) => {
     $.clock.after(1, sync);
     syncSoon = () => $.clock.after(1000, sync);
     $.clock.every(SYNC_MS, sync);
+
+    /**
+     * Deletes the ended sessions on this machine that the dashboard asked to delete, each with
+     * delete-session.ts, which checks Claude Code no longer runs it before removing anything. It
+     * never deletes this session. How it went goes back to the server, which then drops its copy.
+     */
+    async function takeDeletes() {
+      const machine = await thisMachine($);
+      if (!machine) return;
+      const { url, headers } = await connection($);
+      const json = { ...headers, 'content-type': 'application/json' };
+      let res: HttpResponse | undefined;
+      try {
+        res = await fetchWithin($, DELETE_HTTP_TIMEOUT_MS, `${url}${DELETE_PATH}`, {
+          method: 'POST',
+          headers: json,
+          body: JSON.stringify({ machine }),
+        });
+      } catch (error) {
+        const detail = errorDetail(error);
+        log.note({ ok: false, kind: 'unreachable', where: url, detail, at: Date.now() });
+        return;
+      }
+      if (!res) return;
+      log.note(
+        responseOutcome({ status: res.status, body: res.text }, DELETE_PATH, url, Date.now()),
+      );
+      // An older server has no deletes.
+      if (!res.ok) return;
+      const deletes = field(JSON.parse(res.text), 'deletes');
+      if (!Array.isArray(deletes)) return;
+      for (const request of deletes) {
+        const id = text(field(request, 'id'));
+        const sessionId = text(field(request, 'sessionId'));
+        if (!id || !sessionId) continue;
+        let outcome: { ok: boolean; removed?: string[]; detail?: string };
+        if (sessionId === (await $.session.id())) {
+          outcome = { ok: false, detail: `Still running on ${machine}. Quit it first.` };
+        } else {
+          const run = await $.process
+            .run(['node', `${root}/src/delete-session.ts`], {
+              stdin: JSON.stringify({ sessionId }),
+              env: { CLAUDE_PLUGIN_ROOT: root, CLAUDE_PLUGIN_DATA: pluginData(root) ?? '' },
+              timeoutMs: DELETE_TIMEOUT_MS,
+            })
+            .catch((error: unknown) => {
+              log.note(crash('module', errorDetail(error)));
+              return undefined;
+            });
+          outcome = (run && deleteOutcome(run.stdout)) ?? {
+            ok: false,
+            detail: `The JOC plugin on ${machine} couldn't run the delete. Nothing may have been deleted.`,
+          };
+        }
+        const result = `${url}/api/deletes/${encodeURIComponent(id)}/result`;
+        await fetchWithin($, DELETE_HTTP_TIMEOUT_MS, result, {
+          method: 'POST',
+          headers: json,
+          body: JSON.stringify(outcome),
+        }).catch(() => undefined); // The dashboard then says the machine didn't report back.
+      }
+    }
+    $.clock.every(DELETE_POLL_MS, oneAtATime(takeDeletes, failedIn('module')));
 
     // Nobody reads a -p run's dashboard; only take prompts for sessions a person runs.
     interactive = e.isInteractive;
