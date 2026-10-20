@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import type { Prefs } from './prefs.ts';
+
+export * from './prefs.ts';
 
 export const SessionState = z.enum(['working', 'background', 'needs', 'idle', 'offline']);
 export type SessionState = z.infer<typeof SessionState>;
@@ -540,7 +543,9 @@ export type StreamEvent =
   /** The person's alerts changed; fetch them from `/api/alerts`. */
   | { type: 'alerts' }
   /** A new session was asked for or changed; fetch them from `/api/launches`. */
-  | { type: 'launches' };
+  | { type: 'launches' }
+  /** The person's preferences changed, maybe in another tab. */
+  | { type: 'prefs'; prefs: Prefs };
 
 /** A signed-in person, as the dashboard shows them. */
 export const User = z.object({
