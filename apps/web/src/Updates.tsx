@@ -20,7 +20,6 @@ import {
 
 /** How often an open tab asks; also on coming back to the tab. */
 const CHECK_MS = 5 * 60_000;
-const RELOAD_DISMISSED_KEY = 'joc.reload-banner.dismissed';
 /** After reloads are sent: long enough for each session's next sync (every 30s) to report. */
 const AFTER_RELOAD_MS = 40_000;
 
@@ -96,30 +95,11 @@ function useVersions(): Versions & { checkSoon: () => void } {
   return { ...versions, checkSoon };
 }
 
-/** What the person dismissed under `key`, if anything. */
-function dismissedUnder(key: string): string | undefined {
-  try {
-    return localStorage.getItem(key) ?? undefined;
-  } catch {
-    // Storage blocked (private window, site data off): the banner shows again, nothing more.
-    return undefined;
-  }
-}
-
-function dismissUnder(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // Storage blocked: dismissed for this page only.
-  }
-}
-
 /** App-wide notices under the nav bar: a plugin to update, or a newer dashboard to reload into. */
 export function Updates() {
   const { plugin, behind, stale, updated, checkSoon } = useVersions();
-  // The plugin version whose banner the person dismissed, if any.
-  const dismissed = usePrefs().dismissedPluginBanner;
-  const [staleHidden, setStaleHidden] = useState(() => dismissedUnder(RELOAD_DISMISSED_KEY));
+  // The plugin version, and the stale sessions, whose banners the person dismissed, if any.
+  const { dismissedPluginBanner: dismissed, dismissedReloadBanner: staleHidden } = usePrefs();
   const [reloadHidden, setReloadHidden] = useState(false);
   const reload = useReload(checkSoon);
 
@@ -173,11 +153,7 @@ export function Updates() {
                   : 'Reload them'}
             </Button>
           }
-          onDismiss={() => {
-            const key = staleKey(stale);
-            dismissUnder(RELOAD_DISMISSED_KEY, key);
-            setStaleHidden(key);
-          }}
+          onDismiss={() => updatePrefs({ dismissedReloadBanner: staleKey(stale) })}
         >
           <span>
             JOC plugin {plugin} is installed, but {stale.length === 1 ? 'this session' : 'these'}{' '}

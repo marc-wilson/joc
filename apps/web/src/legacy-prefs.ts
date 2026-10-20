@@ -15,6 +15,7 @@ const KEYS = [
   'joc:list-folded',
   'joc:diff-mode',
   'joc.plugin-banner.dismissed',
+  'joc.reload-banner.dismissed',
 ];
 
 /** Which of `keys` (a browser storage's) an older dashboard wrote. */
@@ -48,6 +49,8 @@ export function legacyPatch(read: (key: string) => string | null, keys: string[]
   if (json(read('joc:diff-mode')) === 'split') patch.diffMode = 'split';
   const banner = read('joc.plugin-banner.dismissed');
   if (banner && banner.length <= 100) patch.dismissedPluginBanner = banner;
+  const reload = read('joc.reload-banner.dismissed');
+  if (reload && reload.length <= 10_000) patch.dismissedReloadBanner = reload;
 
   const sessions = new Map<string, SessionPrefsPatch>();
   for (const key of keys) {
