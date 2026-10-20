@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { ConversationItem } from '@joc/protocol';
+import type { ConversationItem, RunningTask } from '@joc/protocol';
 import {
   arrangeTasks,
   type BackgroundTask,
@@ -8,6 +8,8 @@ import {
   clock,
   elapsed,
   latestStep,
+  runningCount,
+  runningLine,
   taskSteps,
 } from './background.ts';
 
@@ -317,4 +319,88 @@ test('a task stopped with TaskStop has ended, though Claude Code sent no notific
   );
   const dev = tasks.find((t) => t.id === 't1');
   assert.deepEqual([dev?.status, dev?.tail, dev?.endedAt], ['ended', 'Stopped', at(40)]);
+});
+
+// Claude Code's own list of what runs, as the session's latest Stop reported it.
+const listed = (s: number, tasks: RunningTask[]) => ({ at: at(s), tasks });
+
+test("a transcript task runs while claude code's list has it, and has ended once it doesn't", () => {
+  const tasks = backgroundTasks(items, 'background', listed(50, [{ id: 'bg1', type: 'shell' }]));
+  const task = (id: string) => tasks.find((t) => t.id === id);
+  assert.equal(task('t1')?.status, 'running');
+  // t6 started before the list, which leaves it out: it ended, how isn't known.
+  assert.deepEqual([task('t6')?.status, task('t6')?.tail], ['ended', 'Ended']);
+  assert.equal(runningCount(tasks), 1);
+
+  // The list says nothing runs: a task the transcript never saw end has ended too.
+  const none = backgroundTasks(items, 'idle', listed(50, []));
+  const dev = none.find((t) => t.id === 't1');
+  assert.equal(runningCount(none), 0);
+  assert.deepEqual([dev?.status, dev?.tail], ['ended', 'Ended']);
+});
+
+test('a task started after the latest list runs until a newer list says otherwise', () => {
+  const tasks = backgroundTasks(items, 'working', listed(0, []));
+  assert.equal(tasks.find((t) => t.id === 't1')?.status, 'running');
+});
+
+test("the transcript's end for a task beats a list that still has it", () => {
+  const tasks = backgroundTasks(
+    items,
+    'background',
+    listed(50, [
+      { id: 'bg2', type: 'shell', command: 'pnpm build' },
+      { id: 'ag1', type: 'subagent' },
+    ]),
+  );
+  assert.equal(tasks.find((t) => t.id === 't5')?.status, 'fail');
+  assert.equal(tasks.find((t) => t.id === 't3')?.status, 'ended');
+  // Matched by Claude Code's id, so neither shows twice.
+  assert.equal(tasks.length, 5);
+});
+
+test("work only claude code's list knows of shows as running, with its type", () => {
+  const tasks = backgroundTasks(
+    items,
+    'background',
+    listed(50, [
+      { id: 'bg1', type: 'shell' },
+      { id: 'tm1', type: 'teammate', description: 'Write the release notes\nfor 2.4' },
+      { id: 'mo1', type: 'monitor', server: 'harbor-ci', tool: 'watch_build' },
+      { id: 'wf1', type: 'workflow', name: 'nightly-triage' },
+      { id: 'cr1', type: 'cron', description: 'check the deploy', schedule: '*/5 * * * *' },
+      { id: 'sh9', type: 'shell', command: 'tail -f logs/atlas.log' },
+    ]),
+  );
+  assert.deepEqual(
+    tasks.slice(5).map((t) => [t.id, t.kind, t.label, t.title, t.command, t.status, t.startedAt]),
+    [
+      ['tm1', 'subagent', 'Teammate', 'Write the release notes', undefined, 'running', undefined],
+      ['mo1', 'shell', 'Monitor', 'harbor-ci · watch_build', undefined, 'running', undefined],
+      ['wf1', 'subagent', 'Workflow', 'nightly-triage', undefined, 'running', undefined],
+      ['cr1', 'shell', 'Scheduled', 'check the deploy', '*/5 * * * *', 'running', undefined],
+      [
+        'sh9',
+        'shell',
+        undefined,
+        'Background command',
+        'tail -f logs/atlas.log',
+        'running',
+        undefined,
+      ],
+    ],
+  );
+  assert.equal(runningCount(tasks), 6);
+  assert.equal(arrangeTasks(tasks).running.length, 6);
+  assert.equal(runningLine(6), '6 background tasks running');
+  assert.equal(runningLine(1), '1 background task running');
+});
+
+test('listed work has ended with its session', () => {
+  const tasks = backgroundTasks([], 'offline', listed(50, [{ id: 'mo1', type: 'monitor' }]));
+  assert.deepEqual(
+    tasks.map((t) => [t.status, t.tail]),
+    [['ended', 'The session ended']],
+  );
+  assert.equal(arrangeTasks(tasks).finished.length, 1);
 });

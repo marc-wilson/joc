@@ -22,6 +22,7 @@ import {
   elapsed,
   FINISHED_SHOWN,
   latestStep,
+  runningCount,
   taskSteps,
 } from './background.ts';
 import { MarkdownText } from './Conversation.tsx';
@@ -36,11 +37,13 @@ interface Props {
 
 // A running time ticks on a clock, which keeps its width; a finished one reads compactly.
 const runTime = (t: BackgroundTask, now: number) =>
-  t.status === 'running'
-    ? clock(t.startedAt, now)
-    : t.endedAt
-      ? elapsed(t.startedAt, t.endedAt)
-      : undefined;
+  !t.startedAt
+    ? undefined
+    : t.status === 'running'
+      ? clock(t.startedAt, now)
+      : t.endedAt
+        ? elapsed(t.startedAt, t.endedAt)
+        : undefined;
 
 const copy = (text: string) => navigator.clipboard?.writeText(text).catch(() => {});
 
@@ -65,7 +68,7 @@ export function BackgroundView({ sessionId, tasks }: Props) {
   useEffect(() => {
     shownRunning.current = running.map((t) => t.id);
   });
-  const stillRunning = running.filter((t) => t.status === 'running').length;
+  const stillRunning = runningCount(running);
   // An opened row stays shown even past the latest few.
   const shownFinished = finished.filter(
     (t, i) => showAll || i < FINISHED_SHOWN || open.includes(t.id),
@@ -137,9 +140,10 @@ function TaskItem({
   fadeIn: boolean;
 }) {
   const running = task.status === 'running';
-  // Only a subagent has steps of its own; they're read while it runs or is open.
+  // Only a subagent the transcript started has steps of its own; they're read while it runs or
+  // is open. Work only Claude Code's list knows of has none here.
   const steps = useConversation(
-    task.kind === 'subagent' && (running || open) ? sessionId : undefined,
+    task.kind === 'subagent' && task.startedAt && (running || open) ? sessionId : undefined,
     task.id,
   );
   return (
@@ -166,7 +170,7 @@ function TaskDetails({ task, steps }: { task: BackgroundTask; steps: Conversatio
   const subagent = task.kind === 'subagent';
   const running = task.status === 'running';
   const command = task.fullCommand ?? task.command;
-  const lines = subagent ? taskSteps(steps, task.startedAt, running) : [];
+  const lines = subagent && task.startedAt ? taskSteps(steps, task.startedAt, running) : [];
   return (
     <TaskDetailsPanel>
       {subagent ? (

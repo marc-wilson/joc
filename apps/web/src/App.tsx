@@ -22,7 +22,7 @@ import {
 import { Fragment, useEffect, useState } from 'react';
 import { apiFetch } from './auth.ts';
 import { BackgroundView } from './Background.tsx';
-import { backgroundTasks } from './background.ts';
+import { backgroundTasks, runningCount, runningLine } from './background.ts';
 import { ChangesView } from './Changes.tsx';
 import { Conversation } from './Conversation.tsx';
 import {
@@ -51,7 +51,11 @@ const FILTER_ID = 'session-filter';
 
 /** The row's activity line: what Claude is doing, or, once it stopped reporting, what it last did. */
 function activityOf(s: Session, now: number): string | undefined {
-  const activity = s.activity && plain(s.activity);
+  // Work running on in the background is counted from Claude Code's list, as the tab counts it.
+  const activity =
+    s.state === 'background' && s.background?.tasks.length
+      ? runningLine(s.background.tasks.length)
+      : s.activity && plain(s.activity);
   if (!isQuiet(s, now)) return activity;
   const silent = `No word from ${s.machine ?? 'its machine'}`;
   return activity ? `${silent} · last: ${activity}` : silent;
@@ -122,8 +126,8 @@ export default function App() {
   useReadWhileViewing(useAlerts(), selected?.id);
   const items = useConversation(selected?.id);
   const changes = useChanges(selected?.id);
-  const tasks = selected ? backgroundTasks(items, selected.state) : [];
-  const running = tasks.filter((t) => t.status === 'running').length;
+  const tasks = selected ? backgroundTasks(items, selected.state, selected.background) : [];
+  const running = runningCount(tasks);
   const [tab, setTab] = useState('conversation');
   // The Changes tab needs the width, so the session list folds into a rail of state dots.
   const [listOpen, setListOpen] = useState(false);
