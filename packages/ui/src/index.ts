@@ -20,6 +20,8 @@ export {
 export {
   Button,
   type ButtonProps,
+  ChoiceField,
+  type ChoiceFieldProps,
   SegmentedControl,
   type SegmentedControlProps,
   Switch,
@@ -108,6 +110,8 @@ export {
   type SessionHeaderProps,
   SessionLink,
   type SessionLinkProps,
+  SessionListNote,
+  type SessionListNoteProps,
   SessionRail,
   type SessionRailGroup,
   type SessionRailProps,

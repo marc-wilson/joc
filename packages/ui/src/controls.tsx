@@ -63,6 +63,8 @@ export interface TextInputProps {
   type?: 'text' | 'password';
   autoComplete?: string;
   autoFocus?: boolean;
+  /** The text as typed, on every change. */
+  onChange?: (value: string) => void;
 }
 
 export function TextInput({
@@ -80,6 +82,7 @@ export function TextInput({
   type = 'text',
   autoComplete,
   autoFocus,
+  onChange,
 }: TextInputProps) {
   const inputId = id || `in-${(label || 'x').replace(/\W+/g, '-').toLowerCase()}`;
   return (
@@ -101,6 +104,7 @@ export function TextInput({
           className={cx(mono && 'is-mono')}
           placeholder={placeholder}
           defaultValue={value}
+          onChange={onChange && ((e) => onChange(e.currentTarget.value))}
           disabled={disabled}
           aria-invalid={!!error}
           aria-describedby={`${inputId}-hint`}
@@ -183,6 +187,26 @@ export function SegmentedControl({ options, value, onChange, label }: SegmentedC
           </button>
         );
       })}
+    </div>
+  );
+}
+
+export interface ChoiceFieldProps {
+  label: string;
+  /** One line under the choices, e.g. what the setting does. */
+  hint?: string;
+  options: { id: string; label: string }[];
+  value?: string;
+  onChange?: (id: string) => void;
+}
+
+/** A labelled segmented control, for a setting with a few fixed choices. */
+export function ChoiceField({ label, hint, options, value, onChange }: ChoiceFieldProps) {
+  return (
+    <div className="joc-field joc-choice">
+      <span className="joc-field__label">{label}</span>
+      <SegmentedControl label={label} options={options} value={value} onChange={onChange} />
+      {hint ? <span className="joc-field__hint">{hint}</span> : null}
     </div>
   );
 }
