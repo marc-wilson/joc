@@ -478,6 +478,8 @@ h4.joc-taskd__label { margin: 0; }
 .joc-composer__bar .joc-code-inline { white-space: nowrap; }
 /* A picker near the bottom of the window, such as the composer's machine, opens upwards. */
 .joc-menu__list.is-above { top: auto; bottom: calc(100% + var(--space-1)); }
+/* A picker's button: its choice and chevron on one line. */
+.joc-menu__button:not(.joc-btn--icon) .joc-btn__content > span { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
 
 /* HistoryRow v2 with a Resume slot (`.joc-hist__act`) between the time and the command. The
    slot is fixed, so the commands still line up whatever button a row shows. */
