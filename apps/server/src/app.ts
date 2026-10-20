@@ -10,6 +10,7 @@ import {
   ChangesReport,
   type ClaimedAnswer,
   type ClaimedDeletes,
+  type ClaimedResumes,
   CommandsReport,
   DeleteClaim,
   type DeleteRefused,
@@ -31,6 +32,9 @@ import {
   ProblemsReport,
   PromptRequest,
   type ReadsClaim,
+  ResumeClaim,
+  ResumeRequest,
+  ResumeResult,
   ReviewSettings,
   reviewPrompt,
   type ServerVersion,
@@ -91,6 +95,7 @@ import { getPrefs, patchPrefs } from './prefs.ts';
 import { listProblems, saveProblems } from './problems.ts';
 import { claimPrompts, queuePrompt } from './prompts.ts';
 import { RateLimit } from './rate-limit.ts';
+import { cancelResume, claimResumes, finishResume, listResumes, requestResume } from './resumes.ts';
 import { newSecret, secretsEqual } from './secrets.ts';
 import {
   applyReport,
@@ -668,6 +673,50 @@ export function createApp({
     return (await finishDelete(c.get('owner'), c.req.param('id'), parsed.data))
       ? c.body(null, 204)
       : c.json({ error: 'No such delete' }, 404);
+  });
+
+  // ── Resuming ended sessions, on a machine that has them ───────────────────
+
+  // The owner's resumes of the last day, for the dashboard to show how each stands.
+  app.get('/api/resumes', async (c) => {
+    if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
+    return c.json(await listResumes(c.get('owner')));
+  });
+
+  // From the dashboard: resume this ended session. Only a person resumes, never a machine.
+  app.post('/api/resumes', async (c) => {
+    if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
+    const parsed = ResumeRequest.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    const { sessionId, machine } = parsed.data;
+    const outcome = await requestResume(c.get('owner'), sessionId, machine);
+    return outcome.ok ? c.json(outcome.resume, 202) : c.json({ error: outcome.reason }, 400);
+  });
+
+  // From the dashboard: withdraw a resume no machine has taken yet.
+  app.post('/api/resumes/:id/cancel', async (c) => {
+    if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
+    return (await cancelResume(c.get('owner'), c.req.param('id')))
+      ? c.body(null, 204)
+      : c.json({ error: 'It already started, or there is no such resume' }, 409);
+  });
+
+  // From a machine's plugin: the resumes waiting for that machine. A browser can't take them.
+  app.post('/api/resumes/claim', async (c) => {
+    if (!machine(c)) return c.json({ error: 'Forbidden' }, 403);
+    const parsed = ResumeClaim.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    const resumes = await claimResumes(c.get('owner'), parsed.data.machine, c.get('device'));
+    return c.json({ resumes } satisfies ClaimedResumes);
+  });
+
+  app.post('/api/resumes/:id/result', async (c) => {
+    if (!machine(c)) return c.json({ error: 'Forbidden' }, 403);
+    const parsed = ResumeResult.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    return (await finishResume(c.get('owner'), c.req.param('id'), parsed.data))
+      ? c.body(null, 204)
+      : c.json({ error: 'No such resume' }, 404);
   });
 
   // ── Images: pasted in the dashboard, or in a session's conversation ─────────
