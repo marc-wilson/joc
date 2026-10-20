@@ -308,7 +308,7 @@ export default function App() {
                 }}
               />
               {tab === 'background' ? (
-                <BackgroundView key={selected.id} tasks={tasks} />
+                <BackgroundView key={selected.id} sessionId={selected.id} tasks={tasks} />
               ) : tab === 'changes' ? (
                 <ChangesView
                   key={selected.id}

@@ -118,6 +118,111 @@ function UserMessage({
 /** A collapsed message's one line: its first line of text, as plain text. */
 const firstLine = (text: string) => plain(text.split('\n').find((l) => l.trim()) ?? '');
 
+/** Claude's markdown, as a message shows it. */
+export function MarkdownText({ children }: { children: string }) {
+  return (
+    <div className="joc-md">
+      <Markdown remarkPlugins={[remarkGfm]} components={markdown}>
+        {children}
+      </Markdown>
+    </div>
+  );
+}
+
+interface ThreadItemsProps {
+  items: ConversationItem[];
+  /** Whether the last tool call may still be running. */
+  working: boolean;
+  /** Claude's messages that are folded, by id. */
+  folded: string[];
+  onFold: (id: string) => void;
+  onOpen?: (viewing: Viewing) => void;
+}
+
+/** Conversation items as messages, for a `Thread`: a session's, or a subagent's own steps. */
+export function ThreadItems({
+  items,
+  working,
+  folded,
+  onFold,
+  onOpen = () => {},
+}: ThreadItemsProps) {
+  const results = new Map(
+    items.flatMap((i) => (i.kind === 'tool_result' ? [[i.toolUseId, i] as const] : [])),
+  );
+  const lastCall = items.findLast((i) => i.kind === 'tool_call');
+  const commands = new Map(
+    items.flatMap((i) => (i.kind === 'command' ? [[i.id, i] as const] : [])),
+  );
+  return items.map((item) => {
+    switch (item.kind) {
+      case 'user':
+        return (
+          <UserMessage
+            key={item.id}
+            time={time(item.at)}
+            text={item.text}
+            command={item.command}
+            images={item.images ?? []}
+            onOpen={onOpen}
+          />
+        );
+      case 'command':
+        return (
+          <Message key={item.id} from="user" time={time(item.at)}>
+            <Code>{commandLine(item)}</Code>
+          </Message>
+        );
+      case 'command_output': {
+        const command = item.commandId ? commands.get(item.commandId) : undefined;
+        return (
+          <Message
+            key={item.id}
+            from="tool"
+            name="Output"
+            target={command ? commandLine(command) : undefined}
+            status={item.isError ? 'error' : 'done'}
+            expanded
+          >
+            {item.text}
+          </Message>
+        );
+      }
+      case 'claude':
+        return (
+          <Message
+            key={item.id}
+            from="claude"
+            time={time(item.at)}
+            collapsed={folded.includes(item.id)}
+            preview={firstLine(item.text)}
+            onToggle={() => onFold(item.id)}
+          >
+            <MarkdownText>{item.text}</MarkdownText>
+          </Message>
+        );
+      case 'tool_call': {
+        const result = results.get(item.toolUseId);
+        const running = !result && item === lastCall && working;
+        return (
+          <Message
+            key={item.id}
+            from="tool"
+            name={item.name}
+            target={item.summary}
+            status={running ? 'running' : result?.isError ? 'error' : 'done'}
+          >
+            {result?.text || 'No output'}
+          </Message>
+        );
+      }
+      default:
+        // Tool results render inside their call above.
+        return null;
+    }
+  });
+}
+
 interface Props {
   sessionId: string;
   items: ConversationItem[];
@@ -138,14 +243,6 @@ export function Conversation({ sessionId, items, pending, state }: Props) {
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
   });
 
-  const results = new Map(
-    items.flatMap((i) => (i.kind === 'tool_result' ? [[i.toolUseId, i] as const] : [])),
-  );
-  const lastCall = items.findLast((i) => i.kind === 'tool_call');
-  const commands = new Map(
-    items.flatMap((i) => (i.kind === 'command' ? [[i.id, i] as const] : [])),
-  );
-
   return (
     <div
       className="app-main__scroll"
@@ -158,77 +255,13 @@ export function Conversation({ sessionId, items, pending, state }: Props) {
     >
       {items.length || pending.length ? (
         <Thread>
-          {items.map((item) => {
-            switch (item.kind) {
-              case 'user':
-                return (
-                  <UserMessage
-                    key={item.id}
-                    time={time(item.at)}
-                    text={item.text}
-                    command={item.command}
-                    images={item.images ?? []}
-                    onOpen={setViewing}
-                  />
-                );
-              case 'command':
-                return (
-                  <Message key={item.id} from="user" time={time(item.at)}>
-                    <Code>{commandLine(item)}</Code>
-                  </Message>
-                );
-              case 'command_output': {
-                const command = item.commandId ? commands.get(item.commandId) : undefined;
-                return (
-                  <Message
-                    key={item.id}
-                    from="tool"
-                    name="Output"
-                    target={command ? commandLine(command) : undefined}
-                    status={item.isError ? 'error' : 'done'}
-                    expanded
-                  >
-                    {item.text}
-                  </Message>
-                );
-              }
-              case 'claude':
-                return (
-                  <Message
-                    key={item.id}
-                    from="claude"
-                    time={time(item.at)}
-                    collapsed={folded.includes(item.id)}
-                    preview={firstLine(item.text)}
-                    onToggle={() => setFolded(toggled(folded, item.id, !folded.includes(item.id)))}
-                  >
-                    <div className="joc-md">
-                      <Markdown remarkPlugins={[remarkGfm]} components={markdown}>
-                        {item.text}
-                      </Markdown>
-                    </div>
-                  </Message>
-                );
-              case 'tool_call': {
-                const result = results.get(item.toolUseId);
-                const running = !result && item === lastCall && state === 'working';
-                return (
-                  <Message
-                    key={item.id}
-                    from="tool"
-                    name={item.name}
-                    target={item.summary}
-                    status={running ? 'running' : result?.isError ? 'error' : 'done'}
-                  >
-                    {result?.text || 'No output'}
-                  </Message>
-                );
-              }
-              default:
-                // Tool results render inside their call above.
-                return null;
-            }
-          })}
+          <ThreadItems
+            items={items}
+            working={state === 'working'}
+            folded={folded}
+            onFold={(id) => setFolded(toggled(folded, id, !folded.includes(id)))}
+            onOpen={setViewing}
+          />
           {pending.map((p) => (
             <UserMessage
               key={p.id}
