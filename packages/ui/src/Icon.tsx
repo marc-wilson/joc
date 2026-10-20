@@ -31,6 +31,8 @@ const PATHS = {
   external: 'M9 3h4v4M13 3L7.5 8.5M11.5 9.5v3a1 1 0 01-1 1h-7a1 1 0 01-1-1v-7a1 1 0 011-1h3',
   plug: 'M6 1.5v3M10 1.5v3M4 4.5h8v3a4 4 0 01-8 0zM8 11.5v3',
   update: 'M14 8A6 6 0 112 8a6 6 0 0112 0zM8 5v6M5.5 8.5L8 11l2.5-2.5',
+  more: 'M3.5 8h.5M7.75 8h.5M12 8h.5',
+  trash: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 8.5h6l.5-8.5',
 } as const;
 
 export type IconName = keyof typeof PATHS;

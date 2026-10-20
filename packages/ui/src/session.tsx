@@ -30,6 +30,8 @@ export interface SessionRowProps {
   onSelect?: () => void;
   /** Shows a pin button in the time's place on hover or focus. */
   onPinChange?: (pinned: boolean) => void;
+  /** It's gone: the row fades to this line and keeps its place, so nothing below it moves. */
+  removed?: string;
 }
 
 export function SessionRow({
@@ -45,6 +47,7 @@ export function SessionRow({
   quiet,
   onSelect,
   onPinChange,
+  removed,
 }: SessionRowProps) {
   return (
     <div
@@ -53,9 +56,12 @@ export function SessionRow({
         `joc-srow--${state}`,
         selected && 'is-selected',
         quiet && 'is-quiet',
+        removed && 'is-removed',
       )}
       role="option"
       aria-selected={!!selected}
+      aria-hidden={removed ? 'true' : undefined}
+      inert={removed ? true : undefined}
       tabIndex={0}
       onClick={onSelect}
       onKeyDown={(e) => {
@@ -121,6 +127,7 @@ export function SessionRow({
           <Icon name="pin" size={14} filled={pinned} />
         </button>
       ) : null}
+      {removed ? <span className="joc-srow__removed">{removed}</span> : null}
     </div>
   );
 }

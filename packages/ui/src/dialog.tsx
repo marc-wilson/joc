@@ -110,3 +110,62 @@ export function Dialog({
     </dialog>
   );
 }
+
+export interface ConfirmDialogProps {
+  /** The question, e.g. "Delete 2 sessions?". */
+  title: string;
+  /** What happens, in a sentence or two. */
+  children?: ReactNode;
+  confirmLabel: string;
+  /** For what can't be undone: the confirm button is the danger one. */
+  danger?: boolean;
+  /** While the request is on its way: the confirm button spins and both are held. */
+  busy?: boolean;
+  /** Why it didn't go through, shown above the buttons. */
+  error?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+/** Asks before doing something. Focus starts on the close button, so Enter never confirms. */
+export function ConfirmDialog({
+  title,
+  children,
+  confirmLabel,
+  danger,
+  busy,
+  error,
+  onConfirm,
+  onCancel,
+}: ConfirmDialogProps) {
+  return (
+    <Dialog
+      label={title}
+      title={title}
+      className="joc-confirm"
+      onClose={() => {
+        if (!busy) onCancel();
+      }}
+      footer={
+        <>
+          <span className="joc-confirm__error" role="alert">
+            {error}
+          </span>
+          <Button disabled={busy} onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button
+            variant={danger ? 'danger' : 'primary'}
+            loading={busy}
+            disabled={busy}
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </Button>
+        </>
+      }
+    >
+      <div className="joc-confirm__body">{children}</div>
+    </Dialog>
+  );
+}
