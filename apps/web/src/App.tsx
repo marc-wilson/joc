@@ -6,6 +6,7 @@ import {
   type Session,
 } from '@joc/protocol';
 import {
+  Button,
   Composer,
   EmptyState,
   NewSessionButton,
@@ -67,7 +68,9 @@ export default function App() {
   const [tab, setTab] = useState('conversation');
   // The Changes tab needs the width, so the session list folds into a rail of state dots.
   const [listOpen, setListOpen] = useState(false);
-  const railed = tab === 'changes' && !listOpen;
+  // You can also fold it on any tab; that choice is remembered in this browser.
+  const [listFolded, setListFolded] = usePref('joc:list-folded', false);
+  const railed = listFolded || (tab === 'changes' && !listOpen);
   // Session list groups you folded, remembered in this browser.
   const [folded, setFolded] = usePref<string[]>('joc:folded-groups', []);
   const [pending, setPending] = useState<PendingPrompt[]>([]);
@@ -113,7 +116,10 @@ export default function App() {
                   selected: s.id === selected?.id,
                 })),
               }))}
-              onExpand={() => setListOpen(true)}
+              onExpand={() => {
+                setListFolded(false);
+                setListOpen(true);
+              }}
               onSelect={(s) => setSelectedId(s.id)}
             />
           </aside>
@@ -121,6 +127,14 @@ export default function App() {
           <aside className="joc-app__side">
             <div className="app-side__filter">
               <TextInput placeholder="Filter sessions" kbd="/" />
+              <Button
+                variant="ghost"
+                size="sm"
+                icon="chevronLeft"
+                aria-label="Collapse session list"
+                title="Collapse session list"
+                onClick={() => setListFolded(true)}
+              />
             </div>
             <div className="app-side__list" role="listbox" aria-label="Sessions">
               {groupByRepo(sessions).map(([repo, list]) => (
