@@ -24,10 +24,12 @@ import { backgroundTasks } from './background.ts';
 import { ChangesView } from './Changes.tsx';
 import { Conversation } from './Conversation.tsx';
 import {
+  useAlerts,
   useChanges,
   useConversation,
   useHistory,
   useNow,
+  useReadWhileViewing,
   useSessionSettings,
   useSessions,
 } from './hooks.ts';
@@ -107,7 +109,7 @@ export default function App() {
     sessions[0];
   const keep = useSessionSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const needs = sessions.filter((s) => s.state === 'needs').length;
+  useReadWhileViewing(useAlerts(), selected?.id);
   const items = useConversation(selected?.id);
   const changes = useChanges(selected?.id);
   const tasks = selected ? backgroundTasks(items, selected.state) : [];
@@ -152,7 +154,7 @@ export default function App() {
 
   return (
     <div className="joc-app app">
-      <Nav page="sessions" needs={needs} connected={connected} />
+      <Nav page="sessions" connected={connected} viewing={selected?.id} />
       <div className="joc-app__body">
         {railed ? (
           <aside className="joc-app__side is-rail">
