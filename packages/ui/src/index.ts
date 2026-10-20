@@ -168,7 +168,6 @@ export {
   type ReviewRowProps,
 } from './pr.tsx';
 export { resumeCommand, shortId, shortPath } from './resume.ts';
-export { ReviewSessionRow, type ReviewSessionRowProps } from './review-session.tsx';
 export {
   Divider,
   EndedTag,
@@ -177,6 +176,7 @@ export {
   type ResumeStepStatus,
   ResumeSteps,
 } from './resuming.tsx';
+export { ReviewSessionRow, type ReviewSessionRowProps } from './review-session.tsx';
 export {
   NewSessionButton,
   type NewSessionButtonProps,

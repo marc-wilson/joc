@@ -14,6 +14,7 @@ const AlertsEvent = z.object({ type: z.literal('alerts') });
 const LaunchesEvent = z.object({ type: z.literal('launches') });
 const DeletesEvent = z.object({ type: z.literal('deletes') });
 const DeletedEvent = z.object({ type: z.literal('deleted'), sessionId: z.string() });
+const ResumesEvent = z.object({ type: z.literal('resumes') });
 const PrefsEvent = z.object({ type: z.literal('prefs'), prefs: Prefs });
 const Messages = z.object({
   type: z.literal('messages'),
@@ -33,6 +34,7 @@ export type LiveEvent =
   | z.infer<typeof LaunchesEvent>
   | z.infer<typeof DeletesEvent>
   | z.infer<typeof DeletedEvent>
+  | z.infer<typeof ResumesEvent>
   | z.infer<typeof PrefsEvent>
   | { type: 'status'; connected: boolean };
 
@@ -74,6 +76,7 @@ function start(): () => void {
     on('launches', LaunchesEvent);
     on('deletes', DeletesEvent);
     on('deleted', DeletedEvent);
+    on('resumes', ResumesEvent);
     on('prefs', PrefsEvent);
     source.addEventListener('ping', () => {
       lastMessage = Date.now();

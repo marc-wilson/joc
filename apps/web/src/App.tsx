@@ -43,6 +43,7 @@ import {
   useHistory,
   useNow,
   useReadWhileViewing,
+  useResumes,
   useSessionSettings,
   useSessions,
 } from './hooks.ts';
@@ -52,6 +53,7 @@ import { useNoteData } from './note-data.ts';
 import { delivered, type PendingPrompt } from './pending.ts';
 import { plain } from './plain.ts';
 import { updatePrefs, usePrefs } from './prefs.ts';
+import { useResumeView } from './Resuming.tsx';
 import { reviewGone, reviewRowText } from './review-rows.ts';
 import { isQuiet, keepNote, matchesFilter } from './session-list.ts';
 import {
@@ -64,7 +66,7 @@ import {
   SORT_OPTIONS,
 } from './sessions.ts';
 import { sessionSuggestions } from './slash-commands.ts';
-import { age, clock } from './time.ts';
+import { age, ago, clock } from './time.ts';
 import { toggled } from './toggled.ts';
 
 const UNTITLED = 'New session';
@@ -140,11 +142,14 @@ function SessionActions({
   line,
   now,
   onDelete,
+  onResume,
 }: {
   session: Session;
   line?: { text: string; failed: boolean };
   now: number;
   onDelete: () => void;
+  /** Resume, for an ended session that can be resumed now. */
+  onResume?: () => void;
 }) {
   return (
     <>
@@ -153,6 +158,11 @@ function SessionActions({
           {line.failed ? <CIMark status="fail" size={12} /> : null}
           {line.text}
         </span>
+      ) : null}
+      {onResume ? (
+        <Button variant="secondary" size="sm" onClick={onResume}>
+          Resume
+        </Button>
       ) : null}
       <OverflowMenu
         label="Session actions"
@@ -283,6 +293,10 @@ export default function App() {
   const [pending, setPending] = useState<PendingPrompt[]>([]);
   // A sent prompt shows until the session's own transcript has it.
   const waiting = pending.filter((p) => p.sessionId === selected?.id && !delivered(items, p));
+  // An ended session's Resume, and how starting it back up goes.
+  const resumes = useResumes();
+  const messages = items.filter((i) => i.kind === 'user' || i.kind === 'claude').length;
+  const resuming = useResumeView(selected, resumes, sessions, messages, now);
 
   /** Where the session's delete stands, while one is under way or after it failed. */
   function deletingLine(s: Session): { text: string; failed: boolean } | undefined {
@@ -504,6 +518,10 @@ export default function App() {
               <SessionHeader
                 title={selected.title ?? UNTITLED}
                 state={selected.state}
+                ended={resuming?.tag}
+                when={
+                  selected.state === 'offline' ? `Ended ${ago(selected.updatedAt, now)}` : undefined
+                }
                 repo={selected.repo}
                 branch={selected.branch}
                 worktree={selected.worktree}
@@ -536,6 +554,7 @@ export default function App() {
                   line={deletingLine(selected)}
                   now={now}
                   onDelete={() => setDeleting(selected)}
+                  onResume={resuming?.canResume ? resuming.resume : undefined}
                 />
               </SessionHeader>
               {tab === 'background' ? (
@@ -559,6 +578,7 @@ export default function App() {
                     pending={waiting}
                     state={selected.state}
                     session={selected}
+                    divider={resuming?.divider}
                   />
                   <div className="app-main__dock" ref={dockRef}>
                     {/* One composer whether or not the session is online, so going offline keeps
@@ -566,6 +586,7 @@ export default function App() {
                     <Composer
                       key={selected.id}
                       disabled={selected.state === 'offline'}
+                      resume={resuming?.composer}
                       hint={
                         selected.state === 'offline'
                           ? 'Session went offline. You can send again when it reconnects.'

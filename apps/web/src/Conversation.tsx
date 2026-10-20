@@ -3,6 +3,7 @@ import {
   Attachment,
   Code,
   CodeBlock,
+  Divider,
   EmptyState,
   formatBytes,
   ImageViewer,
@@ -139,6 +140,8 @@ interface ThreadItemsProps {
   folded: string[];
   onFold: (id: string) => void;
   onOpen?: (viewing: Viewing) => void;
+  /** Something drawn between the items, before the item at `index`, such as a divider. */
+  insert?: { index: number; node: ReactNode };
 }
 
 /** Conversation items as messages, for a `Thread`: a session's, or a subagent's own steps. */
@@ -148,6 +151,7 @@ export function ThreadItems({
   folded,
   onFold,
   onOpen = () => {},
+  insert,
 }: ThreadItemsProps) {
   const results = new Map(
     items.flatMap((i) => (i.kind === 'tool_result' ? [[i.toolUseId, i] as const] : [])),
@@ -156,7 +160,7 @@ export function ThreadItems({
   const commands = new Map(
     items.flatMap((i) => (i.kind === 'command' ? [[i.id, i] as const] : [])),
   );
-  return items.map((item) => {
+  const rendered = items.map((item) => {
     switch (item.kind) {
       case 'user':
         return (
@@ -223,6 +227,8 @@ export function ThreadItems({
         return null;
     }
   });
+  if (!insert) return rendered;
+  return [...rendered.slice(0, insert.index), insert.node, ...rendered.slice(insert.index)];
 }
 
 interface Props {
@@ -232,10 +238,19 @@ interface Props {
   state: SessionState;
   /** The session, for answering what it waits on from here. */
   session?: Session;
+  /** A line across the thread, after the items up to `at` (at the end without one). */
+  divider?: { text: string; at?: string };
 }
 
 /** A session's conversation, kept pinned to the newest message while you're at the bottom. */
-export function Conversation({ sessionId, items, pending, state, session }: Props) {
+export function Conversation({ sessionId, items, pending, state, session, divider }: Props) {
+  const at = divider?.at;
+  const insert = divider
+    ? {
+        index: at ? items.filter((i) => i.at <= at).length : items.length,
+        node: <Divider key="divider">{divider.text}</Divider>,
+      }
+    : undefined;
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const [viewing, setViewing] = useState<Viewing>();
@@ -270,6 +285,7 @@ export function Conversation({ sessionId, items, pending, state, session }: Prop
               })
             }
             onOpen={setViewing}
+            insert={insert}
           />
           {pending.map((p) => (
             <UserMessage
