@@ -5,8 +5,10 @@ import {
   arrangeTasks,
   type BackgroundTask,
   backgroundTasks,
+  clock,
   elapsed,
   latestStep,
+  taskSteps,
 } from './background.ts';
 
 const at = (s: number) => new Date(Date.UTC(2026, 9, 18, 10, 0, s)).toISOString();
@@ -274,4 +276,24 @@ test('a subagent is doing what its latest step says', () => {
     latestStep([step(0, { kind: 'claude', text: '\nSign-in starts in `src/auth.ts`.\nMore' })]),
     'Sign-in starts in src/auth.ts.',
   );
+});
+
+test('a running time reads as a clock that keeps its width', () => {
+  assert.equal(clock(at(0), at(8)), '0:08');
+  assert.equal(clock(at(0), Date.parse(at(0)) + 252_000), '4:12');
+  assert.equal(clock(at(0), Date.parse(at(0)) + 3_723_000), '1:02:03');
+});
+
+test("a subagent's steps are its tool calls, timed from its start, the last one current", () => {
+  const steps: ConversationItem[] = [
+    { id: 's1', at: at(2), kind: 'tool_call', toolUseId: 'u1', name: 'Glob', summary: '**/*.ts' },
+    { id: 's2', at: at(3), kind: 'tool_result', toolUseId: 'u1', isError: false, text: '18' },
+    { id: 's3', at: at(9), kind: 'claude', text: 'Reading them now.' },
+    { id: 's4', at: at(50), kind: 'tool_call', toolUseId: 'u2', name: 'Read', summary: 'a.ts' },
+  ];
+  assert.deepEqual(taskSteps(steps, at(0), true), [
+    { id: 's1', tool: 'Glob', target: '**/*.ts', time: '0:02', status: 'done' },
+    { id: 's4', tool: 'Read', target: 'a.ts', time: '0:50', status: 'current' },
+  ]);
+  assert.equal(taskSteps(steps, at(0), false)[1]?.status, 'done');
 });
