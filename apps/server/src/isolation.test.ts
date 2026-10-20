@@ -15,6 +15,8 @@ import {
   Launch,
   MachineProblem,
   NotificationsSnapshot,
+  Prefs,
+  PrefsSnapshot,
   ReadsClaim,
   ReviewSettings,
   Session,
@@ -112,6 +114,8 @@ test('every API route needs an owner', async () => {
     ['POST', '/api/notifications/reads/claim'],
     ['GET', '/api/settings/sessions'],
     ['PUT', '/api/settings/sessions'],
+    ['GET', '/api/prefs'],
+    ['PATCH', '/api/prefs'],
     ['GET', '/api/alerts'],
     ['POST', '/api/alerts/read'],
     ['POST', '/api/alerts/read-all'],
@@ -905,4 +909,79 @@ test("a live stream hears only its owner's launches", async () => {
     assert.equal(res.status, 201);
   });
   assert.doesNotMatch(heard, /event: launches/);
+});
+
+test("preferences are each owner's own, only a signed-in person's, and heard only by them", async () => {
+  const asPerson = (who: Who, body?: unknown) =>
+    app.request('/api/prefs', {
+      method: body === undefined ? 'GET' : 'PATCH',
+      headers: {
+        cookie: cookies.get(who) ?? '',
+        host: 'joc.test',
+        origin: 'http://joc.test',
+        'content-type': 'application/json',
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  await call('alice', '/api/reports', report('alice-pref'));
+  await call('bob', '/api/reports', report('bob-pref'));
+
+  assert.deepEqual(await read(await asPerson('alice'), PrefsSnapshot), {
+    saved: false,
+    prefs: {
+      browserNotifications: false,
+      pinned: [],
+      foldedGroups: [],
+      listFolded: false,
+      diffMode: 'unified',
+      sessions: [],
+    },
+  });
+
+  // Alice turns notifications on and pins her session. Bob's open tab hears nothing of it.
+  const heard = await listen('bob', async () => {
+    const res = await asPerson('alice', {
+      browserNotifications: true,
+      // Bob's session id is no session of Alice's, so it's dropped.
+      pinned: ['alice-pref', 'bob-pref'],
+      sessions: [
+        { id: 'alice-pref', foldedMessages: ['m1'] },
+        { id: 'bob-pref', foldedMessages: ['m2'] },
+      ],
+    });
+    assert.equal(res.status, 200);
+  });
+  assert.doesNotMatch(heard, /event: prefs/);
+
+  const alice = await read(await asPerson('alice'), PrefsSnapshot);
+  assert.equal(alice.saved, true);
+  assert.equal(alice.prefs.browserNotifications, true);
+  assert.deepEqual(alice.prefs.pinned, ['alice-pref']);
+  assert.deepEqual(
+    alice.prefs.sessions.map((s) => [s.id, s.foldedMessages]),
+    [['alice-pref', ['m1']]],
+  );
+  const bob = await read(await asPerson('bob'), PrefsSnapshot);
+  assert.equal(bob.saved, false);
+  assert.equal(bob.prefs.browserNotifications, false);
+
+  // A patch keeps what it doesn't name, and Alice's other tabs hear the result.
+  const own = await listen('alice', async () => {
+    assert.equal((await asPerson('alice', { listFolded: true })).status, 200);
+  });
+  assert.match(own, /event: prefs/);
+  const after = await read(await asPerson('alice'), PrefsSnapshot);
+  assert.equal(after.prefs.listFolded, true);
+  assert.equal(after.prefs.browserNotifications, true);
+  assert.equal(Prefs.safeParse(after.prefs).success, true);
+
+  // A machine's token can't read or change them, and a bad value is refused.
+  assert.equal((await call('alice', '/api/prefs')).status, 403);
+  const patched = await app.request('/api/prefs', {
+    method: 'PATCH',
+    headers: { ...auth('alice'), 'content-type': 'application/json' },
+    body: JSON.stringify({ browserNotifications: false }),
+  });
+  assert.equal(patched.status, 403);
+  assert.equal((await asPerson('alice', { diffMode: 'sideways' })).status, 400);
 });

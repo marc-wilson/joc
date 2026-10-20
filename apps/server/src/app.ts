@@ -16,6 +16,7 @@ import {
   MessagesReport,
   NotificationsReport,
   PluginVersion,
+  PrefsPatch,
   ProblemsReport,
   PromptRequest,
   type ReadsClaim,
@@ -70,6 +71,7 @@ import {
   saveNotifications,
 } from './notifications.ts';
 import { type Owner, ownerFrom } from './owner.ts';
+import { getPrefs, onPrefs, patchPrefs } from './prefs.ts';
 import { listProblems, saveProblems } from './problems.ts';
 import { claimPrompts, queuePrompt } from './prompts.ts';
 import { RateLimit } from './rate-limit.ts';
@@ -335,6 +337,19 @@ export function createApp({
     return c.json(parsed.data);
   });
 
+  // Pins, folds and the notifications switch: the person's own, never a machine's.
+  app.get('/api/prefs', async (c) => {
+    if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
+    return c.json(await getPrefs(c.get('owner')));
+  });
+
+  app.patch('/api/prefs', bodyLimit({ maxSize: 512 * 1024 }), async (c) => {
+    if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
+    const parsed = PrefsPatch.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    return c.json(await patchPrefs(c.get('owner'), parsed.data));
+  });
+
   // ── GitHub, as the person's plugin reads it through `gh` ────────────────────
 
   app.post('/api/github', async (c) => {
@@ -569,6 +584,7 @@ export function createApp({
           onNotifications(owner, () => publish({ type: 'notifications' })),
           onAlerts(owner, () => publish({ type: 'alerts' })),
           onLaunches(owner, () => publish({ type: 'launches' })),
+          onPrefs(owner, (prefs) => publish({ type: 'prefs', prefs })),
         ];
         const unsubscribeAll = () => {
           for (const unsubscribe of unsubscribers) unsubscribe();
