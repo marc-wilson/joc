@@ -15,6 +15,7 @@ import {
 import { forgetAlerts } from './alerts.ts';
 import { forgetAnswers } from './answers.ts';
 import { forgetChanges } from './changes.ts';
+import { forgetCommands } from './commands.ts';
 import { deleteImages } from './images.ts';
 import { forgetLaunches } from './launches.ts';
 import { forgetMessages, imagesShown } from './messages.ts';
@@ -287,6 +288,7 @@ async function forget(owner: Owner, sessionId: string, now: number): Promise<voi
     images.filter((i) => !kept.has(i)),
   );
   await forgetChanges(owner, sessionId);
+  await forgetCommands(owner, sessionId);
   await forgetAnswers(owner, sessionId);
   await forgetAlerts(owner, sessionId);
   await forgetLaunches(owner, sessionId);

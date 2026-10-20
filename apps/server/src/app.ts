@@ -10,6 +10,7 @@ import {
   ChangesReport,
   type ClaimedAnswer,
   type ClaimedDeletes,
+  CommandsReport,
   DeleteClaim,
   type DeleteRefused,
   DeleteRequest,
@@ -56,6 +57,7 @@ import {
   takeOAuthCookies,
 } from './auth.ts';
 import { getChanges, onChanges, saveChanges } from './changes.ts';
+import { getCommands, onCommands, saveCommands } from './commands.ts';
 import {
   claimDeletes,
   finishDelete,
@@ -482,6 +484,22 @@ export function createApp({
     return changes ? c.json(changes) : c.json({ error: 'No changes reported yet' }, 404);
   });
 
+  // The session's slash commands, from its plugin, for the composer's suggestions.
+  app.post('/api/commands', async (c) => {
+    const parsed = CommandsReport.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    if (await isDeleted(c.get('owner'), parsed.data.sessionId)) return ignored(c);
+    // 202 for a stale report: accepted, but a newer list already won.
+    return (await saveCommands(c.get('owner'), parsed.data))
+      ? c.json({ ok: true })
+      : c.body(null, 202);
+  });
+
+  app.get('/api/sessions/:id/commands', async (c) => {
+    const commands = await getCommands(c.get('owner'), c.req.param('id'));
+    return commands ? c.json(commands) : c.json({ error: 'No commands reported yet' }, 404);
+  });
+
   // From the dashboard: queue a prompt for the session.
   app.post('/api/sessions/:id/prompts', async (c) => {
     const owner = c.get('owner');
@@ -716,6 +734,7 @@ export function createApp({
           onSessionUpdate(owner, (session) => publish({ type: 'session', session })),
           onMessages(owner, (sessionId, items) => publish({ type: 'messages', sessionId, items })),
           onChanges(owner, (sessionId) => publish({ type: 'changes', sessionId })),
+          onCommands(owner, (sessionId) => publish({ type: 'commands', sessionId })),
           onGitHub(owner, () => publish({ type: 'github' })),
           onNotifications(owner, () => publish({ type: 'notifications' })),
           onAlerts(owner, () => publish({ type: 'alerts' })),
