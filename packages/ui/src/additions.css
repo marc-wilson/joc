@@ -219,3 +219,6 @@ h4.joc-taskd__label { margin: 0; }
 
 /* Banners: JOC's CopyCommand copies with .joc-copy, which keeps its place as the text scrolls. */
 .joc-banner .joc-copy { flex: none; }
+
+/* Folded message head: the name and time keep to one line; only the summary gives way. */
+.joc-fold__who, .joc-fold__time { flex: none; white-space: nowrap; }
