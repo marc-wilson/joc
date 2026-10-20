@@ -4,8 +4,13 @@ export {
   AgentTeam,
   type AgentTeamMember,
   type AgentTeamProps,
+  TaskDetails,
+  type TaskDetailsProps,
+  type TaskFact,
   TaskRow,
   type TaskRowProps,
+  TaskSection,
+  type TaskSectionProps,
 } from './background.tsx';
 export { ContextMeter, type ContextMeterProps } from './ContextMeter.tsx';
 export { CIBadge, type CIBadgeProps, CIMark, type CIMarkProps } from './ci.tsx';
