@@ -569,6 +569,43 @@ export const ChangesReport = z.object({
 });
 export type ChangesReport = z.infer<typeof ChangesReport>;
 
+/** Where a slash command comes from: Claude Code, the repo's `.claude`, `~/.claude`, a plugin. */
+export const CommandSource = z.enum(['builtin', 'project', 'user', 'plugin']);
+export type CommandSource = z.infer<typeof CommandSource>;
+
+/** The most commands one session's list carries; past it, the rest are left out. */
+export const MAX_SESSION_COMMANDS = 500;
+
+/** One slash command the session can run, as its typeahead lists it. */
+export const SlashCommand = z.object({
+  /** Without the slash. A plugin's carries no `plugin:` prefix; `plugin` names it. */
+  name: z.string().min(1).max(200),
+  description: z.string().max(500),
+  /** Drawn dim after the name, e.g. `<pr>` or `[instructions]`. */
+  argumentHint: z.string().max(200).optional(),
+  source: CommandSource,
+  /** The plugin that adds it, when `source` is `plugin`. */
+  plugin: z.string().max(200).optional(),
+  /** A skill (`SKILL.md`) rather than a command file. */
+  skill: z.boolean().optional(),
+});
+export type SlashCommand = z.infer<typeof SlashCommand>;
+
+/** The session's slash commands, sent when it starts and whenever they change. */
+export const CommandsReport = z.object({
+  sessionId: z.string().min(1),
+  at: z.number().int().positive(),
+  commands: z.array(SlashCommand).max(MAX_SESSION_COMMANDS),
+});
+export type CommandsReport = z.infer<typeof CommandsReport>;
+
+/** A session's slash commands as the dashboard reads them. */
+export const SessionCommands = z.object({
+  commands: z.array(SlashCommand),
+  updatedAt: z.string(),
+});
+export type SessionCommands = z.infer<typeof SessionCommands>;
+
 /** A prompt typed in the dashboard, for the session's plugin to submit: text, images or both. */
 export const PromptRequest = z
   .object({
@@ -770,6 +807,8 @@ export type StreamEvent =
   | { type: 'messages'; sessionId: string; items: ConversationItem[] }
   /** The session's diff changed; fetch it from `/api/sessions/:id/changes`. */
   | { type: 'changes'; sessionId: string }
+  /** The session's slash commands changed; fetch them from `/api/sessions/:id/commands`. */
+  | { type: 'commands'; sessionId: string }
   /** New GitHub data; fetch it from `/api/github`. */
   | { type: 'github' }
   /** The unread GitHub notifications changed; fetch them from `/api/notifications`. */
