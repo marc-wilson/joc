@@ -29,6 +29,15 @@ import {
   STATUS_PATH,
 } from './problems.ts';
 import { LATEST_HEADER, manifestVersion, versionHeader } from './version.ts';
+import {
+  ANSWER_POLL_MS,
+  answerOf,
+  type Decision,
+  decisionFor,
+  inputKey,
+  newWaitingId,
+  waitingFor,
+} from './waiting.ts';
 
 const POLL_MS = 2000;
 const SYNC_MS = 30_000;
@@ -415,6 +424,111 @@ async function runCommand(
   }
 }
 
+/** How long a question or permission request can be answered from JOC; then only in Claude Code. */
+const ANSWER_FOR_MS = 30 * 60_000;
+/** Failed answer polls in a row before JOC stops offering to answer, and the pause after each. */
+const ANSWER_FAILURES = 3;
+const ANSWER_RETRY_MS = 1000;
+
+/** Whether a person runs this session: only then can a question wait on JOC. */
+let interactive = false;
+
+interface RunningCall {
+  tool: string;
+  /** Resolves once the call is over: answered in Claude Code, or run. */
+  ended: Promise<void>;
+}
+
+/** The tool calls running now, newest last, by their input (`inputKey`). */
+const running = new Map<string, RunningCall[]>();
+
+/**
+ * The running call a permission request is about, found by its input; failing that, the newest
+ * call of that tool.
+ */
+function callFor(tool: string, input: unknown): RunningCall | undefined {
+  const same = running.get(inputKey(tool, input));
+  if (same?.length) return same.at(-1);
+  return [...running.values()]
+    .flat()
+    .filter((c) => c.tool === tool)
+    .at(-1);
+}
+
+/**
+ * Offers a permission request (a question is one too) to JOC while Claude Code asks in the
+ * terminal, and resolves to JOC's answer as the request's decision. The two race fairly: when
+ * the terminal answers first the call ends and this stops, saying so; a JOC answer after that
+ * is dropped by the server. Undefined, the terminal is the only way to answer: the server is
+ * down or too old, nobody answered from JOC in time, or the call ended.
+ *
+ * Every wait here is an HTTP call or the call ending, which cost the hook no time, so a request
+ * can wait on JOC for as long as the terminal does. Nothing is ever answered without a person's
+ * answer, and an allow is for this call only.
+ */
+async function answerFromJoc(
+  $: EngineInterface,
+  tool: string,
+  input: unknown,
+  cwd: string,
+): Promise<Decision | undefined> {
+  const waitingId = newWaitingId();
+  const waiting = waitingFor(waitingId, tool, input, cwd);
+  if (!waiting) return undefined;
+  const ended = callFor(tool, input)?.ended ?? new Promise<void>(() => {});
+  const over = ended.then(() => 'over' as const);
+  const { url, headers } = await connection($);
+  const base = `${url}/api/sessions/${encodeURIComponent(await $.session.id())}`;
+  const post = (path: string, body: unknown) =>
+    $.http.fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  const done = (by?: 'joc' | 'claude-code') => {
+    // Best effort: unsaid, the session's next report moves it on from waiting anyway.
+    post(`/waiting/${waitingId}/done`, by ? { by } : {}).catch(() => undefined);
+  };
+
+  const told = await Promise.race([post('/waiting', waiting).catch(() => undefined), over]);
+  if (told === 'over') return undefined;
+  // Unreachable, or a server from before answers: the terminal alone.
+  if (!told?.ok) return undefined;
+
+  const deadline = Date.now() + ANSWER_FOR_MS;
+  let failures = 0;
+  while (Date.now() < deadline) {
+    const claim = post('/answers/claim', { waitingId, waitMs: ANSWER_POLL_MS }).catch(
+      () => undefined,
+    );
+    const res = await Promise.race([claim, over]);
+    if (res === 'over') {
+      done('claude-code');
+      return undefined;
+    }
+    if (!res?.ok) {
+      if (++failures >= ANSWER_FAILURES) break;
+      await Promise.race([$.clock.sleep(ANSWER_RETRY_MS), ended]);
+      continue;
+    }
+    failures = 0;
+    let body: unknown;
+    try {
+      body = JSON.parse(res.text);
+    } catch {
+      continue;
+    }
+    const answer = answerOf(body);
+    const decision = answer && decisionFor(waiting, answer, input);
+    if (decision) {
+      done('joc');
+      return decision;
+    }
+  }
+  done();
+  return undefined;
+}
+
 /** Set once the session starts: reports the conversation a moment from now. */
 let syncSoon: (() => void) | undefined;
 
@@ -523,6 +637,7 @@ export const register: Register = (on) => {
     $.clock.every(SYNC_MS, sync);
 
     // Nobody reads a -p run's dashboard; only take prompts for sessions a person runs.
+    interactive = e.isInteractive;
     if (!e.isInteractive) return result;
 
     async function takePrompts() {
@@ -670,6 +785,58 @@ export const register: Register = (on) => {
     $.clock.every(POLL_MS, oneAtATime(takePrompts, failedIn('module')));
     $.clock.every(LAUNCH_POLL_MS, oneAtATime(takeLaunches, failedIn('module')));
     return result;
+  });
+
+  // Keeps track of the running tool calls, so a question or permission request offered to JOC
+  // knows when Claude Code's own prompt was answered: its call goes on, then ends.
+  on('tool.call', async (_$, e, next) => {
+    let end = () => {};
+    const call: RunningCall = {
+      tool: e.tool,
+      ended: new Promise<void>((resolve) => {
+        end = resolve;
+      }),
+    };
+    let key: string | undefined;
+    try {
+      // The tool's own arguments: the call less the keys the engine adds beside them.
+      const {
+        tool: _tool,
+        tool_use_id: _id,
+        consent: _consent,
+        agentId: _agent,
+        requestMeta: _meta,
+        ...input
+      } = e as Record<string, unknown>;
+      key = inputKey(e.tool, input);
+      running.set(key, [...(running.get(key) ?? []), call]);
+    } catch {
+      // An input that can't be keyed only loses the race's early end.
+    }
+    try {
+      return await next(e);
+    } finally {
+      end();
+      if (key) {
+        const rest = (running.get(key) ?? []).filter((c) => c !== call);
+        if (rest.length) running.set(key, rest);
+        else running.delete(key);
+      }
+    }
+  });
+
+  // A question or permission request: answered in Claude Code or from JOC, whichever is first.
+  on('classic.PermissionRequest', async ($, e, next) => {
+    const below = await next(e);
+    // Another hook decided, or nobody is there to answer from JOC.
+    if (below.decision || !interactive) return below;
+    try {
+      const decision = await answerFromJoc($, e.tool_name, e.tool_input, e.cwd);
+      return decision ? { ...below, decision } : below;
+    } catch (error) {
+      log.note(crash('module', errorDetail(error)));
+      return below;
+    }
   });
 
   // No hook reports a built-in command (no prompt, no tool), so it would wait for the next sync.
