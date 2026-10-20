@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ConversationItem } from '@joc/protocol';
-import { backgroundTasks, elapsed } from './background.ts';
+import {
+  arrangeTasks,
+  type BackgroundTask,
+  backgroundTasks,
+  elapsed,
+  latestStep,
+} from './background.ts';
 
 const at = (s: number) => new Date(Date.UTC(2026, 9, 18, 10, 0, s)).toISOString();
 
@@ -214,5 +220,58 @@ test('a task keeps what it was asked and how it ended, for its details', () => {
       ],
       [undefined, undefined, 'pnpm build &&\npnpm test', '1 test failed'],
     ],
+  );
+});
+
+const task = (
+  id: string,
+  status: BackgroundTask['status'],
+  start: number,
+  end?: number,
+): BackgroundTask => ({
+  id,
+  kind: 'subagent',
+  title: id,
+  status,
+  startedAt: at(start),
+  ...(end == null ? {} : { endedAt: at(end) }),
+});
+
+const ids = (tasks: BackgroundTask[]) => tasks.map((t) => t.id);
+
+test('running tasks come first in start order, then finished ones newest first', () => {
+  const { running, finished } = arrangeTasks([
+    task('a', 'pass', 0, 5),
+    task('b', 'running', 1),
+    task('c', 'fail', 2, 9),
+    task('d', 'running', 3),
+    task('e', 'ended', 4),
+  ]);
+  assert.deepEqual(ids(running), ['b', 'd']);
+  assert.deepEqual(ids(finished), ['c', 'a', 'e']);
+});
+
+test('a held task stays with the running ones after it ends', () => {
+  const tasks = [task('a', 'pass', 0, 5), task('b', 'running', 1), task('c', 'pass', 2, 3)];
+  const { running, finished } = arrangeTasks(tasks, ['c']);
+  assert.deepEqual(ids(running), ['b', 'c']);
+  assert.deepEqual(ids(finished), ['a']);
+});
+
+test('a subagent is doing what its latest step says', () => {
+  const step = (i: number, item: Partial<ConversationItem>) =>
+    ({ id: `s${i}`, at: at(i), task: 't2', ...item }) as ConversationItem;
+  assert.equal(latestStep([]), undefined);
+  assert.equal(
+    latestStep([
+      step(0, { kind: 'claude', text: 'Looking at **auth** first.' }),
+      step(1, { kind: 'tool_call', toolUseId: 'x', name: 'Read', summary: 'src/auth.ts' }),
+      step(2, { kind: 'tool_result', toolUseId: 'x', isError: false, text: 'export const a = 1' }),
+    ]),
+    'Read src/auth.ts',
+  );
+  assert.equal(
+    latestStep([step(0, { kind: 'claude', text: '\nSign-in starts in `src/auth.ts`.\nMore' })]),
+    'Sign-in starts in src/auth.ts.',
   );
 });
