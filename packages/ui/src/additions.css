@@ -222,3 +222,73 @@ h4.joc-taskd__label { margin: 0; }
 
 /* Folded message head: the name and time keep to one line; only the summary gives way. */
 .joc-fold__who, .joc-fold__time { flex: none; white-space: nowrap; }
+
+/* ==========================================================================
+   HistoryRow v2 (issue #57). Copied from Claude Design's joc-next.css ("JOC: slash commands and
+   history rows"): .joc-hist v2 replaces the history row in styles/components.css. Its "Row menu"
+   rules are left out: the row keeps the OverflowMenu (.joc-menu) from #53, whose class they share.
+   ========================================================================== */
+
+/* ---------- History list + row v2: fixed height, command never clipped ---------- */
+.joc-histlist { container: hist / inline-size; background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.joc-hist { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 128px minmax(300px, 360px) var(--control-md); grid-template-areas: "main when cmd menu"; align-items: center; column-gap: var(--space-4); height: 64px; padding: 0 var(--space-3) 0 var(--space-4); border-bottom: 1px solid var(--border-subtle); transition: background-color var(--duration-instant) linear; }
+.joc-hist:last-child { border-bottom: 0; }
+.joc-hist:hover { background: var(--bg-hover); }
+.joc-hist__main { grid-area: main; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.joc-hist__title { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: 13px; line-height: 20px; font-weight: 550; }
+.joc-hist__title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.joc-hist__meta { display: flex; align-items: center; gap: var(--space-3); min-width: 0; font-size: 12px; line-height: 16px; color: var(--text-tertiary); white-space: nowrap; overflow: hidden; }
+.joc-hist__meta code { flex: none; font-family: var(--font-mono); font-size: 12px; font-weight: 450; color: var(--text-secondary); font-variant-ligatures: none; }
+.joc-hist__meta .joc-hist__path { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.joc-hist__when { grid-area: when; display: flex; flex-direction: column; gap: 2px; font-size: 12px; line-height: 16px; color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.joc-hist__when-sub { color: var(--text-tertiary); }
+.joc-hist__when-inline { display: none; font-variant-numeric: tabular-nums; }
+.joc-hist__cmd { grid-area: cmd; position: relative; min-width: 0; }
+.joc-hist__menu { grid-area: menu; position: relative; justify-self: end; }
+
+.joc-rcmd { display: flex; align-items: center; gap: var(--space-2); height: var(--control-md); padding: 0 var(--space-0\.5) 0 var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-sunken); font-family: var(--font-mono); font-size: 12px; line-height: 16px; font-weight: 450; font-variant-ligatures: none; transition: border-color var(--duration-instant) linear; }
+.joc-rcmd:hover, .joc-rcmd:focus-within { border-color: var(--border-strong); }
+.joc-rcmd__prompt { flex: none; color: var(--text-tertiary); user-select: none; }
+.joc-rcmd__text { flex: 1; min-width: 0; color: var(--text-primary); white-space: nowrap; }
+.joc-rcmd__id { color: var(--text-secondary); }
+.joc-rcmd__copy { flex: none; }
+
+.joc-rcmd__tip { position: absolute; right: 0; bottom: calc(100% + var(--space-1\.5)); width: max-content; max-width: min(560px, 90vw); padding: var(--space-2) var(--space-3); background: var(--bg-overlay); border-radius: var(--radius-md); box-shadow: var(--shadow-2); z-index: var(--z-popover); opacity: 0; pointer-events: none; transition: opacity var(--duration-fast) var(--ease-standard); }
+.joc-hist__cmd:hover .joc-rcmd__tip, .joc-hist__cmd:focus-within .joc-rcmd__tip, .joc-rcmd__tip.is-open { opacity: 1; transition-delay: 400ms; }
+.joc-rcmd__tip.is-open { transition: none; }
+.joc-rcmd__tip-label { display: block; margin-bottom: var(--space-1); font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-tertiary); }
+.joc-rcmd__tip-cmd { display: block; font-family: var(--font-mono); font-size: 12.5px; line-height: 20px; color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; font-variant-ligatures: none; }
+/* Narrower than 1100px: last activity folds into the meta line */
+@container hist (max-width: 1099px) {
+  .joc-hist { grid-template-columns: minmax(0, 1fr) minmax(260px, 300px) var(--control-md); grid-template-areas: "main cmd menu"; }
+  .joc-hist__when { display: none; }
+  .joc-hist__when-inline { display: inline; }
+}
+/* Narrower than 720px: the command drops to its own line, full width */
+@container hist (max-width: 719px) {
+  .joc-hist { grid-template-columns: minmax(0, 1fr) var(--control-md); grid-template-areas: "main menu" "cmd cmd"; height: 100px; row-gap: var(--space-2); padding: 0 var(--space-3); align-content: center; }
+  .joc-rcmd__tip { left: 0; right: auto; }
+}
+
+/* HistoryRow v2 fitted to JOC: the selection checkbox from #53 takes a column before the title,
+   and a row keeps the list's rounded corners when it's hovered or removed. */
+.joc-hist { min-height: 0; }
+.joc-hist:first-child { border-top-left-radius: calc(var(--radius-lg) - 1px); border-top-right-radius: calc(var(--radius-lg) - 1px); }
+.joc-hist:last-child { border-bottom-left-radius: calc(var(--radius-lg) - 1px); border-bottom-right-radius: calc(var(--radius-lg) - 1px); }
+.joc-hist__select { grid-area: select; display: inline-flex; align-items: center; justify-content: center; }
+.joc-hist--select { grid-template-columns: var(--control-sm) minmax(0, 1fr) 128px minmax(300px, 360px) var(--control-md); grid-template-areas: "select main when cmd menu"; padding-left: var(--space-3); }
+.joc-hist__status { overflow: hidden; text-overflow: ellipsis; }
+/* Meta line: the path gives way first, then the branch and the time, each with an ellipsis. */
+.joc-hist__meta .joc-hist__path { flex-shrink: 1000; }
+.joc-hist__meta .joc-branch { flex: 0 1 auto; }
+.joc-hist__meta > span:not(.joc-branch):not(.joc-hist__when-inline) { flex: none; }
+.joc-hist__when-inline { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@container hist (max-width: 1099px) {
+  .joc-hist--select { grid-template-columns: var(--control-sm) minmax(0, 1fr) minmax(260px, 300px) var(--control-md); grid-template-areas: "select main cmd menu"; }
+}
+@container hist (max-width: 719px) {
+  .joc-hist--select { grid-template-columns: var(--control-sm) minmax(0, 1fr) var(--control-md); grid-template-areas: "select main menu" ". cmd cmd"; }
+  /* Stacked, the tooltip spans the command's own width, so it never runs off a phone screen. */
+  .joc-rcmd__tip { right: 0; width: auto; max-width: none; }
+}
+/* ======================== end HistoryRow v2 (issue #57) ======================== */
