@@ -255,3 +255,62 @@ test('an image the server could not take now holds the messages for the next syn
     ['u1', 'u2:0'],
   );
 });
+
+// A turn that ended with a background shell running, as Claude Code's Stop hook says it.
+const stop = {
+  hook_event_name: 'Stop',
+  last_assistant_message: 'Started the atlas-web dev server.',
+  background_tasks: [{ id: 'bk3d9q2x1', type: 'shell', status: 'running', command: 'pnpm dev' }],
+};
+const stopped = (id: string) =>
+  `${JSON.stringify({
+    type: 'user',
+    uuid: `stop-${id}`,
+    timestamp: '2026-10-18T10:05:00.000Z',
+    message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_9', content: '{}' }] },
+    toolUseResult: { message: `Successfully stopped task: ${id} (pnpm dev)`, task_id: id },
+  })}\n`;
+const reports = () => received.filter((r) => r.path === '/api/reports').map((r) => r.body);
+
+test('between turns, a sync settles a session whose background work ended as idle', async () => {
+  await sync(stop);
+  assert.equal(reports()[0]?.state, 'background');
+  appendFileSync(transcript, stopped('bk3d9q2x1'));
+  received = [];
+  const checkedAt = Date.now();
+  await sync({ between_turns: true, checked_at: checkedAt });
+  const [report] = reports();
+  assert.equal(report?.state, 'idle');
+  assert.equal(report?.activity, 'Done');
+  assert.deepEqual(report?.background, []);
+  // It counts from when register.ts looked, so a turn that started since wins at the server.
+  assert.equal(report?.at, checkedAt);
+  // Settled once: the next sync has nothing to change.
+  received = [];
+  await sync({ between_turns: true });
+  assert.equal('state' in (reports()[0] ?? {}), false);
+});
+
+test('a sync leaves the state alone mid-turn, or while the work still runs', async () => {
+  await sync(stop);
+  received = [];
+  await sync({ between_turns: true });
+  assert.equal('state' in (reports()[0] ?? {}), false);
+  appendFileSync(transcript, stopped('bk3d9q2x1'));
+  received = [];
+  await sync({ between_turns: false });
+  await sync();
+  assert.deepEqual(
+    reports().map((r) => 'state' in r),
+    [false, false],
+  );
+});
+
+test('a sync never settles a working session', async () => {
+  await sync(stop);
+  await sync({ hook_event_name: 'UserPromptSubmit', prompt: 'Now the docs' });
+  appendFileSync(transcript, stopped('bk3d9q2x1'));
+  received = [];
+  await sync({ between_turns: true });
+  assert.equal('state' in (reports()[0] ?? {}), false);
+});
