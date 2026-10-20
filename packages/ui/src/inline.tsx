@@ -19,8 +19,17 @@ export function Emph({ children }: { children?: ReactNode }) {
 }
 
 /** A small outlined label beside a name, e.g. "Draft" or "Out of date". */
-export function Tag({ children }: { children?: ReactNode }) {
-  return <span className="joc-tag">{children}</span>;
+export function Tag({ children, title }: { children?: ReactNode; title?: string }) {
+  return (
+    <span className="joc-tag" title={title}>
+      {children}
+    </span>
+  );
+}
+
+/** Marks a session that works in a linked worktree, beside its branch; hover names it. */
+export function WorktreeTag({ name }: { name: string }) {
+  return <Tag title={`Worktree ${name}`}>Worktree</Tag>;
 }
 
 export interface TextLinkProps {
