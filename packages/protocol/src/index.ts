@@ -9,6 +9,108 @@ export type SessionState = z.infer<typeof SessionState>;
 export const CIStatus = z.enum(['pass', 'fail', 'pending', 'skipped']);
 export type CIStatus = z.infer<typeof CIStatus>;
 
+// Answering from the dashboard. When a session asks a question (AskUserQuestion) or wants
+// permission for a tool call, its plugin tells the server what it waits on and polls for an
+// answer while Claude Code's own prompt stays up. Whichever answers first wins: the terminal, or
+// a person in the dashboard. An answer that comes too late is dropped. A permission answer from
+// the dashboard is only ever "allow once" or "deny": it never adds a rule.
+
+/** Names one wait: made by the plugin, fresh for every question or permission request. */
+export const WaitingId = z.string().regex(/^[\w-]{8,64}$/);
+export type WaitingId = z.infer<typeof WaitingId>;
+
+/** One of the questions a session asks, as Claude Code's AskUserQuestion tool puts it. */
+export const WaitingQuestion = z.object({
+  question: z.string().min(1).max(2000),
+  /** A short label for it, e.g. `Auth method`. */
+  header: z.string().max(100).optional(),
+  /** Empty for a question answered in words alone. */
+  options: z
+    .array(
+      z.object({ label: z.string().min(1).max(200), description: z.string().max(500).optional() }),
+    )
+    .max(10),
+  multiSelect: z.boolean(),
+});
+export type WaitingQuestion = z.infer<typeof WaitingQuestion>;
+
+/** What a session waits on you for, as its plugin reports it. */
+export const Waiting = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('question'),
+    id: WaitingId,
+    questions: z.array(WaitingQuestion).min(1).max(4),
+  }),
+  z.object({
+    kind: z.literal('permission'),
+    id: WaitingId,
+    /** The tool, as Claude Code names it: `Bash`, `Edit`, `mcp__server__tool`. */
+    tool: z.string().min(1).max(200),
+    /** What the call does, one line: a command, a path, a URL. */
+    summary: z.string().max(500),
+    /** What Claude said the call is for, when it said. */
+    description: z.string().max(500).optional(),
+  }),
+]);
+export type Waiting = z.infer<typeof Waiting>;
+
+/** Who answered a wait: from the dashboard, or in Claude Code itself. */
+export const AnsweredBy = z.enum(['joc', 'claude-code']);
+export type AnsweredBy = z.infer<typeof AnsweredBy>;
+
+/** An answer from the dashboard. */
+export const Answer = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('question'),
+    /** Each question's answer by its text: an option's label, labels joined by `, `, or words. */
+    answers: z.record(z.string().max(2000), z.string().trim().min(1).max(5000)),
+  }),
+  /** Allow this one call, or deny it. Never a rule for later calls. */
+  z.object({ kind: z.literal('permission'), allow: z.boolean() }),
+]);
+export type Answer = z.infer<typeof Answer>;
+
+/** `POST /api/sessions/:id/answers`, from the dashboard. */
+export const AnswerRequest = z.object({ waitingId: WaitingId, answer: Answer });
+export type AnswerRequest = z.infer<typeof AnswerRequest>;
+
+/** Why an answer was refused (409): the wait is over, and who ended it if anyone did. */
+export const AnswerRefused = z.object({
+  error: z.string(),
+  answeredBy: AnsweredBy.optional(),
+});
+export type AnswerRefused = z.infer<typeof AnswerRefused>;
+
+/** The longest a plugin's answer poll is held open. */
+export const MAX_ANSWER_WAIT_MS = 10_000;
+
+/** `POST /api/sessions/:id/answers/claim`, the plugin's: held open until an answer or `waitMs`. */
+export const AnswerClaim = z.object({
+  waitingId: WaitingId,
+  waitMs: z.number().int().min(0).max(MAX_ANSWER_WAIT_MS).optional(),
+});
+export type AnswerClaim = z.infer<typeof AnswerClaim>;
+
+/** The claim's reply: the answer, taken once, or `null` when none came in time. */
+export const ClaimedAnswer = z.object({ answer: Answer.nullable() });
+export type ClaimedAnswer = z.infer<typeof ClaimedAnswer>;
+
+/**
+ * `POST /api/sessions/:id/waiting/:waitingId/done`, the plugin's: the wait is over. `by` says
+ * who answered; left out, the plugin stopped watching and Claude Code still asks.
+ */
+export const WaitingDone = z.object({ by: AnsweredBy.optional() });
+export type WaitingDone = z.infer<typeof WaitingDone>;
+
+/** Whether `answer` answers `waiting`: the same kind, and for questions every one of them. */
+export function answerFits(waiting: Waiting, answer: Answer): boolean {
+  if (waiting.kind === 'permission') return answer.kind === 'permission';
+  if (answer.kind !== 'question') return false;
+  const asked = waiting.questions.map((q) => q.question);
+  const given = Object.keys(answer.answers);
+  return given.length === asked.length && asked.every((q) => given.includes(q));
+}
+
 /** A live Claude Code session, as the server knows it. */
 export const Session = z.object({
   id: z.string(),
@@ -31,6 +133,10 @@ export const Session = z.object({
    * reloads plugins. Unset when its plugin is too old to say.
    */
   plugin: z.string().optional(),
+  /** What it waits on you for, while its plugin can take an answer from the dashboard. */
+  waiting: Waiting.optional(),
+  /** The last wait that ended, and who answered it. */
+  answered: z.object({ id: z.string(), by: AnsweredBy }).optional(),
   startedAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
