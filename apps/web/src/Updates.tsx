@@ -1,16 +1,18 @@
 import { Device, ServerVersion, type StaleSession } from '@joc/protocol';
-import { Banner, Button, Code, CopyCommand } from '@joc/ui';
+import { Banner, BannerSessions, Button } from '@joc/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { apiFetch } from './auth.ts';
 import { updatePrefs, usePrefs } from './prefs.ts';
-import { StaleSessions, useReload } from './StaleSessions.tsx';
+import { useReload } from './StaleSessions.tsx';
 import {
   behindTitle,
   RELOAD_COMMAND,
   reloadable,
+  sessionHref,
   staleDismissed,
   staleKey,
+  staleName,
   staleTitle,
   UPDATE_COMMAND,
 } from './version.ts';
@@ -103,64 +105,57 @@ export function Updates() {
   const [reloadHidden, setReloadHidden] = useState(false);
   const reload = useReload(checkSoon);
 
+  const allSent = stale.every((s) => reload.sent.has(s.id));
+
   return (
     <>
       {updated && !reloadHidden ? (
         <Banner
-          title="JOC was updated"
+          title="JOC was updated. This page still runs the previous version."
+          icon="update"
           actions={
             <Button variant="secondary" size="sm" onClick={() => location.reload()}>
               Reload
             </Button>
           }
           onDismiss={() => setReloadHidden(true)}
-        >
-          This page still runs the previous version. Reload to get the new one.
-        </Banner>
+        />
       ) : null}
       {plugin && behind.length > 0 && dismissed !== plugin ? (
         <Banner
-          title={behindTitle(behind, plugin)}
-          icon="terminal"
+          // Once it's updated, its sessions show in the banner below to reload.
+          title={`${behindTitle(behind, plugin)}. Update it there with`}
+          icon="update"
+          command={UPDATE_COMMAND}
           onDismiss={() => updatePrefs({ dismissedPluginBanner: plugin })}
-        >
-          <span>
-            Some features won't work there until it's updated. In a terminal on that machine, run:
-          </span>
-          <CopyCommand command={UPDATE_COMMAND} />
-          <span>
-            Then run <Code>/reload-plugins</Code> in its Claude Code sessions. From then on,{' '}
-            <Code>/joc-update</Code> does both.
-          </span>
-        </Banner>
+        />
       ) : null}
       {plugin && stale.length > 0 && !staleDismissed(stale, staleHidden) ? (
         <Banner
           title={staleTitle(stale)}
-          icon="terminal"
+          icon="plug"
           actions={
             <Button
               variant="secondary"
               size="sm"
+              title={`Sends ${RELOAD_COMMAND} to ${stale.length === 1 ? 'it' : 'each'}, which loads JOC plugin ${plugin}`}
               loading={reload.busy}
-              disabled={stale.every((s) => reload.sent.has(s.id))}
+              disabled={allSent}
               onClick={() => void reload.send(stale.map((s) => s.id))}
             >
-              {stale.every((s) => reload.sent.has(s.id))
-                ? 'Reload sent'
-                : stale.length === 1
-                  ? 'Reload it'
-                  : 'Reload them'}
+              {allSent ? 'Reload sent' : stale.length === 1 ? 'Reload it' : 'Reload them'}
             </Button>
           }
           onDismiss={() => updatePrefs({ dismissedReloadBanner: staleKey(stale) })}
         >
-          <span>
-            JOC plugin {plugin} is installed, but {stale.length === 1 ? 'this session' : 'these'}{' '}
-            loaded an older copy. Run <Code>{RELOAD_COMMAND}</Code> in{' '}
-            {stale.length === 1 ? 'it' : 'each'}, or reload from here.
-          </span>
-          <StaleSessions sessions={stale} />
+          <BannerSessions
+            sessions={stale.map((s) => ({
+              id: s.id,
+              title: staleName(s),
+              state: s.state,
+              href: sessionHref(s.id),
+            }))}
+          />
           {reload.failed ? <span>Couldn't send the reload. Try again.</span> : null}
         </Banner>
       ) : null}
