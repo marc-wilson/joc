@@ -19,6 +19,8 @@ interface ReadDoc {
   owner: string;
   threadId: string;
   requestedAt: Date;
+  /** The thread's GitHub `updatedAt` when it was marked read, if the snapshot had it. */
+  seen?: string;
   claimedAt?: Date;
 }
 
@@ -63,14 +65,17 @@ export async function saveNotifications(
   return true;
 }
 
-/** When each thread was last asked to be marked read. */
-async function readRequests(owner: Owner): Promise<Map<string, Date>> {
+/**
+ * Up to when each thread was read: the newest of when it was asked to be and the version of it
+ * the person saw then. GitHub's clock and ours needn't agree, so the version counts too.
+ */
+async function readRequests(owner: Owner): Promise<Map<string, number>> {
   await ensureIndexes();
   const docs = await reads().find({ owner }).toArray();
-  const latest = new Map<string, Date>();
+  const latest = new Map<string, number>();
   for (const doc of docs) {
-    const known = latest.get(doc.threadId);
-    if (!known || known < doc.requestedAt) latest.set(doc.threadId, doc.requestedAt);
+    const at = Math.max(doc.requestedAt.getTime(), doc.seen ? Date.parse(doc.seen) || 0 : 0);
+    latest.set(doc.threadId, Math.max(latest.get(doc.threadId) ?? 0, at));
   }
   return latest;
 }
@@ -85,30 +90,47 @@ export async function getNotifications(owner: Owner): Promise<NotificationsSnaps
     // A thread marked read stays hidden unless something new happened on it since.
     threads: doc.threads.filter((t) => {
       const at = requested.get(t.id);
-      return !at || Date.parse(t.updatedAt) > at.getTime();
+      return at === undefined || Date.parse(t.updatedAt) > at;
     }),
     more: doc.more,
     updatedAt: doc.updatedAt.toISOString(),
   };
 }
 
-/** Queues the threads to be marked read on GitHub by the owner's next machine to read. */
-export async function markRead(owner: Owner, threadIds: string[]): Promise<void> {
+/**
+ * Queues the threads to be marked read on GitHub by the owner's next machine to read, and
+ * returns the snapshot after. A thread still queued is queued once however often it's asked
+ * for, and the dashboards hear only when a thread they show leaves.
+ */
+export async function markRead(owner: Owner, threadIds: string[]): Promise<NotificationsSnapshot> {
   await ensureIndexes();
   const requestedAt = new Date();
-  const unique = [...new Set(threadIds)];
-  await reads().insertMany(
-    unique.map((threadId) => ({ _id: randomUUID(), owner, threadId, requestedAt })),
+  const before = await getNotifications(owner);
+  // The version of each thread the person saw, and so marked read.
+  const seen = new Map(
+    before.state === 'reported' ? before.threads.map((t) => [t.id, t.updatedAt]) : [],
   );
-  changed(owner);
+  const unique = [...new Set(threadIds)];
+  for (const threadId of unique) {
+    const version = seen.get(threadId);
+    await reads().updateOne(
+      { owner, threadId, claimedAt: { $exists: false } },
+      {
+        $set: { requestedAt, ...(version ? { seen: version } : {}) },
+        $setOnInsert: { _id: randomUUID() },
+      },
+      { upsert: true },
+    );
+  }
+  if (unique.some((id) => seen.has(id))) changed(owner);
+  return getNotifications(owner);
 }
 
-/** Marks every thread the owner can see read; returns how many. */
-export async function markAllRead(owner: Owner): Promise<number> {
+/** Marks every thread the owner can see read; returns the snapshot after. */
+export async function markAllRead(owner: Owner): Promise<NotificationsSnapshot> {
   const snapshot = await getNotifications(owner);
   const ids = snapshot.state === 'reported' ? snapshot.threads.map((t) => t.id) : [];
-  if (ids.length) await markRead(owner, ids);
-  return ids.length;
+  return ids.length ? markRead(owner, ids) : snapshot;
 }
 
 /**
