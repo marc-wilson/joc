@@ -1,10 +1,12 @@
 import { Device, MachineProblem, PendingDevice, type ProblemKind } from '@joc/protocol';
-import { Button, EmptyState, SectionHeader, SetupCheck, Tag, TextInput } from '@joc/ui';
+import { Button, Code, EmptyState, SectionHeader, SetupCheck, Tag, TextInput } from '@joc/ui';
 import { type FormEvent, useEffect, useState } from 'react';
 import { z } from 'zod';
 import { apiFetch, signOut, useAuth } from './auth.ts';
 import { Nav } from './Nav.tsx';
+import { StaleSessions, useReload } from './StaleSessions.tsx';
 import { ago } from './time.ts';
+import { RELOAD_COMMAND } from './version.ts';
 
 const Devices = z.array(Device);
 const ErrorBody = z.object({ error: z.string() });
@@ -52,8 +54,12 @@ function ProblemCheck({ problem }: { problem: MachineProblem }) {
   );
 }
 
-/** Which plugin a machine runs, as far as JOC knows. */
+/** After reloads are sent: long enough for each session's next sync (every 30s) to report. */
+const AFTER_RELOAD_MS = 40_000;
+
+/** Which plugin a machine has, as far as JOC knows: what's installed, else what last reported. */
 function pluginLabel(device: Device): string {
+  if (device.installed) return `plugin ${device.installed} installed`;
   if (device.plugin) return `plugin ${device.plugin}`;
   // It reported without naming a version: a plugin from before versions were sent.
   return device.outdated ? 'older plugin' : 'plugin not seen yet';
@@ -81,6 +87,7 @@ export function LinkPage() {
   const [linked, setLinked] = useState(false);
 
   const load = () => fetchDevices().then((list) => list && setDevices(list));
+  const reload = useReload(() => setTimeout(() => void load(), AFTER_RELOAD_MS));
 
   useEffect(() => {
     void fetchDevices().then((list) => list && setDevices(list));
@@ -208,18 +215,54 @@ export function LinkPage() {
         <SectionHeader title="Your machines" count={devices?.length} />
         {devices?.length ? (
           <ul className="app-machines">
-            {devices.map((d) => (
-              <li key={d.id} className="app-machines__row">
-                <span className="app-machines__name">{d.name}</span>
-                {d.outdated ? <Tag>Out of date</Tag> : null}
-                <span className="app-machines__meta">
-                  {pluginLabel(d)} · linked {ago(d.createdAt)} · last seen {ago(d.lastSeenAt)}
-                </span>
-                <Button variant="ghost" size="sm" onClick={() => void revoke(d.id)}>
-                  Revoke
-                </Button>
-              </li>
-            ))}
+            {devices.map((d) => {
+              // Sessions that only need a reload; a machine that needs the update says so first.
+              const stale = d.outdated ? [] : d.stale;
+              const sent = stale.every((s) => reload.sent.has(s.id));
+              return (
+                <li
+                  key={d.id}
+                  className={`app-machines__row${stale.length ? ' app-machines__row--stale' : ''}`}
+                >
+                  <span className="app-machines__name">{d.name}</span>
+                  {d.outdated ? (
+                    <Tag>Out of date</Tag>
+                  ) : stale.length ? (
+                    <Tag>Reload needed</Tag>
+                  ) : null}
+                  <span className="app-machines__meta">
+                    {pluginLabel(d)} · linked {ago(d.createdAt)} · last seen {ago(d.lastSeenAt)}
+                  </span>
+                  {stale.length ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={reload.busy}
+                      disabled={sent}
+                      onClick={() => void reload.send(stale.map((s) => s.id))}
+                    >
+                      {sent ? 'Reload sent' : stale.length === 1 ? 'Reload it' : 'Reload them'}
+                    </Button>
+                  ) : null}
+                  <Button variant="ghost" size="sm" onClick={() => void revoke(d.id)}>
+                    Revoke
+                  </Button>
+                  {stale.length ? (
+                    <div className="app-machines__stale">
+                      <span>
+                        {stale.length === 1
+                          ? 'This session still runs'
+                          : 'These sessions still run'}{' '}
+                        an older copy. Run <Code>{RELOAD_COMMAND}</Code> in{' '}
+                        {stale.length === 1 ? 'it' : 'each'}, or reload from here.
+                      </span>
+                      <StaleSessions sessions={stale} />
+                      {reload.failed ? <span>Couldn't send the reload. Try again.</span> : null}
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         ) : devices ? (
           <EmptyState compact title="No machines yet" body="Link one with /joc-login." />
