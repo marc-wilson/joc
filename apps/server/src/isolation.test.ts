@@ -770,14 +770,31 @@ test("marking read reaches only the owner's machines, and hides only the owner's
   });
 
   // Bob marks the same thread id read, and then everything he has.
-  assert.equal((await call('bob', '/api/notifications/read', { ids: ['201'] })).status, 204);
-  assert.equal((await call('bob', '/api/notifications/read-all', {})).status, 204);
+  // Each answers with the owner's snapshot after it.
+  const bobRead = await read(
+    await call('bob', '/api/notifications/read', { ids: ['201'] }),
+    NotificationsSnapshot,
+  );
+  assert.deepEqual(bobRead.state === 'reported' ? bobRead.threads : 'none', []);
+  const bobAll = await read(
+    await call('bob', '/api/notifications/read-all', {}),
+    NotificationsSnapshot,
+  );
+  assert.deepEqual(bobAll.state === 'reported' ? bobAll.threads : 'none', []);
   assert.deepEqual(await unread('bob'), []);
   assert.deepEqual(await unread('alice'), ['Alice one', 'Alice two']);
   assert.deepEqual(await claim('alice'), []);
   assert.deepEqual(await claim('bob'), ['201']);
 
-  assert.equal((await call('alice', '/api/notifications/read', { ids: ['202'] })).status, 204);
+  const alices = await read(
+    await call('alice', '/api/notifications/read', { ids: ['202'] }),
+    NotificationsSnapshot,
+  );
+  assert.deepEqual(alices.state === 'reported' ? alices.threads.map((t) => t.title) : 'none', [
+    'Alice one',
+  ]);
+  // Asked again before a machine took it: still queued once.
+  assert.equal((await call('alice', '/api/notifications/read', { ids: ['202'] })).status, 200);
   assert.deepEqual(await unread('alice'), ['Alice one']);
   assert.deepEqual(await claim('bob'), []);
   assert.deepEqual(await claim('alice'), ['202']);
@@ -806,6 +823,24 @@ test('a thread marked read comes back when something new happens on it', async (
     more: false,
   });
   assert.deepEqual(await unread('alice'), ['New comment']);
+});
+
+test("a thread marked read stays read when GitHub's clock runs ahead of ours", async () => {
+  const ahead = new Date(Date.now() + 30_000).toISOString();
+  const send = (updatedAt: string) =>
+    call('alice', '/api/notifications', {
+      at: ++clock,
+      status: 'ok',
+      threads: [thread('401', 'Ahead', updatedAt)],
+      more: false,
+    });
+  await send(ahead);
+  await call('alice', '/api/notifications/read', { ids: ['401'] });
+  // GitHub's next read still has it, before a machine marked it: the version read stays read.
+  await send(ahead);
+  assert.deepEqual(await unread('alice'), []);
+  await send(new Date(Date.now() + 90_000).toISOString());
+  assert.deepEqual(await unread('alice'), ['Ahead']);
 });
 
 test('only a machine takes the mark-read queue, and bad ids are refused', async () => {
@@ -843,8 +878,10 @@ test("a session's alerts are raised, read and cleared only for its owner", async
   assert.equal(alices.title, 'Alice asks');
 
   // Bob can't read or clear Alice's alert by its id, nor through his own "all".
-  assert.equal((await call('bob', '/api/alerts/read', { ids: [alices.id] })).status, 204);
-  assert.equal((await call('bob', '/api/alerts/clear', { ids: [alices.id] })).status, 204);
+  const bobRead = await read(await call('bob', '/api/alerts/read', { ids: [alices.id] }), Alerts);
+  assert.ok(bobRead.every((a) => a.id !== alices.id));
+  const bobClear = await read(await call('bob', '/api/alerts/clear', { ids: [alices.id] }), Alerts);
+  assert.ok(bobClear.every((a) => a.id !== alices.id));
   await call('bob', '/api/alerts/read-all', {});
   assert.deepEqual(await kinds('alice', 'alerts-id'), [['needs', false]]);
   assert.deepEqual(await kinds('bob', 'alerts-id'), [['needs', true]]);
@@ -859,8 +896,21 @@ test("a session's alerts are raised, read and cleared only for its owner", async
     ['needs', true],
   ]);
   const [finished] = await alertsOf('alice');
-  assert.equal((await call('alice', '/api/alerts/read', { ids: [finished?.id] })).status, 204);
-  assert.equal((await call('alice', '/api/alerts/clear', { ids: [alices.id] })).status, 204);
+  // Each change answers with the list after it, and asking twice is the same as once.
+  for (let i = 0; i < 2; i++) {
+    const after = await read(
+      await call('alice', '/api/alerts/read', { ids: [finished?.id] }),
+      Alerts,
+    );
+    assert.equal(after.find((a) => a.id === finished?.id)?.read, true);
+  }
+  for (let i = 0; i < 2; i++) {
+    const after = await read(
+      await call('alice', '/api/alerts/clear', { ids: [alices.id] }),
+      Alerts,
+    );
+    assert.ok(after.every((a) => a.id !== alices.id));
+  }
   assert.deepEqual(await kinds('alice', 'alerts-id'), [['finished', true]]);
   assert.deepEqual(await alertsOf('bob'), []);
 });

@@ -145,19 +145,24 @@ export async function listAlerts(owner: Owner): Promise<Alert[]> {
   return docs.map(toAlert);
 }
 
-/** Marks the owner's alerts read: these, or all of them. */
-export async function readAlerts(owner: Owner, ids?: string[]): Promise<void> {
-  await alerts().updateMany(
+/**
+ * Marks the owner's alerts read: these, or all of them. Asking again changes nothing and tells
+ * no one; the list after is what the dashboard shows.
+ */
+export async function readAlerts(owner: Owner, ids?: string[]): Promise<Alert[]> {
+  const res = await alerts().updateMany(
     { owner, readAt: { $exists: false }, ...(ids ? { _id: { $in: ids } } : {}) },
     { $set: { readAt: new Date() } },
   );
-  changed(owner);
+  if (res.modifiedCount) changed(owner);
+  return listAlerts(owner);
 }
 
-/** Clears the owner's alerts: these, or all of them. */
-export async function clearAlerts(owner: Owner, ids?: string[]): Promise<void> {
-  await alerts().deleteMany({ owner, ...(ids ? { _id: { $in: ids } } : {}) });
-  changed(owner);
+/** Clears the owner's alerts: these, or all of them. Like reading, safe to ask twice. */
+export async function clearAlerts(owner: Owner, ids?: string[]): Promise<Alert[]> {
+  const res = await alerts().deleteMany({ owner, ...(ids ? { _id: { $in: ids } } : {}) });
+  if (res.deletedCount) changed(owner);
+  return listAlerts(owner);
 }
 
 /** Deletes the alerts about a deleted session. */

@@ -401,17 +401,14 @@ export function createApp({
 
   app.get('/api/notifications', async (c) => c.json(await getNotifications(c.get('owner'))));
 
+  // Marking read is safe to repeat, and answers with the snapshot after it.
   app.post('/api/notifications/read', async (c) => {
     const parsed = MarkReadRequest.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
-    await markRead(c.get('owner'), parsed.data.ids);
-    return c.body(null, 204);
+    return c.json(await markRead(c.get('owner'), parsed.data.ids));
   });
 
-  app.post('/api/notifications/read-all', async (c) => {
-    await markAllRead(c.get('owner'));
-    return c.body(null, 204);
-  });
+  app.post('/api/notifications/read-all', async (c) => c.json(await markAllRead(c.get('owner'))));
 
   // A machine's plugin takes the queue; a browser has no `gh` to mark them with.
   app.post('/api/notifications/reads/claim', async (c) => {
@@ -420,32 +417,25 @@ export function createApp({
   });
 
   // ── Alerts: raised by the server from reports, kept to look back on ─────────
+  // Reading and clearing are safe to repeat, and answer with the list after the change.
 
   app.get('/api/alerts', async (c) => c.json(await listAlerts(c.get('owner'))));
 
   app.post('/api/alerts/read', async (c) => {
     const parsed = AlertIdsRequest.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
-    await readAlerts(c.get('owner'), parsed.data.ids);
-    return c.body(null, 204);
+    return c.json(await readAlerts(c.get('owner'), parsed.data.ids));
   });
 
-  app.post('/api/alerts/read-all', async (c) => {
-    await readAlerts(c.get('owner'));
-    return c.body(null, 204);
-  });
+  app.post('/api/alerts/read-all', async (c) => c.json(await readAlerts(c.get('owner'))));
 
   app.post('/api/alerts/clear', async (c) => {
     const parsed = AlertIdsRequest.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
-    await clearAlerts(c.get('owner'), parsed.data.ids);
-    return c.body(null, 204);
+    return c.json(await clearAlerts(c.get('owner'), parsed.data.ids));
   });
 
-  app.post('/api/alerts/clear-all', async (c) => {
-    await clearAlerts(c.get('owner'));
-    return c.body(null, 204);
-  });
+  app.post('/api/alerts/clear-all', async (c) => c.json(await clearAlerts(c.get('owner'))));
 
   app.post('/api/messages', async (c) => {
     const parsed = MessagesReport.safeParse(await c.req.json().catch(() => null));
