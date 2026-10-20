@@ -5,6 +5,8 @@
 // activity (e.g. open before the plugin loaded), a backlog the server missed while down gets
 // sent, and the diff refreshes when files change outside Claude. What a sync prints is GitHub
 // news to raise as a native notification (src/notifications.ts); JOC_NOTIFY=0 keeps it quiet.
+// It also starts the new sessions the dashboard asks this one for, such as a PR review, as
+// background sessions in this session's folder.
 //
 // Nothing here ever shows an error in the session. What fails goes to the plugin's local problem
 // log (problems.ts), which `/joc-status` reads on demand. The one thing it does say unasked: when
@@ -38,6 +40,11 @@ const DEFAULT_SERVER = 'https://joc.marcswilson.com';
 const CREDENTIALS = '.claude/joc/credentials.json';
 /** The prompt poll's path in the problem log, the same for every session. */
 const CLAIM_PATH = '/api/sessions/{id}/prompts/claim';
+/** The launch poll's: new sessions, such as a PR review, to start beside this one. */
+const LAUNCH_PATH = '/api/sessions/{id}/launches/claim';
+const LAUNCH_POLL_MS = 5000;
+/** `claude --bg` returns once the session is running. */
+const LAUNCH_TIMEOUT_MS = 60_000;
 /** Outcomes held between writes to the log; a poll every 2s makes 15 per write. */
 const MAX_PENDING = 200;
 /** Problems `/joc-status` lists. */
@@ -587,7 +594,73 @@ export const register: Register = (on) => {
       });
     }
 
+    /**
+     * Starts the new sessions the dashboard asked this one to start, such as a PR review: each
+     * a background session (`claude --bg`) in this session's folder, under the id and name the
+     * server chose, so the dashboard links to it before it reports. It lives on its own, past
+     * this session; `claude attach` opens it. How it went goes back to the server.
+     */
+    async function takeLaunches() {
+      const { url, headers } = await connection($);
+      const sessionId = await $.session.id();
+      let res: HttpResponse;
+      try {
+        res = await $.http.fetch(
+          `${url}/api/sessions/${encodeURIComponent(sessionId)}/launches/claim`,
+          { method: 'POST', headers },
+        );
+      } catch (error) {
+        const detail = errorDetail(error);
+        log.note({ ok: false, kind: 'unreachable', where: url, detail, at: Date.now() });
+        return;
+      }
+      log.note(
+        responseOutcome({ status: res.status, body: res.text }, LAUNCH_PATH, url, Date.now()),
+      );
+      // An older server has no launches.
+      if (!res.ok) return;
+      const launches = field(JSON.parse(res.text), 'launches');
+      if (!Array.isArray(launches)) return;
+      const cwd = await $.session.cwd();
+      for (const launch of launches) {
+        const id = text(field(launch, 'id'));
+        const newId = text(field(launch, 'sessionId'));
+        const prompt = text(field(launch, 'prompt'));
+        if (!id || !newId || !prompt) continue;
+        const name = text(field(launch, 'name')) ?? 'JOC';
+        const argv = ['claude', '--bg', '--session-id', newId, '--name', name, '--', prompt];
+        let outcome: { ok: boolean; detail?: string };
+        try {
+          const run = await $.process.run(argv, { cwd, timeoutMs: LAUNCH_TIMEOUT_MS });
+          outcome =
+            run.exitCode === 0
+              ? { ok: true }
+              : {
+                  ok: false,
+                  detail: (
+                    lastLine(run.stderr) ||
+                    lastLine(run.stdout) ||
+                    `claude exited with code ${run.exitCode}`
+                  ).slice(0, 500),
+                };
+        } catch (error) {
+          outcome = {
+            ok: false,
+            detail: `Couldn't run claude: ${errorDetail(error)}`.slice(0, 500),
+          };
+        }
+        await $.http
+          .fetch(`${url}/api/launches/${encodeURIComponent(id)}/result`, {
+            method: 'POST',
+            headers: { ...headers, 'content-type': 'application/json' },
+            body: JSON.stringify(outcome),
+          })
+          .catch(() => undefined); // The dashboard then says the launch didn't report back.
+      }
+    }
+
     $.clock.every(POLL_MS, oneAtATime(takePrompts, failedIn('module')));
+    $.clock.every(LAUNCH_POLL_MS, oneAtATime(takeLaunches, failedIn('module')));
     return result;
   });
 
