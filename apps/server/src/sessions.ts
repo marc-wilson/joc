@@ -226,3 +226,15 @@ export async function listStaleSessions(
   }
   return stale;
 }
+
+/** Which of `ids` name sessions the owner has, live or in the history. */
+export async function knownSessionIds(owner: Owner, ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const found = await sessions()
+    .find(
+      { _id: { $in: ids.map((id) => sessionKey(owner, id)) }, owner },
+      { projection: { sessionId: 1 } },
+    )
+    .toArray();
+  return new Set(found.map((s) => s.sessionId));
+}
