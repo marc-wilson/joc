@@ -7,6 +7,7 @@ import { GitHubPage } from './GitHub.tsx';
 import { HistoryPage } from './History.tsx';
 import { InboxPage } from './Inbox.tsx';
 import { LinkPage } from './Link.tsx';
+import { PullRequestPage } from './PullRequest.tsx';
 import { AuthGate } from './SignIn.tsx';
 
 const root = document.getElementById('root');
@@ -17,6 +18,7 @@ const pages = new Map([
   ['/history', HistoryPage],
   ['/inbox', InboxPage],
   ['/link', LinkPage],
+  ['/pr', PullRequestPage],
 ]);
 const Page = pages.get(location.pathname) ?? App;
 
