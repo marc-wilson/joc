@@ -200,6 +200,23 @@ test("a session's background list is its owner's, and stays until a report bring
   assert.deepEqual(bob?.background?.tasks, []);
 });
 
+test("a session's worktree is its owner's, stays while unsaid, and clears when empty", async () => {
+  const worktree = (sessions: Session[]) => sessions.find((s) => s.id === 'wt-id')?.worktree;
+  const where = { branch: 'fix/flaky-login', worktree: 'agent-a71c0e5f' };
+  await call('alice', '/api/reports', report('wt-id', where));
+  await call('bob', '/api/reports', report('wt-id', { branch: 'main', worktree: '' }));
+  // An older plugin leaves it out: the stored one stays.
+  await call('alice', '/api/reports', report('wt-id', { activity: 'pnpm test' }));
+  assert.equal(
+    worktree(await read(await call('alice', '/api/sessions'), Sessions)),
+    where.worktree,
+  );
+  assert.equal(worktree(await read(await call('bob', '/api/sessions'), Sessions)), undefined);
+  // Back in the main checkout.
+  await call('alice', '/api/reports', report('wt-id', { branch: 'main', worktree: '' }));
+  assert.equal(worktree(await read(await call('alice', '/api/sessions'), Sessions)), undefined);
+});
+
 test('conversations stay with their owner', async () => {
   const item = { id: 'm1', at: new Date().toISOString(), kind: 'user', text: 'Alice only' };
   await call('alice', '/api/messages', { sessionId: 'shared-id', items: [item] });

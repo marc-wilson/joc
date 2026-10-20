@@ -27,6 +27,8 @@ interface SessionDoc {
   name?: string;
   repo: string;
   branch?: string;
+  /** The linked worktree it works in; unset in the repo's main checkout. */
+  worktree?: string;
   state: Session['state'];
   activity?: string;
   contextLeft?: number;
@@ -185,6 +187,8 @@ export async function applyReport(
               : {}),
             // A session that ended waits on nothing.
             ...(fields.state === 'offline' ? { waiting: '$$REMOVE' } : {}),
+            // An empty worktree says the session is back in the repo's main checkout.
+            ...(fields.worktree === '' ? { worktree: '$$REMOVE' } : {}),
           },
         },
       ],
