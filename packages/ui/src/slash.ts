@@ -9,7 +9,10 @@ export type SuggestionSource = 'builtin' | 'project' | 'user' | 'plugin' | 'skil
 
 /** One slash command the composer can suggest. */
 export interface ComposerSuggestion {
-  /** Without the slash, and without a plugin's `plugin:` prefix. */
+  /**
+   * Without the slash, as the session runs it: a plugin's may carry its `plugin:` prefix, which
+   * the list leaves off unless two plugins share the name.
+   */
   name: string;
   /** The plugin that adds it. */
   plugin?: string;
@@ -24,7 +27,7 @@ export interface ComposerSuggestion {
 /** One row of the list. */
 export interface SuggestionRow {
   command: ComposerSuggestion;
-  /** What completing it inserts: `plugin:name` for a plugin's, so it runs unambiguously. */
+  /** What completing it sends: the name as the session runs it. */
   insert: string;
   /** The name as shown: `name`, or `plugin:name` where two plugins share the name. */
   shown: string;
@@ -68,6 +71,14 @@ export function sourceLabel(c: ComposerSuggestion): string {
   return LABEL[c.source];
 }
 
+/** A command's name less its plugin's `plugin:` prefix. */
+function shortName(c: ComposerSuggestion): string {
+  const prefix = c.plugin ? `${c.plugin}:` : '';
+  return prefix && c.name.startsWith(prefix) && c.name.length > prefix.length
+    ? c.name.slice(prefix.length)
+    : c.name;
+}
+
 /**
  * The text after `/` while a command is being typed (`/reload-p` → `reload-p`); undefined once
  * there's a space or newline, or the text isn't a command.
@@ -90,11 +101,11 @@ export function matchSuggestions(
   const q = typed.toLowerCase();
   const shared = new Map<string, number>();
   for (const c of commands) {
-    if (c.plugin) shared.set(c.name, (shared.get(c.name) ?? 0) + 1);
+    if (c.plugin) shared.set(shortName(c), (shared.get(shortName(c)) ?? 0) + 1);
   }
   const found: { row: SuggestionRow; rank: number; index: number }[] = [];
   commands.forEach((command, index) => {
-    const name = command.name;
+    const name = shortName(command);
     const lower = name.toLowerCase();
     const full = command.plugin ? `${command.plugin}:${name}` : name;
     const fullLower = full.toLowerCase();
@@ -124,7 +135,7 @@ export function matchSuggestions(
       index,
       row: {
         command,
-        insert: full,
+        insert: command.name,
         shown: ambiguous ? full : name,
         ns: ambiguous ? `${command.plugin}:` : '',
         pre: split ? name.slice(0, at) : name,
