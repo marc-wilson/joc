@@ -8,9 +8,17 @@ const commands: ComposerSuggestion[] = [
   { name: 'resume', args: '[session]', description: 'Resume', source: 'builtin' },
   { name: 'code-review', args: '<pr>', description: 'Review a PR', source: 'project' },
   { name: 'reload-prompts', description: 'Re-read prompts', source: 'user' },
-  { name: 'review', plugin: 'pr-tools', args: '<pr>', description: 'Inline', source: 'plugin' },
-  { name: 'review', plugin: 'gh-kit', description: 'Branch', source: 'plugin' },
-  { name: 'rollout', plugin: 'ops-kit', description: 'Roll out', source: 'plugin' },
+  {
+    name: 'pr-tools:review',
+    plugin: 'pr-tools',
+    args: '<pr>',
+    description: 'Inline',
+    source: 'plugin',
+  },
+  { name: 'gh-kit:review', plugin: 'gh-kit', description: 'Branch', source: 'plugin' },
+  { name: 'ops-kit:rollout', plugin: 'ops-kit', description: 'Roll out', source: 'plugin' },
+  // A plugin's command registered in code runs by its bare name.
+  { name: 'joc-status', plugin: 'joc', description: 'Check the link', source: 'plugin' },
   {
     name: 'release-notes',
     description: 'Draft notes',
@@ -56,7 +64,7 @@ test('typing filters to a flat list, prefix matches first, the typed part marked
 
 test('two plugins sharing a name show plugin:command; a unique one its short name', () => {
   const rows = matchSuggestions(commands, 'r');
-  const review = rows.filter((r) => r.command.name === 'review');
+  const review = rows.filter((r) => r.command.name.endsWith(':review'));
   assert.deepEqual(
     review.map((r) => [r.shown, r.ns, r.label]),
     [
@@ -64,8 +72,11 @@ test('two plugins sharing a name show plugin:command; a unique one its short nam
       ['gh-kit:review', 'gh-kit:', 'gh-kit'],
     ],
   );
-  const rollout = rows.find((r) => r.command.name === 'rollout');
+  const rollout = rows.find((r) => r.command.name === 'ops-kit:rollout');
   assert.deepEqual([rollout?.shown, rollout?.insert], ['rollout', 'ops-kit:rollout']);
+  const status = matchSuggestions(commands, 'joc-st')[0];
+  assert.deepEqual([status?.shown, status?.insert], ['joc-status', 'joc-status']);
+  assert.deepEqual(names('joc:joc-st'), ['joc-status']);
   // Typing the plugin's prefix matches too.
   assert.deepEqual(names('ops-kit:ro'), ['rollout']);
   assert.deepEqual(names('ops'), ['rollout']);
@@ -81,5 +92,5 @@ test('the source column names where each comes from', () => {
   assert.equal(label('clear'), 'Built-in');
   assert.equal(label('code-review'), 'Project');
   assert.equal(label('release-notes'), 'Skill · project');
-  assert.equal(label('rollout'), 'ops-kit');
+  assert.equal(label('ops-kit:rollout'), 'ops-kit');
 });

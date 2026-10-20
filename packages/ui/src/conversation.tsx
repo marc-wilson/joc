@@ -333,6 +333,8 @@ export function Composer({
           role="combobox"
           tabIndex={disabled ? -1 : 0}
           aria-label="Message Claude"
+          // A command name isn't a word to correct.
+          spellCheck={query === undefined}
           aria-expanded={open}
           aria-controls={listId}
           aria-autocomplete="list"
