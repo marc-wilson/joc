@@ -6,7 +6,8 @@
 // sent, and the diff refreshes when files change outside Claude. What a sync prints is GitHub
 // news to raise as a native notification (src/notifications.ts); JOC_NOTIFY=0 keeps it quiet.
 // It also starts the new sessions the dashboard asks this one for, such as a PR review, as
-// background sessions in this session's folder.
+// background sessions in this session's folder, and resumes the ended sessions on this machine
+// the dashboard asks to resume (src/resume-session.ts).
 //
 // Nothing here ever shows an error in the session. What fails goes to the plugin's local problem
 // log (problems.ts), which `/joc-status` reads on demand. The one thing it does say unasked: when
@@ -73,6 +74,12 @@ const DELETE_POLL_MS = 10_000;
 const DELETE_HTTP_TIMEOUT_MS = 10_000;
 /** delete-session.ts asks `claude agents` twice and may run `claude rm`, which removes a worktree. */
 const DELETE_TIMEOUT_MS = 120_000;
+/** The resume poll's: ended sessions to resume on this machine, asked for in the dashboard. */
+const RESUME_PATH = '/api/resumes/claim';
+const RESUME_POLL_MS = 5000;
+const RESUME_HTTP_TIMEOUT_MS = 10_000;
+/** resume-session.ts asks `claude agents`, then `claude --bg --resume` returns once it runs. */
+const RESUME_TIMEOUT_MS = 90_000;
 /** Outcomes held between writes to the log; a poll every 2s makes 15 per write. */
 const MAX_PENDING = 200;
 /** Problems `/joc-status` lists. */
@@ -253,6 +260,27 @@ function thisMachine($: EngineInterface): Promise<string | undefined> {
     .then((run) => run.stdout.trim().replace(/\.local$/, '') || undefined)
     .catch(() => undefined);
   return machineName;
+}
+
+/** What resume-session.ts printed: `{ ok, reason?, detail? }`, or undefined. */
+function resumeOutcome(
+  stdout: string,
+): { ok: boolean; reason?: string; detail?: string } | undefined {
+  let body: unknown;
+  try {
+    body = JSON.parse(stdout);
+  } catch {
+    return undefined;
+  }
+  const ok = field(body, 'ok');
+  if (typeof ok !== 'boolean') return undefined;
+  const reason = text(field(body, 'reason'));
+  const detail = text(field(body, 'detail'));
+  return {
+    ok,
+    ...(reason ? { reason: reason.slice(0, 200) } : {}),
+    ...(detail ? { detail: detail.slice(0, 1000) } : {}),
+  };
 }
 
 /** What delete-session.ts printed: `{ ok, removed?, detail? }`, or undefined. */
@@ -873,6 +901,71 @@ export const register: Register = (on) => {
       }
     }
     $.clock.every(DELETE_POLL_MS, oneAtATime(takeDeletes, failedIn('module')));
+
+    /**
+     * Resumes the ended sessions the dashboard asked this machine to resume, each with
+     * resume-session.ts, which checks Claude Code no longer runs it and still has its transcript,
+     * then runs `claude --bg --resume` in its folder. It never resumes this session. How it went
+     * goes back to the server; the resumed session then reports itself under its own id.
+     */
+    async function takeResumes() {
+      const machine = await thisMachine($);
+      if (!machine) return;
+      const { url, headers } = await connection($);
+      const json = { ...headers, 'content-type': 'application/json' };
+      let res: HttpResponse | undefined;
+      try {
+        res = await fetchWithin($, RESUME_HTTP_TIMEOUT_MS, `${url}${RESUME_PATH}`, {
+          method: 'POST',
+          headers: json,
+          body: JSON.stringify({ machine }),
+        });
+      } catch (error) {
+        const detail = errorDetail(error);
+        log.note({ ok: false, kind: 'unreachable', where: url, detail, at: Date.now() });
+        return;
+      }
+      if (!res) return;
+      log.note(
+        responseOutcome({ status: res.status, body: res.text }, RESUME_PATH, url, Date.now()),
+      );
+      // An older server has no resumes.
+      if (!res.ok) return;
+      const resumes = field(JSON.parse(res.text), 'resumes');
+      if (!Array.isArray(resumes)) return;
+      for (const request of resumes) {
+        const id = text(field(request, 'id'));
+        const sessionId = text(field(request, 'sessionId'));
+        if (!id || !sessionId) continue;
+        let outcome: { ok: boolean; reason?: string; detail?: string };
+        if (sessionId === (await $.session.id())) {
+          outcome = { ok: false, reason: 'it is still running' };
+        } else {
+          const run = await $.process
+            .run(['node', `${root}/src/resume-session.ts`], {
+              stdin: JSON.stringify({ sessionId, cwd: text(field(request, 'cwd')) }),
+              timeoutMs: RESUME_TIMEOUT_MS,
+            })
+            .catch((error: unknown) => {
+              log.note(crash('module', errorDetail(error)));
+              return undefined;
+            });
+          const why = run && (lastLine(run.stderr) || `node exited with code ${run.exitCode}`);
+          outcome = (run && resumeOutcome(run.stdout)) ?? {
+            ok: false,
+            reason: "the JOC plugin couldn't run it",
+            ...(why ? { detail: why.slice(0, 1000) } : {}),
+          };
+        }
+        const result = `${url}/api/resumes/${encodeURIComponent(id)}/result`;
+        await fetchWithin($, RESUME_HTTP_TIMEOUT_MS, result, {
+          method: 'POST',
+          headers: json,
+          body: JSON.stringify(outcome),
+        }).catch(() => undefined); // The dashboard then says the machine didn't report back.
+      }
+    }
+    $.clock.every(RESUME_POLL_MS, oneAtATime(takeResumes, failedIn('module')));
 
     // Nobody reads a -p run's dashboard; only take prompts for sessions a person runs.
     interactive = e.isInteractive;
