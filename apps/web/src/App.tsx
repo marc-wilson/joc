@@ -290,6 +290,7 @@ export default function App() {
                           state={s.state}
                           title={s.title ?? UNTITLED}
                           branch={s.branch}
+                          worktree={s.worktree}
                           contextLeft={s.contextLeft}
                           activity={activityOf(s, now)}
                           time={age(s.updatedAt, now)}
@@ -323,6 +324,7 @@ export default function App() {
                           state={s.state}
                           title={s.title ?? UNTITLED}
                           branch={s.branch}
+                          worktree={s.worktree}
                           contextLeft={s.contextLeft}
                           activity={activityOf(s, now)}
                           time={age(s.updatedAt, now)}
@@ -365,6 +367,7 @@ export default function App() {
                 state={selected.state}
                 repo={selected.repo}
                 branch={selected.branch}
+                worktree={selected.worktree}
                 machine={selected.machine}
                 model={selected.model}
                 contextLeft={selected.contextLeft}
