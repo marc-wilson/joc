@@ -1,0 +1,99 @@
+/* Opening a background task's details under its row. Not in the JOC design system yet: move it
+   into styles/components.css when the design system has it, and delete this file. Tokens only. */
+
+button.joc-task.is-toggle {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--duration-instant) linear;
+}
+
+.joc-task.is-toggle[aria-expanded="true"] {
+  background: var(--bg-selected);
+}
+
+.joc-task.is-toggle .joc-task__actions {
+  height: 20px;
+  color: var(--text-tertiary);
+}
+
+.joc-task__details {
+  padding: var(--space-3) var(--space-4) var(--space-4) calc(var(--space-4) + 16px + var(--space-3));
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-base);
+}
+
+.joc-taskd {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.joc-taskd__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-6);
+  margin: 0;
+}
+
+.joc-taskd__fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.joc-taskd__fact dt,
+.joc-taskd__title {
+  margin: 0;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.joc-taskd__fact dd {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.joc-taskd__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.joc-taskd__body {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.joc-taskd__body.is-pre {
+  white-space: pre-wrap;
+}
+
+.joc-taskd__body.is-mono {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  font-variant-ligatures: none;
+}

@@ -21,10 +21,18 @@ export interface TaskRowProps {
   elapsed?: string;
   state?: SessionState;
   result?: 'pass' | 'fail';
+  /** Makes the row a toggle that shows `details` under it. A toggle row takes no `children`. */
+  onToggle?: () => void;
+  open?: boolean;
+  /** Shown under the row while it's open, e.g. a `TaskDetails`. */
+  details?: ReactNode;
   children?: ReactNode;
 }
 
-/** A background shell command or subagent: state dot while running, check or cross when done. */
+/**
+ * A background shell command or subagent: state dot while running, check or cross when done.
+ * With `onToggle` the whole row opens its details in place, under it.
+ */
 export function TaskRow({
   kind = 'shell',
   kindLabel,
@@ -34,10 +42,14 @@ export function TaskRow({
   elapsed,
   state = 'background',
   result,
+  onToggle,
+  open = false,
+  details,
   children,
 }: TaskRowProps) {
-  return (
-    <div className={cx('joc-task', `joc-task--${result ? 'done' : state}`)}>
+  const className = cx('joc-task', `joc-task--${result ? 'done' : state}`, onToggle && 'is-toggle');
+  const content = (
+    <>
       <span className="joc-task__lead">
         {result ? <CIMark status={result} /> : <StateDot state={state} />}
       </span>
@@ -57,8 +69,68 @@ export function TaskRow({
           </span>
         ) : null}
       </span>
-      <span className="joc-task__actions">{children}</span>
+      <span className="joc-task__actions">
+        {onToggle ? <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} /> : children}
+      </span>
+    </>
+  );
+  if (!onToggle) return <div className={className}>{content}</div>;
+  return (
+    <>
+      <button type="button" className={className} aria-expanded={open} onClick={onToggle}>
+        {content}
+      </button>
+      {open && details ? <div className="joc-task__details">{details}</div> : null}
+    </>
+  );
+}
+
+export interface TaskFact {
+  label: string;
+  value: ReactNode;
+}
+
+export interface TaskDetailsProps {
+  /** Short facts in one row: type, status, started, duration. */
+  facts?: TaskFact[];
+  /** `TaskSection`s: what it was asked, what it did, how it ended. */
+  children?: ReactNode;
+}
+
+/** What a background task was asked, what it did and how it ended, under its `TaskRow`. */
+export function TaskDetails({ facts, children }: TaskDetailsProps) {
+  return (
+    <div className="joc-taskd joc-fade-in">
+      {facts?.length ? (
+        <dl className="joc-taskd__facts">
+          {facts.map((f) => (
+            <div key={f.label} className="joc-taskd__fact">
+              <dt>{f.label}</dt>
+              <dd>{f.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {children}
     </div>
+  );
+}
+
+export interface TaskSectionProps {
+  title: string;
+  /** Code or terminal output: mono, on a sunken surface, lines wrapped. */
+  mono?: boolean;
+  /** Plain text, kept as written: line breaks wrap instead of running together. */
+  pre?: boolean;
+  children?: ReactNode;
+}
+
+export function TaskSection({ title, mono, pre, children }: TaskSectionProps) {
+  return (
+    <section className="joc-taskd__section">
+      <h4 className="joc-taskd__title">{title}</h4>
+      <div className={cx('joc-taskd__body', mono && 'is-mono', pre && 'is-pre')}>{children}</div>
+    </section>
   );
 }
 
