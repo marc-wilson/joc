@@ -23,6 +23,8 @@ export interface SortBarProps<T extends string = string> {
   note?: string;
   /** Says when the menu opens or closes, so the list can hold its order meanwhile. */
   onOpenChange?: (open: boolean) => void;
+  /** Read out by screen readers when it changes, e.g. "Sessions re-sorted". */
+  announcement?: string;
 }
 
 /**
@@ -38,6 +40,7 @@ export function SortBar<T extends string>({
   waiting = 0,
   note,
   onOpenChange,
+  announcement,
 }: SortBarProps<T>) {
   const [open, setOpenState] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -103,6 +106,9 @@ export function SortBar<T extends string>({
       {/* Space kept, faded by opacity: the bar never changes size. */}
       <span className="joc-sortbar__held" aria-hidden={shownWaiting ? undefined : 'true'}>
         Order held, {waiting} waiting
+      </span>
+      <span className="joc-sortbar__live" aria-live="polite">
+        {announcement}
       </span>
       {open ? (
         <div
