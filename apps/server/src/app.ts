@@ -9,6 +9,7 @@ import {
   DeviceTokenRequest,
   GitHubReport,
   ImageId,
+  LaunchRequest,
   LaunchResult,
   MAX_IMAGE_BYTES,
   MarkReadRequest,
@@ -18,7 +19,6 @@ import {
   ProblemsReport,
   PromptRequest,
   type ReadsClaim,
-  ReviewRequest,
   ReviewSettings,
   reviewPrompt,
   type ServerVersion,
@@ -59,6 +59,7 @@ import {
   startLink,
 } from './identity.ts';
 import { findImages, getImage, saveImage } from './images.ts';
+import { claimLaunches, createLaunch, finishLaunch, listLaunches, onLaunches } from './launches.ts';
 import { addMessages, listMessages, onMessages } from './messages.ts';
 import {
   claimReads,
@@ -72,7 +73,6 @@ import { type Owner, ownerFrom } from './owner.ts';
 import { listProblems, saveProblems } from './problems.ts';
 import { claimPrompts, queuePrompt } from './prompts.ts';
 import { RateLimit } from './rate-limit.ts';
-import { claimLaunches, createReview, finishLaunch, listReviews, onReviews } from './reviews.ts';
 import { newSecret, secretsEqual } from './secrets.ts';
 import {
   applyReport,
@@ -453,36 +453,37 @@ export function createApp({
     c.json({ prompts: await claimPrompts(c.get('owner'), c.req.param('id')) }),
   );
 
-  // ── Reviewing a pull request in a session ──────────────────────────────────
+  // ── New sessions, started beside a running one ─────────────────────────────
 
-  app.get('/api/reviews', async (c) => {
-    const number = Number(c.req.query('number'));
+  // The owner's recent launches; with repo and number, the ones reviewing that PR.
+  app.get('/api/launches', async (c) => {
     const repo = c.req.query('repo');
+    const number = Number(c.req.query('number'));
+    if (repo === undefined) return c.json(await listLaunches(c.get('owner')));
     if (!repo || !Number.isInteger(number) || number < 1) {
       return c.json({ error: 'Name the PR with repo and number' }, 400);
     }
-    return c.json(await listReviews(c.get('owner'), repo, number));
+    return c.json(await listLaunches(c.get('owner'), { repo, number }));
   });
 
-  // From the dashboard: run a review in an open session on the PR's repo, or in a new session
-  // that one starts.
-  app.post('/api/reviews', async (c) => {
+  // From the dashboard: start a new session from one of the owner's live sessions, which has a
+  // folder to start it in. A review needs one on the PR's repo, and runs the owner's review
+  // instructions.
+  app.post('/api/launches', async (c) => {
     const owner = c.get('owner');
-    const parsed = ReviewRequest.safeParse(await c.req.json().catch(() => null));
+    const parsed = LaunchRequest.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
-    const { target, ...pr } = parsed.data;
-    // Only the owner's own live session, and one on the PR's repo: the review needs a checkout.
-    const session = await getLiveSession(
-      owner,
-      target.kind === 'new' ? target.from : target.sessionId,
-    );
+    const { from, review } = parsed.data;
+    const session = await getLiveSession(owner, from);
     if (!session) return c.json({ error: 'No such live session' }, 400);
-    if (session.repo !== pr.repo) {
-      return c.json({ error: `That session isn't on ${pr.repo}` }, 400);
-    }
     if (session.state === 'offline') return c.json({ error: 'That session is offline' }, 400);
-    const prompt = reviewPrompt(pr, pr.method, pr.command);
-    return c.json(await createReview(owner, pr, prompt, target), 201);
+    if (review && session.repo !== review.repo) {
+      return c.json({ error: `That session isn't on ${review.repo}` }, 400);
+    }
+    const prompt = review
+      ? reviewPrompt(review, (await getReviewSettings(owner)).instructions)
+      : parsed.data.prompt || undefined;
+    return c.json(await createLaunch(owner, { from, repo: session.repo, prompt, review }), 201);
   });
 
   app.get('/api/settings/review', async (c) => c.json(await getReviewSettings(c.get('owner'))));
@@ -567,7 +568,7 @@ export function createApp({
           onGitHub(owner, () => publish({ type: 'github' })),
           onNotifications(owner, () => publish({ type: 'notifications' })),
           onAlerts(owner, () => publish({ type: 'alerts' })),
-          onReviews(owner, () => publish({ type: 'reviews' })),
+          onLaunches(owner, () => publish({ type: 'launches' })),
         ];
         const unsubscribeAll = () => {
           for (const unsubscribe of unsubscribers) unsubscribe();
