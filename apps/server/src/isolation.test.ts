@@ -14,6 +14,7 @@ import {
   NotificationsSnapshot,
   ReadsClaim,
   Session,
+  SessionSettings,
 } from '@joc/protocol';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { z } from 'zod';
@@ -104,6 +105,8 @@ test('every API route needs an owner', async () => {
     ['POST', '/api/notifications/read'],
     ['POST', '/api/notifications/read-all'],
     ['POST', '/api/notifications/reads/claim'],
+    ['GET', '/api/settings/sessions'],
+    ['PUT', '/api/settings/sessions'],
   ] as const) {
     const res = await app.request(path, { method });
     assert.equal(res.status, 401, `${method} ${path}`);
@@ -257,15 +260,18 @@ test('GitHub data stays with its owner', async () => {
   assert.equal(bob.state, 'none');
 });
 
+/** Backdates a session's last report, as if it went quiet that long ago. */
+const quietFor = (owner: string, sessionId: string, ms: number) =>
+  getDb()
+    .collection('sessions')
+    .updateOne({ owner, sessionId }, { $set: { updatedAt: new Date(Date.now() - ms) } });
+
+const DAY = 24 * 60 * 60_000;
+
 test('history is per owner, and a silent session leaves the live list but stays in history', async () => {
   await call('alice', '/api/reports', report('alice-old', { title: 'Old one' }));
-  // An hour and a bit of silence.
-  await getDb()
-    .collection('sessions')
-    .updateOne(
-      { owner: 'gh_1', sessionId: 'alice-old' },
-      { $set: { updatedAt: new Date(Date.now() - 61 * 60_000) } },
-    );
+  // Over a week of silence, the default for a session that went quiet.
+  await quietFor('gh_1', 'alice-old', 8 * DAY);
 
   const live = await read(await call('alice', '/api/sessions'), Sessions);
   const history = await read(await call('alice', '/api/history'), z.array(HistorySession));
@@ -283,6 +289,56 @@ test('history is per owner, and a silent session leaves the live list but stays 
     bobs.some((s) => s.title === 'Old one' || s.title === 'Alice'),
     false,
   );
+});
+
+test("how long sessions stay is each owner's own setting, and only a signed-in person's", async () => {
+  const asPerson = (who: Who, body?: unknown) =>
+    app.request('/api/settings/sessions', {
+      method: body === undefined ? 'GET' : 'PUT',
+      headers: {
+        cookie: cookies.get(who) ?? '',
+        host: 'joc.test',
+        origin: 'http://joc.test',
+        'content-type': 'application/json',
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  const live = async (who: Who) =>
+    (await read(await call(who, '/api/sessions'), Sessions)).map((s) => s.id);
+
+  // Bob has a session that went quiet over a week ago too. Alice has one that ended 2h ago.
+  await call('bob', '/api/reports', report('bob-old'));
+  await quietFor('gh_2', 'bob-old', 8 * DAY);
+  await call('alice', '/api/reports', report('alice-ended', { state: 'offline' }));
+  await quietFor('gh_1', 'alice-ended', 2 * 60 * 60_000);
+  assert.equal((await live('alice')).includes('alice-ended'), true);
+
+  // Alice keeps quiet sessions for good, and ended ones for an hour.
+  assert.equal((await asPerson('alice', { quiet: 'never', ended: '1h' })).status, 200);
+  assert.deepEqual(await read(await asPerson('alice'), SessionSettings), {
+    quiet: 'never',
+    ended: '1h',
+  });
+  assert.equal((await live('alice')).includes('alice-old'), true);
+  assert.equal((await live('alice')).includes('alice-ended'), false);
+
+  // Bob still has the defaults, and his quiet session stays off his list.
+  assert.deepEqual(await read(await asPerson('bob'), SessionSettings), {
+    quiet: '1w',
+    ended: '1d',
+  });
+  const bobs = await live('bob');
+  assert.equal(bobs.includes('bob-old'), false);
+  assert.equal(
+    bobs.some((id) => id.startsWith('alice')),
+    false,
+  );
+
+  // A machine's token can't read or change them, and a bad value is refused.
+  assert.equal((await call('alice', '/api/settings/sessions')).status, 403);
+  assert.equal((await asPerson('alice', { quiet: 'forever', ended: '1h' })).status, 400);
+
+  await asPerson('alice', { quiet: '1w', ended: '1d' });
 });
 
 test("a machine's problems are shown only to its owner, and only to a signed-in person", async () => {
