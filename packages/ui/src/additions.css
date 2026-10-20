@@ -69,6 +69,43 @@
 .joc-slist__foot-text { flex: 1 1 200px; min-width: 0; }
 .joc-slist__foot-links { flex: none; display: inline-flex; gap: var(--space-3); }
 
+/* ---------- Background tab ---------- */
+.joc-bg { display: flex; flex-direction: column; min-height: 0; background: var(--bg-base); }
+.joc-bg__running { position: sticky; top: 0; z-index: var(--z-sticky); background: var(--bg-base); box-shadow: 0 1px 0 var(--border); }
+.joc-bg .joc-sechead { padding: var(--space-4) var(--space-4) var(--space-2); }
+.joc-task.is-button { width: 100%; border: 0; border-bottom: 1px solid var(--border-subtle); text-align: left; font: inherit; color: inherit; cursor: pointer; transition: background-color var(--duration-instant) linear; }
+.joc-task.is-open { border-bottom-color: transparent; }
+.joc-task__step { font-family: var(--font-mono); font-size: 12px; line-height: 20px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; animation: joc-fade var(--duration-fade) var(--ease-standard) both; }
+.joc-task__chev { width: 14px; height: 14px; color: var(--text-tertiary); }
+.joc-task.is-live .joc-task__elapsed { color: var(--text-secondary); min-width: 5ch; text-align: right; }
+.joc-showall { display: flex; align-items: center; justify-content: center; gap: var(--space-1\.5); width: 100%; height: var(--row); border: 0; border-bottom: 1px solid var(--border-subtle); background: var(--bg-raised); color: var(--accent); font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; transition: background-color var(--duration-instant) linear; }
+.joc-showall:hover { background: var(--bg-hover); }
+.joc-showall__n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ---------- Task details (a background row opened in place) ---------- */
+/* Indented to the row's text column: space-4 + 16px lead + space-3 = 44px. */
+.joc-taskd { display: flex; flex-direction: column; gap: var(--space-4); padding: 0 var(--space-4) var(--space-4) 44px; background: var(--bg-raised); border-bottom: 1px solid var(--border-subtle); animation: joc-fade var(--duration-fade) var(--ease-standard) both; }
+.joc-taskd__sec { display: flex; flex-direction: column; gap: var(--space-1\.5); min-width: 0; }
+.joc-taskd__label { display: flex; align-items: center; gap: var(--space-2); height: 16px; font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-secondary); }
+.joc-taskd__count { font-family: var(--font-mono); font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text-tertiary); }
+.joc-taskd__asked { margin: 0; max-width: var(--reading-measure); font-size: 13px; line-height: 20px; color: var(--text-primary); }
+.joc-steps { list-style: none; margin: 0; padding: var(--space-1) 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-base); }
+.joc-step { display: grid; grid-template-columns: 12px auto minmax(0, 1fr) auto; align-items: center; column-gap: var(--space-2); height: var(--row-step); padding: 0 var(--space-3) 0 var(--space-2); font-family: var(--font-mono); font-size: 11px; line-height: 16px; font-variant-ligatures: none; }
+.joc-step__tool { color: var(--text-primary); font-weight: 500; }
+.joc-step__target { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.joc-step__time { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.joc-step.is-current { background: var(--bg-hover); }
+.joc-step.is-current .joc-step__target { color: var(--text-primary); }
+.joc-taskd__report { max-height: var(--details-max); overflow-y: auto; padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-base); font-size: 13px; line-height: 20px; color: var(--text-primary); }
+.joc-taskd__report > * { max-width: var(--reading-measure); }
+.joc-taskd__report p, .joc-taskd__report ul { margin: 0 0 var(--space-2); }
+.joc-taskd__report ul { padding-left: var(--space-5); }
+.joc-taskd__report h4 { margin: var(--space-3) 0 var(--space-1); font-size: 13px; line-height: 20px; font-weight: 600; }
+.joc-taskd__report h4:first-child { margin-top: 0; }
+.joc-taskd__output { margin: 0; max-height: var(--output-max); overflow: auto; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-sunken); font-family: var(--font-mono); font-size: 11px; line-height: 16px; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; font-variant-ligatures: none; }
+.joc-taskd__pending { margin: 0; font-size: 12px; line-height: 16px; color: var(--text-tertiary); }
+.joc-taskd__foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); font-size: 12px; line-height: 16px; color: var(--text-tertiary); }
+
 /* ---------- Textarea ---------- */
 .joc-textarea { display: block; box-sizing: border-box; width: 100%; min-height: var(--textarea-min); max-height: var(--textarea-max); padding: var(--space-2) var(--space-3); border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--bg-raised); color: var(--text-primary); font-family: var(--font-sans); font-size: 13px; line-height: 20px; resize: vertical; transition: border-color var(--duration-instant) linear; }
 .joc-textarea::placeholder { color: var(--text-tertiary); }
@@ -110,3 +147,10 @@ button.joc-link { padding: 0; border: 0; background: none; font-family: inherit;
 .joc-slnote { display: flex; align-items: center; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border-subtle); background: var(--bg-base); color: var(--text-tertiary); font-size: 12px; line-height: 16px; }
 .joc-slnote__text { flex: 1; min-width: 0; }
 h3.joc-rgh { margin: 0; }
+
+/* Background tab: one list (so a row that moves keeps its details), headed by SectionHeaders. */
+.joc-task.is-button { display: grid; }
+h4.joc-taskd__label { margin: 0; }
+.joc-step .joc-sdot, .joc-step .joc-ci { justify-self: center; }
+.joc-step .joc-sdot { --dot: 6px; }
+.joc-taskd .joc-cmd { max-width: none; }
