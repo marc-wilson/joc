@@ -7,6 +7,7 @@ import {
   HistorySession,
   Launch,
   type LaunchRequest,
+  Resume,
   ReviewSettings,
   Session,
   SessionCommands,
@@ -443,6 +444,64 @@ export function useDeletes(): Deletion[] {
     };
   }, []);
   return deletes;
+}
+
+const Resumes = z.array(Resume);
+const Refused = z.object({ error: z.string() });
+
+/** The person's resumes of the last day, oldest first, refetched whenever one changes. */
+export function useResumes(): Resume[] {
+  const [resumes, setResumes] = useState<Resume[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      apiFetch('/api/resumes')
+        .then(async (r) => {
+          if (r.ok && !cancelled) setResumes(Resumes.parse(await r.json()));
+        })
+        // Unreachable for now: the next resumes event or reconnect snapshot loads them again.
+        .catch(() => {});
+    const unsubscribe = subscribe((event) => {
+      if (event.type === 'resumes' || event.type === 'snapshot') void load();
+    });
+    void load();
+    // A waiting resume fails after a while without any event: look again now and then.
+    const timer = setInterval(() => void load(), 60_000);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      clearInterval(timer);
+    };
+  }, []);
+  return resumes;
+}
+
+/** Asks for an ended session to be resumed, on its machine or `machine`. The resume, or why not. */
+export async function askResume(
+  sessionId: string,
+  machine?: string,
+): Promise<Resume | { error: string }> {
+  try {
+    const res = await apiFetch('/api/resumes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId, ...(machine ? { machine } : {}) }),
+    });
+    const body: unknown = await res.json().catch(() => ({}));
+    if (res.ok) return Resume.parse(body);
+    const refused = Refused.safeParse(body);
+    return { error: refused.success ? refused.data.error : "JOC couldn't resume it." };
+  } catch {
+    return { error: "JOC couldn't reach the server. Try again." };
+  }
+}
+
+/** Withdraws a resume no machine has taken yet. False when it already started. */
+export async function withdrawResume(id: string): Promise<boolean> {
+  const res = await apiFetch(`/api/resumes/${encodeURIComponent(id)}/cancel`, {
+    method: 'POST',
+  }).catch(() => undefined);
+  return res?.ok ?? false;
 }
 
 /** Asks for sessions to be deleted on their machines and in JOC. The deletes, or why not. */

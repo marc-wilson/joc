@@ -5,8 +5,8 @@ import { type TabItem, Tabs } from './controls.tsx';
 import { cx } from './cx.ts';
 import { Icon } from './Icon.tsx';
 import { Branch, WorktreeTag } from './inline.tsx';
-import { ReviewSessionRow, type ReviewSessionRowProps } from './review-session.tsx';
 import { EndedTag } from './resuming.tsx';
+import { ReviewSessionRow, type ReviewSessionRowProps } from './review-session.tsx';
 import { STATE_LABEL, StateBadge, StateDot } from './state.tsx';
 
 export interface SessionRowProps {

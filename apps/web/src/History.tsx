@@ -12,9 +12,18 @@ import {
 import { Fragment, useState } from 'react';
 import { DeleteDialog } from './DeleteSessions.tsx';
 import { cantDelete, deletionLine, deletionOf, machineLive, removedLine } from './deletes.ts';
-import { useDeletes, useGitHub, useHistory, useNow, useSessions } from './hooks.ts';
+import {
+  askResume,
+  useDeletes,
+  useGitHub,
+  useHistory,
+  useNow,
+  useResumes,
+  useSessions,
+} from './hooks.ts';
 import { prFor } from './links.ts';
 import { Nav } from './Nav.tsx';
+import { historyResume } from './Resuming.tsx';
 import { ago, duration } from './time.ts';
 
 // Repos in the order their latest session appears: the list is already newest first.
@@ -31,7 +40,16 @@ export function HistoryPage() {
   const now = useNow();
   const { sessions: live, deleted } = useSessions();
   const deletes = useDeletes();
+  const resumes = useResumes();
+  // A resume the server refused, by session.
+  const [refused, setRefused] = useState<{ id: string; error: string }>();
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+
+  async function ask(sessionId: string) {
+    setRefused(undefined);
+    const outcome = await askResume(sessionId);
+    if ('error' in outcome) setRefused({ id: sessionId, error: outcome.error });
+  }
   const [confirming, setConfirming] = useState<HistorySession[]>();
   const prs = github?.state === 'reported' ? [...github.mine, ...github.reviewRequested] : [];
 
@@ -56,7 +74,7 @@ export function HistoryPage() {
           size="lg"
           title="History"
           count={history?.length}
-          description="Every session JOC has seen, newest first. Copy a command to pick one up where it left off."
+          description="Every session JOC has seen, newest first. Resume one here, or copy its command to pick it up in a terminal."
         >
           {history?.length ? (
             <span className="app-history__bulk">
@@ -96,6 +114,9 @@ export function HistoryPage() {
                     const line =
                       deletion && deletionLine(deletion, machineLive(live, deletion.machine, now));
                     const failed = deletion?.status === 'failed';
+                    const current = live.find((l) => l.id === s.id) ?? s;
+                    const resume = historyResume(current, resumes, live, now, () => void ask(s.id));
+                    const refusal = refused?.id === s.id ? refused.error : undefined;
                     return (
                       <HistoryRow
                         key={s.id}
@@ -118,8 +139,28 @@ export function HistoryPage() {
                             <span className={failed ? 'is-failed' : undefined}>
                               {failed ? <CIMark status="fail" size={12} /> : null} {line}
                             </span>
+                          ) : refusal ? (
+                            <>
+                              <CIMark status="fail" />
+                              Couldn't resume it: {refusal}
+                            </>
+                          ) : resume.status ? (
+                            <>
+                              <CIMark
+                                status={
+                                  resume.failed
+                                    ? 'fail'
+                                    : resume.phase === 'live'
+                                      ? 'pass'
+                                      : 'pending'
+                                }
+                              />
+                              {resume.status}
+                            </>
                           ) : undefined
                         }
+                        statusError={!line && (!!refusal || resume.failed)}
+                        resume={resume.action}
                         actions={
                           <OverflowMenu
                             label={`Actions for ${s.title ?? 'New session'}`}
