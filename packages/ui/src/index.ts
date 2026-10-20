@@ -97,6 +97,8 @@ export {
 } from './diff.tsx';
 export { PRRow, type PRRowProps } from './github.tsx';
 export {
+  HistoryList,
+  type HistoryListProps,
   HistoryRow,
   type HistoryRowProps,
   SetupCheck,
@@ -164,6 +166,7 @@ export {
   ReviewRow,
   type ReviewRowProps,
 } from './pr.tsx';
+export { resumeCommand, shortId, shortPath } from './resume.ts';
 export {
   NewSessionButton,
   type NewSessionButtonProps,
