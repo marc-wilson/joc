@@ -433,6 +433,8 @@ h4.joc-taskd__label { margin: 0; }
 /* The row is the option (it takes focus, as SessionRow does), so its title is plain text. */
 .joc-rrow { cursor: default; }
 .joc-rrow:focus-visible { outline: none; }
+/* The sort bar's screen reader line: "Sessions re-sorted", heard once per settle, never seen. */
+.joc-sortbar__live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* Each live list item wraps one row; the wrapper only fades. */
 .joc-slist__item { display: block; }
 /* ===== End sort and reviews ========================================================== */
