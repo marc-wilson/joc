@@ -94,7 +94,6 @@ export {
   type SetupStatus,
 } from './history.tsx';
 export { Icon, type IconName, type IconProps } from './Icon.tsx';
-export { type InboxMark, InboxRow, type InboxRowProps } from './inbox.tsx';
 export { Branch, Code, Emph, Tag } from './inline.tsx';
 export { LogoMark, type LogoMarkProps } from './Logo.tsx';
 export {
