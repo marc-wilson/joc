@@ -1,5 +1,5 @@
 import { relative } from 'node:path';
-import type { SessionReport } from '@joc/protocol';
+import type { RunningTask, SessionReport } from '@joc/protocol';
 
 /** The hook fields we read. See https://code.claude.com/docs/en/hooks for the full shapes. */
 export interface HookInput {
@@ -16,13 +16,78 @@ export interface HookInput {
   notification_type?: string;
   message?: string;
   last_assistant_message?: string;
+  /** On Stop: Claude Code's in-flight background work. Empty when nothing is in flight. */
   background_tasks?: unknown[];
+  /** On Stop: the session's scheduled wakeups (CronCreate, ScheduleWakeup, /loop). */
+  session_crons?: unknown[];
   /** On a Sync from register.ts: whether its session can show a native notification. */
   can_notify?: boolean;
 }
 
 /** The part of a report decided by the hook event alone. */
-export type EventFields = Pick<SessionReport, 'state' | 'activity' | 'title' | 'name' | 'model'>;
+export type EventFields = Pick<
+  SessionReport,
+  'state' | 'activity' | 'title' | 'name' | 'model' | 'background'
+>;
+
+/** The most background tasks a report carries; matches MAX_RUNNING_TASKS in @joc/protocol. */
+const MAX_TASKS = 50;
+
+/** A string field of `o`, cut to `max` characters; undefined when it isn't a non-empty string. */
+function field(o: Record<string, unknown>, key: string, max: number): string | undefined {
+  const v = o[key];
+  if (typeof v !== 'string' || !v) return undefined;
+  return v.length > max ? `${v.slice(0, max - 1)}…` : v;
+}
+
+/** Leaves out the fields that aren't set, so the report stays small. */
+function defined<T extends object>(o: T): T {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
+}
+
+/**
+ * Claude Code's own list of what runs in the background, from a Stop's `background_tasks` and
+ * `session_crons`, bounded to fit the report. Undefined when the hook carries neither.
+ */
+export function runningTasks(input: HookInput): RunningTask[] | undefined {
+  const { background_tasks: tasks, session_crons: crons } = input;
+  if (!Array.isArray(tasks) && !Array.isArray(crons)) return undefined;
+  const list: RunningTask[] = [];
+  for (const t of Array.isArray(tasks) ? tasks : []) {
+    if (!t || typeof t !== 'object') continue;
+    const o = t as Record<string, unknown>;
+    const id = field(o, 'id', 200);
+    if (!id) continue;
+    list.push(
+      defined({
+        id,
+        type: field(o, 'type', 50) ?? 'task',
+        status: field(o, 'status', 50),
+        description: field(o, 'description', 1000),
+        command: field(o, 'command', 1000),
+        agentType: field(o, 'agent_type', 100),
+        server: field(o, 'server', 200),
+        tool: field(o, 'tool', 200),
+        name: field(o, 'name', 200),
+      }),
+    );
+  }
+  for (const c of Array.isArray(crons) ? crons : []) {
+    if (!c || typeof c !== 'object') continue;
+    const o = c as Record<string, unknown>;
+    const id = field(o, 'id', 200);
+    if (!id) continue;
+    list.push(
+      defined({
+        id,
+        type: 'cron',
+        description: field(o, 'prompt', 1000),
+        schedule: field(o, 'schedule', 100),
+      }),
+    );
+  }
+  return list.slice(0, MAX_TASKS);
+}
 
 /** First non-empty line, whitespace collapsed, cut to `max` characters. */
 export function firstLine(text: string | undefined, max = 120): string | undefined {
@@ -106,17 +171,27 @@ export function eventFields(input: HookInput): EventFields | undefined {
       if (input.notification_type === 'permission_prompt') return { state: 'needs' };
       return { state: 'needs', activity: firstLine(input.message) ?? 'Waiting for you' };
     case 'Stop': {
-      const running = input.background_tasks?.length ?? 0;
+      // Claude Code's list is the truth for what runs. Older versions send none: then the count
+      // is all there is, and the stored list stays as it was.
+      const background = runningTasks(input);
+      const running = background?.length ?? input.background_tasks?.length ?? 0;
+      const list = background ? { background } : {};
       if (running) {
         return {
           state: 'background',
           activity: `${running} background ${running === 1 ? 'task' : 'tasks'} running`,
+          ...list,
         };
       }
-      return { state: 'idle', activity: firstLine(input.last_assistant_message) ?? 'Done' };
+      return {
+        state: 'idle',
+        activity: firstLine(input.last_assistant_message) ?? 'Done',
+        ...list,
+      };
     }
     case 'SessionEnd':
-      return { state: 'offline', activity: 'Session ended' };
+      // Its background work ends with it.
+      return { state: 'offline', activity: 'Session ended', background: [] };
     default:
       return undefined;
   }
