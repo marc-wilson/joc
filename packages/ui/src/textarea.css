@@ -1,0 +1,41 @@
+/* A multi-line text field. Not in the JOC design system yet: move it into styles/components.css
+   when the design system has it, and delete this file. Tokens only; the frame matches .joc-input. */
+
+.joc-textarea {
+  display: block;
+  width: 100%;
+  min-height: calc(var(--control-md, 30px) * 2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 20px;
+  resize: vertical;
+  outline: none;
+}
+
+.joc-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.joc-textarea.is-mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.joc-textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+.joc-field.is-error .joc-textarea {
+  border-color: var(--state-offline);
+}
+
+.joc-field.is-disabled .joc-textarea {
+  border-color: var(--border);
+  background: var(--bg-base);
+  color: var(--text-disabled);
+}

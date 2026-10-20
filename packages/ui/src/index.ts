@@ -34,6 +34,8 @@ export {
   type TabItem,
   Tabs,
   type TabsProps,
+  TextArea,
+  type TextAreaProps,
   TextInput,
   type TextInputProps,
 } from './controls.tsx';
