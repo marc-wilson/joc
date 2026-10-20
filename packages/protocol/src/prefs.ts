@@ -30,9 +30,58 @@ export const SessionPrefs = z.object({
 });
 export type SessionPrefs = z.infer<typeof SessionPrefs>;
 
+/**
+ * A kind of notification, as the settings name it. `question` and `permission` are a session
+ * waiting on you; the rest are JOC's alerts and the person's GitHub notifications.
+ */
+export const NotificationKind = z.enum([
+  'question',
+  'permission',
+  'finished',
+  'review',
+  'mention',
+  'ci-failed',
+  'github',
+]);
+export type NotificationKind = z.infer<typeof NotificationKind>;
+
+/** Where one kind shows up. All off keeps it in the history only. */
+export const NotificationChannels = z.object({
+  panel: z.boolean(),
+  toast: z.boolean(),
+  desktop: z.boolean(),
+});
+export type NotificationChannels = z.infer<typeof NotificationChannels>;
+
+/** Kinds always in the panel: a session waiting on you never hides. */
+export const PINNED_KINDS: readonly NotificationKind[] = ['question', 'permission'];
+
+export const DEFAULT_NOTIFICATION_CHANNELS: Record<NotificationKind, NotificationChannels> = {
+  question: { panel: true, toast: true, desktop: true },
+  permission: { panel: true, toast: true, desktop: true },
+  finished: { panel: true, toast: false, desktop: false },
+  review: { panel: true, toast: true, desktop: false },
+  mention: { panel: true, toast: false, desktop: false },
+  'ci-failed': { panel: true, toast: true, desktop: true },
+  github: { panel: true, toast: false, desktop: false },
+};
+
+/** The notification panel's filter. */
+export const NotificationTab = z.enum(['all', 'needs', 'github']);
+export type NotificationTab = z.infer<typeof NotificationTab>;
+
 export const Prefs = z.object({
-  /** Browser notifications are wanted. Each browser still has to allow them itself. */
+  /**
+   * Desktop notifications are wanted (for the kinds set to Desktop). Each browser still has to
+   * allow them itself.
+   */
   browserNotifications: z.boolean(),
+  /** Only while JOC isn't the focused window. */
+  desktopWhenAway: z.boolean(),
+  /** Where each kind of notification shows up; a kind left out has its default. */
+  notificationKinds: z.partialRecord(NotificationKind, NotificationChannels),
+  /** The panel's last filter. */
+  notificationTab: NotificationTab,
   /** Sessions pinned to the top of the list, in the order they were pinned. */
   pinned: Entries,
   /** Session list groups folded. */
@@ -52,6 +101,9 @@ export type Prefs = z.infer<typeof Prefs>;
 
 export const DEFAULT_PREFS: Prefs = {
   browserNotifications: false,
+  desktopWhenAway: true,
+  notificationKinds: {},
+  notificationTab: 'all',
   pinned: [],
   foldedGroups: [],
   listFolded: false,
@@ -105,6 +157,12 @@ export function applyPrefsPatch(prefs: Prefs, patch: PrefsPatch, now: number): P
   }
   const kept = sessions.sort((a, b) => a.at - b.at).slice(-MAX_PREF_SESSIONS);
   return { ...prefs, ...given(top), sessions: kept };
+}
+
+/** Where a kind shows up: the person's choice or the default; pinned kinds always in the panel. */
+export function channelsOf(prefs: Prefs, kind: NotificationKind): NotificationChannels {
+  const chosen = prefs.notificationKinds[kind] ?? DEFAULT_NOTIFICATION_CHANNELS[kind];
+  return PINNED_KINDS.includes(kind) ? { ...chosen, panel: true } : chosen;
 }
 
 /** Two pending patches as one, the later winning field by field and session by session. */

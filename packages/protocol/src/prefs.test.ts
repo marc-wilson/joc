@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   applyPrefsPatch,
+  channelsOf,
   combinePrefsPatches,
+  DEFAULT_NOTIFICATION_CHANNELS,
   DEFAULT_PREFS,
   MAX_PREF_SESSIONS,
   PrefsPatch,
@@ -71,4 +73,17 @@ test('a patch with an unbounded list is refused', () => {
   const many = Array.from({ length: 1000 }, (_, i) => `s${i}`);
   assert.equal(PrefsPatch.safeParse({ pinned: many }).success, false);
   assert.equal(PrefsPatch.safeParse({ diffMode: 'sideways' }).success, false);
+});
+
+test('a kind never set has its default, and a session waiting on you stays in the panel', () => {
+  assert.deepEqual(channelsOf(DEFAULT_PREFS, 'review'), DEFAULT_NOTIFICATION_CHANNELS.review);
+  const off = { panel: false, toast: false, desktop: false };
+  const prefs = applyPrefsPatch(
+    DEFAULT_PREFS,
+    { notificationKinds: { github: off, question: off } },
+    1,
+  );
+  assert.deepEqual(channelsOf(prefs, 'github'), off);
+  assert.deepEqual(channelsOf(prefs, 'question'), { ...off, panel: true });
+  assert.equal(PrefsPatch.safeParse({ notificationKinds: { pager: off } }).success, false);
 });
