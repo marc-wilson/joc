@@ -1,5 +1,5 @@
 import type { SessionState } from '@joc/protocol';
-import { type ButtonHTMLAttributes, useState } from 'react';
+import { type ButtonHTMLAttributes, type ReactNode, useState } from 'react';
 import { cx } from './cx.ts';
 import { Icon, type IconName } from './Icon.tsx';
 import { StateDot } from './state.tsx';
@@ -182,11 +182,21 @@ export interface SwitchProps {
   disabled?: boolean;
   /** Shown instead of the description, e.g. why it can't be turned on. */
   hint?: string;
+  /** A small button after the description, e.g. to finish turning it on here. */
+  action?: ReactNode;
   onChange?: (checked: boolean) => void;
 }
 
 /** A one-line on/off setting: switch, label, what it does, and On or Off. */
-export function Switch({ label, description, checked, disabled, hint, onChange }: SwitchProps) {
+export function Switch({
+  label,
+  description,
+  checked,
+  disabled,
+  hint,
+  action,
+  onChange,
+}: SwitchProps) {
   const id = `sw-${label.replace(/\W+/g, '-').toLowerCase()}`;
   return (
     <div className={cx('joc-switchbar', disabled && 'is-disabled')}>
@@ -204,6 +214,7 @@ export function Switch({ label, description, checked, disabled, hint, onChange }
         {label}
       </label>
       <span className="joc-switchbar__desc meta">{hint ?? description}</span>
+      {action}
       <span className="joc-switchbar__state meta">{checked ? 'On' : 'Off'}</span>
     </div>
   );
