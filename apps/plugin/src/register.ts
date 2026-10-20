@@ -80,15 +80,20 @@ interface Credentials {
 
 /**
  * The folder Claude Code gives the plugin's command hooks as CLAUDE_PLUGIN_DATA, where hook.ts
- * keeps its read positions. Not on `$`, so it's worked out from where an installed plugin lives:
+ * keeps its per-session state. Not on `$`, so it's worked out from where the plugin lives:
  * `<config>/plugins/cache/<marketplace>/<plugin>/<version>` keeps its data in
- * `<config>/plugins/data/<plugin>-<marketplace>`.
+ * `<config>/plugins/data/<plugin>-<marketplace>`; one loaded with `--plugin-dir` in
+ * `<config>/plugins/data/<plugin>-inline`.
  */
-function pluginData(root: string): string | undefined {
+async function pluginData($: EngineInterface, root: string): Promise<string | undefined> {
   const installed = root.match(/^(.*)\/plugins\/cache\/([^/]+)\/([^/]+)\/[^/]+$/);
-  if (!installed) return undefined;
-  const [, config, marketplace, plugin] = installed;
-  return `${config}/plugins/data/${`${plugin}@${marketplace}`.replace(/[^\w-]/g, '-')}`;
+  if (installed) {
+    const [, config, marketplace, plugin] = installed;
+    return `${config}/plugins/data/${`${plugin}@${marketplace}`.replace(/[^\w-]/g, '-')}`;
+  }
+  const config = (await $.env.get('CLAUDE_CONFIG_DIR')) || (await homePath($, '.claude'));
+  const name = $.plugin.name.replace(/[^\w-]/g, '-');
+  return config && name ? `${config}/plugins/data/${name}-inline` : undefined;
 }
 
 /** The plugin's folder: `$.plugin.root`, which may name its .claude-plugin folder. */
@@ -685,7 +690,7 @@ export const register: Register = (on) => {
         const run = await $.process.run(['node', `${root}/src/hook.ts`], {
           stdin: JSON.stringify(event),
           // An empty value makes hook.ts use its own folder rather than one this process has.
-          env: { CLAUDE_PLUGIN_ROOT: root, CLAUDE_PLUGIN_DATA: pluginData(root) ?? '' },
+          env: { CLAUDE_PLUGIN_ROOT: root, CLAUDE_PLUGIN_DATA: (await pluginData($, root)) ?? '' },
           timeoutMs: SYNC_TIMEOUT_MS,
         });
         if (run.exitCode !== 0) log.note(crash('hook', exitDetail(run.exitCode, run.stderr)));
@@ -742,7 +747,10 @@ export const register: Register = (on) => {
           const run = await $.process
             .run(['node', `${root}/src/delete-session.ts`], {
               stdin: JSON.stringify({ sessionId }),
-              env: { CLAUDE_PLUGIN_ROOT: root, CLAUDE_PLUGIN_DATA: pluginData(root) ?? '' },
+              env: {
+                CLAUDE_PLUGIN_ROOT: root,
+                CLAUDE_PLUGIN_DATA: (await pluginData($, root)) ?? '',
+              },
               timeoutMs: DELETE_TIMEOUT_MS,
             })
             .catch((error: unknown) => {
