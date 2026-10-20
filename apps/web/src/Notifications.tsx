@@ -17,6 +17,8 @@ import {
   ToastStack,
 } from '@joc/ui';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { NoteAnswers } from './Answering.tsx';
+import { droppedAnswers, useSent } from './answers.ts';
 import { apiFetch } from './auth.ts';
 import { useAlerts, useGitHub, useNotifications, useNow, useSessions } from './hooks.ts';
 import { sessionForThread } from './links.ts';
@@ -103,7 +105,7 @@ function useAction(
       else location.assign(note.href);
     },
   });
-  if (note.live) return open('Open session');
+  if (note.live) return open();
   if (note.kind === 'review' && note.number) {
     const href = `/pr?${new URLSearchParams({ repo: note.repo, number: String(note.number) })}`;
     return {
@@ -166,9 +168,7 @@ export function NoteRow({ note, gone, now, sessions, prs, time }: NoteRowProps) 
       time={time ?? age(note.at, now)}
       unread={note.unread}
       needs={note.live}
-      answers={
-        note.live ? <span className="jn-answers__note">Answer it in Claude Code</span> : undefined
-      }
+      answers={note.live ? <NoteAnswers note={note} sessions={sessions} /> : undefined}
       action={action}
       onMarkRead={note.live ? undefined : () => void markRead([note])}
       onClear={note.live ? undefined : () => void clearNotes([note])}
@@ -405,7 +405,8 @@ function NoteToast({
       tone={TONE(note)}
       title={note.title}
       body={mono(note)}
-      action={action.label}
+      answers={note.live ? <NoteAnswers note={note} sessions={sessions} /> : undefined}
+      action={note.live ? 'Open' : action.label}
       onAction={() => {
         action.run();
         onDismiss();
@@ -455,6 +456,10 @@ export function useNotificationCenter(viewing: string | undefined): {
   }, []);
 
   const stack = toasts.filter((n) => !dismissed.has(n.id));
+  // Answers from here that came after Claude Code was answered: said once, then gone.
+  const dropped = droppedAnswers(sessions, useSent()).filter(
+    (d) => !dismissed.has(`answer:${d.waitingId}`),
+  );
   // Oldest stay put; newer ones wait behind the "more" bar. Newest of those shown on top. While
   // the panel is open it has them all, so the stack steps aside.
   const visible = stack.slice(0, MAX_TOASTS).reverse();
@@ -480,10 +485,18 @@ export function useNotificationCenter(viewing: string | undefined): {
             onClose={() => setOpen(false)}
           />
         ) : null}
-        {visible.length && !open ? (
+        {(visible.length || dropped.length) && !open ? (
           <ToastStack more={stack.length - visible.length} onOpenMore={() => setOpen(true)}>
             {visible.map((n) => (
               <NoteToast key={n.id} note={n} sessions={sessions} onDismiss={() => dismiss(n.id)} />
+            ))}
+            {dropped.map((d) => (
+              <Toast
+                key={d.waitingId}
+                title="Answered in Claude Code"
+                body={`${d.title ?? 'The session'} was answered there first, so your answer from JOC wasn’t used.`}
+                onDismiss={() => dismiss(`answer:${d.waitingId}`)}
+              />
             ))}
           </ToastStack>
         ) : null}
