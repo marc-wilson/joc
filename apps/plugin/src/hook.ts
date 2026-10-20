@@ -10,6 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 import type {
   ChangesReport,
   ImageRef,
@@ -43,7 +44,15 @@ import {
   readSubagents,
   type TranscriptImage,
 } from './transcript.ts';
-import { manifestVersion, PLUGIN_HEADER, versionHeader } from './version.ts';
+import {
+  INSTALLED_HEADER,
+  installedHeader,
+  installedList,
+  installedVersion,
+  manifestVersion,
+  PLUGIN_HEADER,
+  versionHeader,
+} from './version.ts';
 
 const at = Date.now();
 const { url: serverUrl, token } = connection(process.env, readCredentials());
@@ -74,10 +83,30 @@ function ownVersion(): string | undefined {
   }
 }
 
-const version = versionHeader(ownVersion());
+/**
+ * The plugin version installed on this machine, from Claude Code's list of installed plugins,
+ * read afresh each run: an update shows at once, even from a session still running an old copy.
+ * Undefined when this copy isn't an installed one, or the list can't be read. Only read.
+ */
+function installed(): string | undefined {
+  const list = installedList(fileURLToPath(new URL('..', import.meta.url)));
+  if (!list) return undefined;
+  try {
+    return installedVersion(readFileSync(list.file, 'utf8'), list.key);
+  } catch {
+    // No list there: requests go without it, as an older plugin's do.
+    return undefined;
+  }
+}
 
-/** Who this machine is, and which plugin version it runs: on every request. */
-const auth = (): { authorization?: string; [PLUGIN_HEADER]?: string } => ({
+const version = { ...versionHeader(ownVersion()), ...installedHeader(installed()) };
+
+/** Who this machine is, and which plugin versions it runs and has installed: on every request. */
+const auth = (): {
+  authorization?: string;
+  [PLUGIN_HEADER]?: string;
+  [INSTALLED_HEADER]?: string;
+} => ({
   ...version,
   ...(token ? { authorization: `Bearer ${token}` } : {}),
 });
