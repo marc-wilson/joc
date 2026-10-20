@@ -40,6 +40,8 @@ export const Prefs = z.object({
   /** The session list folded into its rail. */
   listFolded: z.boolean(),
   diffMode: DiffMode,
+  /** The Background tab lists every finished task, not just the latest few. */
+  showAllFinishedTasks: z.boolean(),
   /** The plugin version whose out-of-date banner was dismissed. */
   dismissedPluginBanner: z.string().max(100).optional(),
   /** The sessions on an old plugin copy whose reload banner was dismissed (`staleKey`). */
@@ -54,6 +56,7 @@ export const DEFAULT_PREFS: Prefs = {
   foldedGroups: [],
   listFolded: false,
   diffMode: 'unified',
+  showAllFinishedTasks: false,
   sessions: [],
 };
 
