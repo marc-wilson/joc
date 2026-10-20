@@ -34,6 +34,7 @@ import {
   useSessions,
 } from './hooks.ts';
 import { Nav } from './Nav.tsx';
+import { NewSessionDialog } from './NewSession.tsx';
 import { delivered, type PendingPrompt } from './pending.ts';
 import { plain } from './plain.ts';
 import { toggled, usePref } from './prefs.ts';
@@ -109,6 +110,8 @@ export default function App() {
     sessions[0];
   const keep = useSessionSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // The repo a new session is being started on.
+  const [newIn, setNewIn] = useState<string>();
   useReadWhileViewing(useAlerts(), selected?.id);
   const items = useConversation(selected?.id);
   const changes = useChanges(selected?.id);
@@ -222,7 +225,7 @@ export default function App() {
                         />
                       ))}
                       {filtering || g.id === PINNED_GROUP ? null : (
-                        <NewSessionButton repo={g.label} />
+                        <NewSessionButton repo={g.label} onClick={() => setNewIn(g.label)} />
                       )}
                     </>
                   )}
@@ -362,6 +365,18 @@ export default function App() {
             return ok;
           }}
           onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
+      {newIn ? (
+        <NewSessionDialog
+          repo={newIn}
+          candidates={sessions.filter((s) => s.repo === newIn)}
+          sessions={sessions}
+          onOpen={(id) => {
+            setNewIn(undefined);
+            setSelectedId(id);
+          }}
+          onClose={() => setNewIn(undefined)}
         />
       ) : null}
     </div>

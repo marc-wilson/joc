@@ -10,7 +10,7 @@ const ChangesEvent = z.object({ type: z.literal('changes'), sessionId: z.string(
 const GitHubEvent = z.object({ type: z.literal('github') });
 const NotificationsEvent = z.object({ type: z.literal('notifications') });
 const AlertsEvent = z.object({ type: z.literal('alerts') });
-const ReviewsEvent = z.object({ type: z.literal('reviews') });
+const LaunchesEvent = z.object({ type: z.literal('launches') });
 const Messages = z.object({
   type: z.literal('messages'),
   sessionId: z.string(),
@@ -25,7 +25,7 @@ export type LiveEvent =
   | z.infer<typeof GitHubEvent>
   | z.infer<typeof NotificationsEvent>
   | z.infer<typeof AlertsEvent>
-  | z.infer<typeof ReviewsEvent>
+  | z.infer<typeof LaunchesEvent>
   | { type: 'status'; connected: boolean };
 
 // The server pings every 15s. A proxy can keep a connection open after the server behind it
@@ -62,7 +62,7 @@ function start(): () => void {
     on('github', GitHubEvent);
     on('notifications', NotificationsEvent);
     on('alerts', AlertsEvent);
-    on('reviews', ReviewsEvent);
+    on('launches', LaunchesEvent);
     source.addEventListener('ping', () => {
       lastMessage = Date.now();
     });

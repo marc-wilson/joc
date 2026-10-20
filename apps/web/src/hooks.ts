@@ -4,8 +4,9 @@ import {
   type GitHubNotification,
   GitHubSnapshot,
   HistorySession,
+  Launch,
+  type LaunchRequest,
   NotificationsSnapshot,
-  Review,
   ReviewSettings,
   Session,
   SessionSettings,
@@ -337,45 +338,64 @@ export function useReadWhileViewing(alerts: Alert[] | undefined, sessionId: stri
   }, [alerts, sessionId, visible]);
 }
 
-const Reviews = z.array(Review);
+const Launches = z.array(Launch);
 
-/** The person's reviews of one PR, oldest first, refetched whenever one is asked for or changes. */
-export function useReviews(pr: { repo: string; number: number } | undefined): Review[] {
-  const [reviews, setReviews] = useState<Review[]>([]);
+/**
+ * The person's new sessions of the last day, oldest first; with a PR, the ones reviewing it.
+ * Refetched whenever one is asked for or changes. Off while `enabled` is false.
+ */
+export function useLaunches(pr?: { repo: string; number: number }, enabled = true): Launch[] {
+  const [launches, setLaunches] = useState<Launch[]>([]);
   const repo = pr?.repo;
   const number = pr?.number;
   useEffect(() => {
-    setReviews([]);
-    if (!repo || !number) return;
+    if (!enabled) return;
     let cancelled = false;
-    const query = new URLSearchParams({ repo, number: String(number) });
+    const query = repo && number ? `?${new URLSearchParams({ repo, number: String(number) })}` : '';
     const load = () =>
-      apiFetch(`/api/reviews?${query}`)
+      apiFetch(`/api/launches${query}`)
         .then(async (r) => {
-          if (r.ok && !cancelled) setReviews(Reviews.parse(await r.json()));
+          if (r.ok && !cancelled) setLaunches(Launches.parse(await r.json()));
         })
-        // Unreachable for now: the next reviews event or reconnect snapshot loads them again.
+        // Unreachable for now: the next launches event or reconnect snapshot loads them again.
         .catch(() => {});
     const unsubscribe = subscribe((event) => {
-      if (event.type === 'reviews' || event.type === 'snapshot') void load();
+      if (event.type === 'launches' || event.type === 'snapshot') void load();
     });
     void load();
     return () => {
       cancelled = true;
       unsubscribe();
     };
-  }, [repo, number]);
-  return reviews;
+  }, [repo, number, enabled]);
+  return launches;
 }
 
-/** How the person reviews by default, once loaded. */
+/** Asks for a new session. The launch, or why the server didn't take it. */
+export async function startLaunch(request: LaunchRequest): Promise<Launch | { error: string }> {
+  try {
+    const res = await apiFetch('/api/launches', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+    const body: unknown = await res.json().catch(() => ({}));
+    if (res.ok) return Launch.parse(body);
+    const error = (body as { error?: unknown }).error;
+    return { error: typeof error === 'string' ? error : "JOC couldn't start the session." };
+  } catch {
+    return { error: "JOC couldn't reach the server. Try again." };
+  }
+}
+
+/** The person's review instructions, once loaded. */
 export function useReviewSettings(): ReviewSettings | undefined {
   const [settings, setSettings] = useState<ReviewSettings>();
   useEffect(() => {
     let cancelled = false;
     const fallback = () => {
-      // Unreadable: the form starts from Claude's standard review.
-      if (!cancelled) setSettings({ method: 'standard' });
+      // Unreadable: Claude's standard review.
+      if (!cancelled) setSettings({});
     };
     apiFetch('/api/settings/review')
       .then(async (r) => {
