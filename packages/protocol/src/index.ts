@@ -32,6 +32,35 @@ export type Session = z.infer<typeof Session>;
 export const HistorySession = Session.extend({ messages: z.number().int().nonnegative() });
 export type HistorySession = z.infer<typeof HistorySession>;
 
+/** How long a session stays on the live list after it last reported. `never` keeps it there. */
+export const DropAfter = z.enum(['1h', '1d', '1w', '30d', 'never']);
+export type DropAfter = z.infer<typeof DropAfter>;
+
+/** The milliseconds each `DropAfter` stands for; `never` has none. */
+export const DROP_AFTER_MS: Record<Exclude<DropAfter, 'never'>, number> = {
+  '1h': 60 * 60_000,
+  '1d': 24 * 60 * 60_000,
+  '1w': 7 * 24 * 60 * 60_000,
+  '30d': 30 * 24 * 60 * 60_000,
+};
+
+/**
+ * Which sessions the live list keeps, per owner (`GET`/`PUT /api/settings/sessions`). A session
+ * that dropped off stays in the history.
+ */
+export const SessionSettings = z.object({
+  /** A session that went quiet without ending: the machine asleep, or Claude Code killed. */
+  quiet: DropAfter,
+  /** A session that ended (`offline`, from Claude Code's SessionEnd). */
+  ended: DropAfter,
+});
+export type SessionSettings = z.infer<typeof SessionSettings>;
+
+export const DEFAULT_SESSION_SETTINGS: SessionSettings = { quiet: '1w', ended: '1d' };
+
+/** A live session syncs every 30s, so this much silence means it stopped reporting. */
+export const QUIET_AFTER_MS = 2 * 60_000;
+
 /**
  * What the plugin sends on each hook event. Fields left out keep their last value; `title` is
  * only taken from the first report that has one. A report older than the last one applied is
