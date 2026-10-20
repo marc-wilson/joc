@@ -5,6 +5,7 @@ import { CopyCommand } from './code.tsx';
 import { Button } from './controls.tsx';
 import { cx } from './cx.ts';
 import { Icon, type IconName } from './Icon.tsx';
+import { LogoMark } from './Logo.tsx';
 import { StateBadge, StateDot } from './state.tsx';
 
 export interface NavItem {
@@ -27,7 +28,7 @@ export function NavBar({ items, value, machine, machineOffline, user }: NavBarPr
   return (
     <header className="joc-nav">
       <a className="joc-nav__brand" href="/">
-        <span className="joc-nav__mark" aria-hidden="true" />
+        <LogoMark size={20} />
         JOC
       </a>
       <nav className="joc-nav__links" aria-label="Primary">
