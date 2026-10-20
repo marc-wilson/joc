@@ -37,13 +37,21 @@ export async function getPrefs(owner: Owner): Promise<PrefsSnapshot> {
   return { saved: doc?.prefs !== undefined, prefs: parse(doc?.prefs) };
 }
 
-/** Drops pins and per-session entries for sessions the owner doesn't have, and keeps it small. */
+/**
+ * Drops pins, cleared reviews and per-session entries for sessions the owner doesn't have, and
+ * keeps it small.
+ */
 async function prune(owner: Owner, prefs: Prefs): Promise<Prefs> {
   const known = await knownSessionIds(owner, [
-    ...new Set([...prefs.pinned, ...prefs.sessions.map((s) => s.id)]),
+    ...new Set([...prefs.pinned, ...prefs.dismissedReviews, ...prefs.sessions.map((s) => s.id)]),
   ]);
   const sessions = prefs.sessions.filter((s) => known.has(s.id));
-  const pruned = { ...prefs, pinned: prefs.pinned.filter((id) => known.has(id)), sessions };
+  const pruned = {
+    ...prefs,
+    pinned: prefs.pinned.filter((id) => known.has(id)),
+    dismissedReviews: prefs.dismissedReviews.filter((id) => known.has(id)),
+    sessions,
+  };
   // Sessions are oldest first: drop from the front until it fits.
   while (sessions.length && JSON.stringify(pruned).length > MAX_PREFS_BYTES) sessions.shift();
   return pruned;

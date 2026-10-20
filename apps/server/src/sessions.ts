@@ -6,13 +6,18 @@ import {
   type HistorySession,
   type PluginVersion,
   QUIET_AFTER_MS,
+  type ReviewOutcome,
+  reviewOfPrompt,
+  reviewOutcome,
   type Session,
   type SessionReport,
+  type SessionReview,
   type StaleSession,
   type Waiting,
 } from '@joc/protocol';
 import { alertOnSession } from './alerts.ts';
 import { publish } from './bus.ts';
+import { launchedReview } from './launches.ts';
 import { countMessages } from './messages.ts';
 import { type Owner, sessionKey } from './owner.ts';
 import { getSessionSettings } from './settings.ts';
@@ -51,6 +56,10 @@ interface SessionDoc {
   answered?: Session['answered'];
   /** What Claude Code last said runs in the background, and when. */
   background?: Session['background'];
+  /** The PR it reviews, when JOC's Review button started it (its first prompt can say too). */
+  review?: Omit<SessionReview, 'outcome'>;
+  /** How its review ended, from the last turn whose closing words said. */
+  reviewOutcome?: ReviewOutcome;
 }
 
 const sessions = () => getDb().collection<SessionDoc>('sessions');
@@ -64,17 +73,24 @@ function toSession({
   previousState: _p,
   device: _d,
   updatedAt,
+  reportedAt,
   name,
   title,
+  review: launched,
+  reviewOutcome: outcome,
   ...rest
 }: SessionDoc): Session {
+  // `title` is the first prompt's first line: a review command names the PR it reviews.
+  const review = launched ?? reviewOfPrompt(title, rest.repo);
   return {
     id: sessionId,
     ...rest,
     // Claude Code's own name beats the first-prompt fallback.
     title: name ?? title,
+    ...(review ? { review: outcome ? { ...review, outcome } : review } : {}),
     startedAt: createdAt.toISOString(),
     updatedAt: updatedAt.toISOString(),
+    ...(reportedAt > 0 ? { activeAt: new Date(reportedAt).toISOString() } : {}),
   };
 }
 
@@ -147,6 +163,9 @@ export async function applyReport(
   sender: ReportSender = {},
 ): Promise<Session | undefined> {
   const now = new Date();
+  // A turn that ended (or the session going quiet after one) saying how a review went: kept, so
+  // the outcome outlasts the session's end.
+  const outcome = fields.state === 'idle' ? reviewOutcome(fields.activity) : undefined;
   // $literal keeps reported strings like "$ pnpm test" from being read as field paths. A report
   // that names no plugin version keeps the one stored.
   const set = Object.fromEntries(
@@ -189,6 +208,7 @@ export async function applyReport(
             ...(fields.state === 'offline' ? { waiting: '$$REMOVE' } : {}),
             // An empty worktree says the session is back in the repo's main checkout.
             ...(fields.worktree === '' ? { worktree: '$$REMOVE' } : {}),
+            ...(outcome ? { reviewOutcome: { $literal: outcome } } : {}),
           },
         },
       ],
@@ -199,10 +219,35 @@ export async function applyReport(
     throw error;
   }
   if (!doc) throw new Error(`Session ${sessionId} was not saved`);
+  // A session JOC's Review button started may report before its plugin says which one it was.
+  if (!doc.review && doc.createdAt.getTime() === now.getTime()) {
+    const review = await launchedReview(owner, sessionId);
+    if (review) doc.review = (await markReview(owner, sessionId, review, false))?.review;
+  }
   const session = toSession(doc);
   publish(owner, { type: 'session', session });
   if (fields.state) await alertOnSession(owner, doc.previousState, { ...session, sessionId });
   return session;
+}
+
+/**
+ * Records the PR the owner's session reviews, as the launch that started it says, and tells their
+ * dashboards unless `announce` is false. Undefined when the owner has no such session yet.
+ */
+export async function markReview(
+  owner: Owner,
+  sessionId: string,
+  review: Omit<SessionReview, 'outcome'>,
+  announce = true,
+): Promise<SessionDoc | undefined> {
+  const doc = await sessions().findOneAndUpdate(
+    { _id: sessionKey(owner, sessionId), owner },
+    { $set: { review: { repo: review.repo, number: review.number, url: review.url } } },
+    { returnDocument: 'after' },
+  );
+  if (!doc) return undefined;
+  if (announce) publish(owner, { type: 'session', session: toSession(doc) });
+  return doc;
 }
 
 /**
