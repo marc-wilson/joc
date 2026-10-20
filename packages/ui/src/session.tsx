@@ -20,7 +20,11 @@ export interface SessionRowProps {
   time?: string;
   selected?: boolean;
   needsLabel?: string;
+  /** Kept in the Pinned group at the top of the list. */
+  pinned?: boolean;
   onSelect?: () => void;
+  /** Shows a pin button, always while pinned and on hover or focus otherwise. */
+  onPinChange?: (pinned: boolean) => void;
 }
 
 export function SessionRow({
@@ -32,7 +36,9 @@ export function SessionRow({
   time,
   selected,
   needsLabel,
+  pinned,
   onSelect,
+  onPinChange,
 }: SessionRowProps) {
   return (
     <div
@@ -59,6 +65,22 @@ export function SessionRow({
             <StateBadge state="needs" label={needsLabel || 'Needs you'} />
           ) : null}
           <span className="joc-srow__time">{time}</span>
+          {onPinChange ? (
+            <button
+              type="button"
+              className={cx('joc-srow__pin', pinned && 'is-pinned')}
+              aria-pressed={!!pinned}
+              aria-label={pinned ? `Unpin ${title}` : `Pin ${title}`}
+              title={pinned ? 'Unpin' : 'Pin to the top'}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPinChange(!pinned);
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <Icon name="pin" size={12} />
+            </button>
+          ) : null}
         </span>
         <span className="joc-srow__line2">
           <span className="joc-srow__where" title={branch}>
