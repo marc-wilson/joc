@@ -12,10 +12,12 @@ import {
   NewSessionButton,
   RepoGroupHeader,
   SessionHeader,
+  SessionListFooter,
   SessionListNote,
   SessionRail,
   SessionRow,
   TextInput,
+  TextLink,
 } from '@joc/ui';
 import { Fragment, useEffect, useState } from 'react';
 import { apiFetch } from './auth.ts';
@@ -47,11 +49,17 @@ const UNTITLED = 'New session';
 
 const FILTER_ID = 'session-filter';
 
-/** The row's activity line: what Claude is doing, unless the session stopped reporting. */
+/** The row's activity line: what Claude is doing, or, once it stopped reporting, what it last did. */
 function activityOf(s: Session, now: number): string | undefined {
-  if (isQuiet(s, now)) return 'No word from its machine';
-  return s.activity && plain(s.activity);
+  const activity = s.activity && plain(s.activity);
+  if (!isQuiet(s, now)) return activity;
+  const silent = `No word from ${s.machine ?? 'its machine'}`;
+  return activity ? `${silent} · last: ${activity}` : silent;
 }
+
+/** "Quiet 6m" for a session whose machine stopped reporting, in place of its time. */
+const quietOf = (s: Session, now: number) =>
+  isQuiet(s, now) ? `Quiet ${age(s.updatedAt, now)}` : undefined;
 
 /** `/` jumps to the session filter, unless the person is already typing somewhere. */
 function useFilterShortcut() {
@@ -160,10 +168,12 @@ export default function App() {
             <SessionRail
               groups={groups.map((g) => ({
                 repo: g.label,
+                pinned: g.id === PINNED_GROUP,
                 sessions: g.sessions.map((s) => ({
                   id: s.id,
                   state: s.state,
                   title: s.title ?? UNTITLED,
+                  quiet: quietOf(s, now),
                   selected: s.id === selected?.id,
                 })),
               }))}
@@ -200,12 +210,14 @@ export default function App() {
                     repo={g.label}
                     count={g.sessions.length}
                     needs={g.sessions.filter((s) => s.state === 'needs').length}
+                    pinned={g.id === PINNED_GROUP}
                     collapsed={folded.includes(g.id)}
                     onToggle={() =>
                       updatePrefs({ foldedGroups: toggled(folded, g.id, !folded.includes(g.id)) })
                     }
                   />
-                  {folded.includes(g.id) ? null : (
+                  {/* Pinned never folds: its header isn't a toggle. */}
+                  {g.id !== PINNED_GROUP && folded.includes(g.id) ? null : (
                     <>
                       {g.sessions.map((s) => (
                         <SessionRow
@@ -216,6 +228,7 @@ export default function App() {
                           contextLeft={s.contextLeft}
                           activity={activityOf(s, now)}
                           time={age(s.updatedAt, now)}
+                          quiet={quietOf(s, now)}
                           selected={s.id === selected?.id}
                           pinned={g.id === PINNED_GROUP}
                           onSelect={() => setSelectedId(s.id)}
@@ -258,27 +271,19 @@ export default function App() {
                   ))}
                 </>
               ) : null}
-              {keep.settings ? (
-                <SessionListNote
-                  actions={
-                    <>
-                      <Button variant="ghost" size="sm" onClick={() => location.assign('/history')}>
-                        History
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => location.assign('/settings#sessions')}
-                      >
-                        Change
-                      </Button>
-                    </>
-                  }
-                >
-                  {keepNote(keep.settings)} Filter to find older ones.
-                </SessionListNote>
-              ) : null}
             </div>
+            {keep.settings ? (
+              <SessionListFooter
+                links={
+                  <>
+                    <TextLink href="/history">History</TextLink>
+                    <TextLink href="/settings#sessions">Change</TextLink>
+                  </>
+                }
+              >
+                {keepNote(keep.settings)} Filter to find older ones.
+              </SessionListFooter>
+            ) : null}
           </aside>
         )}
         <main className="joc-app__main">
