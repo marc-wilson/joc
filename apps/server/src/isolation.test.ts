@@ -1095,6 +1095,52 @@ test('a new session nobody started in time never starts, and says so', async () 
   assert.equal((await launchesOf('alice')).find((l) => l.id === launch.id)?.status, 'failed');
 });
 
+test("a review session is its owner's: the PR it reviews and how it ended", async () => {
+  const reviewOf = async (who: Who, id: string) =>
+    (await read(await call(who, '/api/sessions'), Sessions)).find((s) => s.id === id)?.review;
+  const start = async () => {
+    const launch = await read(
+      await call('alice', '/api/launches', { from: 'alice-rev', review: PR }),
+      Launch,
+    );
+    assert.equal((await claimsFor('alice', 'alice-rev')).at(-1)?.id, launch.id);
+    return launch;
+  };
+  const done = (launch: Launch, sessionId: string) =>
+    call('alice', `/api/launches/${launch.id}/result`, { ok: true, sessionId });
+  const linked = { repo: PR.repo, number: PR.number, url: PR.url };
+
+  // The new session reports first, then Alice's plugin says which one it started. Bob has a
+  // session with the same id: it stays his, and no review.
+  const first = '1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
+  await call('alice', '/api/reports', report(first, { state: 'idle' }));
+  await call('bob', '/api/reports', report(first, { state: 'idle' }));
+  assert.equal((await done(await start(), first)).status, 204);
+  assert.deepEqual(await reviewOf('alice', first), linked);
+  assert.equal(await reviewOf('bob', first), undefined);
+
+  // The other way round: the plugin says first, the session reports after.
+  const second = '2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a';
+  assert.equal((await done(await start(), second)).status, 204);
+  await call('bob', '/api/reports', report(second));
+  await call('alice', '/api/reports', report(second));
+  assert.deepEqual(await reviewOf('alice', second), linked);
+  assert.equal(await reviewOf('bob', second), undefined);
+
+  // How it ended, from Claude's closing words, outlasts the session's end; only for its owner.
+  await call('bob', '/api/reports', report(first, { state: 'idle', activity: 'Approved it' }));
+  const changes = { state: 'idle', activity: 'Requested changes' };
+  await call('alice', '/api/reports', report(first, changes));
+  await call('alice', '/api/reports', report(first, { state: 'offline', activity: 'Ended' }));
+  assert.equal((await reviewOf('alice', first))?.outcome, 'Changes requested');
+  assert.equal(await reviewOf('bob', first), undefined);
+
+  // A review command as the first prompt is a review too.
+  await call('bob', '/api/reports', report('bob-cr', { title: '/code-review 12' }));
+  assert.deepEqual(await reviewOf('bob', 'bob-cr'), { repo: 'harbor-labs/atlas-web', number: 12 });
+  assert.equal(await reviewOf('alice', 'bob-cr'), undefined);
+});
+
 test("a live stream hears only its owner's launches", async () => {
   const heard = await listen('alice', async () => {
     const res = await call('bob', '/api/launches', { from: 'bob-rev' });
@@ -1128,6 +1174,8 @@ test("preferences are each owner's own, only a signed-in person's, and heard onl
       pinned: [],
       foldedGroups: [],
       listFolded: false,
+      sessionSort: 'state',
+      dismissedReviews: [],
       diffMode: 'unified',
       showAllFinishedTasks: false,
       sessions: [],
@@ -1141,6 +1189,8 @@ test("preferences are each owner's own, only a signed-in person's, and heard onl
       notificationKinds: { github: { panel: false, toast: false, desktop: false } },
       // Bob's session id is no session of Alice's, so it's dropped.
       pinned: ['alice-pref', 'bob-pref'],
+      dismissedReviews: ['bob-pref', 'alice-pref'],
+      sessionSort: 'name',
       sessions: [
         { id: 'alice-pref', foldedMessages: ['m1'] },
         { id: 'bob-pref', foldedMessages: ['m2'] },
@@ -1154,6 +1204,8 @@ test("preferences are each owner's own, only a signed-in person's, and heard onl
   assert.equal(alice.saved, true);
   assert.equal(alice.prefs.browserNotifications, true);
   assert.deepEqual(alice.prefs.pinned, ['alice-pref']);
+  assert.deepEqual(alice.prefs.dismissedReviews, ['alice-pref']);
+  assert.equal(alice.prefs.sessionSort, 'name');
   assert.deepEqual(
     alice.prefs.sessions.map((s) => [s.id, s.foldedMessages]),
     [['alice-pref', ['m1']]],
@@ -1162,6 +1214,7 @@ test("preferences are each owner's own, only a signed-in person's, and heard onl
   const bob = await read(await asPerson('bob'), PrefsSnapshot);
   assert.equal(bob.saved, false);
   assert.equal(bob.prefs.browserNotifications, false);
+  assert.equal(bob.prefs.sessionSort, 'state');
   assert.deepEqual(bob.prefs.notificationKinds, {});
 
   // A patch keeps what it doesn't name, and Alice's other tabs hear the result.

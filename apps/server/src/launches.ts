@@ -129,13 +129,16 @@ export async function claimLaunches(
   return claimed;
 }
 
-/** What the plugin said of a launch it took. False when the owner has no such launch. */
+/**
+ * What the plugin said of a launch it took. Undefined when the owner has no such launch;
+ * otherwise the PR it reviews, if it reviews one.
+ */
 export async function finishLaunch(
   owner: Owner,
   id: string,
   { ok, sessionId, detail }: LaunchResult,
-): Promise<boolean> {
-  const result = await launches().updateOne(
+): Promise<{ review?: LaunchReview } | undefined> {
+  const doc = await launches().findOneAndUpdate(
     { _id: id, owner, claimedAt: { $exists: true } },
     {
       $set: ok
@@ -143,9 +146,21 @@ export async function finishLaunch(
         : { status: 'failed', detail: detail || "Claude Code didn't start." },
     },
   );
-  if (!result.matchedCount) return false;
+  if (!doc) return undefined;
   changed(owner);
-  return true;
+  return doc.review ? { review: doc.review } : {};
+}
+
+/** The PR one of the owner's launches started `sessionId` to review, if one did. */
+export async function launchedReview(
+  owner: Owner,
+  sessionId: string,
+): Promise<LaunchReview | undefined> {
+  const doc = await launches().findOne(
+    { owner, sessionId, review: { $exists: true } },
+    { projection: { review: 1 } },
+  );
+  return doc?.review;
 }
 
 /** Deletes the launches a deleted session started, or that started it. */

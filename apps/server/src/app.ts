@@ -99,6 +99,7 @@ import {
   listHistory,
   listSessions,
   listStaleSessions,
+  markReview,
   setWaiting,
 } from './sessions.ts';
 import {
@@ -620,9 +621,15 @@ export function createApp({
     if (c.get('via') === 'session') return c.json({ error: 'Forbidden' }, 403);
     const parsed = LaunchResult.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
-    return (await finishLaunch(c.get('owner'), c.req.param('id'), parsed.data))
-      ? c.body(null, 204)
-      : c.json({ error: 'No such launch' }, 404);
+    const owner = c.get('owner');
+    const launch = await finishLaunch(owner, c.req.param('id'), parsed.data);
+    if (!launch) return c.json({ error: 'No such launch' }, 404);
+    // The session it started reviews the launch's PR, once it reported.
+    const { sessionId } = parsed.data;
+    if (parsed.data.ok && sessionId && launch.review) {
+      await markReview(owner, sessionId, launch.review);
+    }
+    return c.body(null, 204);
   });
 
   // ── Deleting ended sessions, on their machine and in JOC ───────────────────
