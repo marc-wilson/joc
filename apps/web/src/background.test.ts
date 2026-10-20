@@ -297,3 +297,24 @@ test("a subagent's steps are its tool calls, timed from its start, the last one 
   ]);
   assert.equal(taskSteps(steps, at(0), false)[1]?.status, 'done');
 });
+
+test('a task stopped with TaskStop has ended, though Claude Code sent no notification', () => {
+  const stop = (toolUseId: string, text: string): ConversationItem => ({
+    id: `r-${toolUseId}`,
+    at: at(40),
+    kind: 'tool_result',
+    toolUseId,
+    isError: false,
+    text,
+  });
+  const tasks = backgroundTasks(
+    [
+      ...items,
+      stop('s1', '{"message":"Successfully stopped task: bg1 (pnpm dev)","task_id":"bg1"}'),
+      stop('s2', 'No task found with ID: bg9'),
+    ],
+    'background',
+  );
+  const dev = tasks.find((t) => t.id === 't1');
+  assert.deepEqual([dev?.status, dev?.tail, dev?.endedAt], ['ended', 'Stopped', at(40)]);
+});
