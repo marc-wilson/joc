@@ -7,6 +7,8 @@ export {
   TaskDetails,
   type TaskDetailsProps,
   type TaskFact,
+  TaskGroupHeader,
+  type TaskGroupHeaderProps,
   TaskRow,
   type TaskRowProps,
   TaskSection,

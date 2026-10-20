@@ -7,6 +7,45 @@
   text-align: right;
 }
 
+/* A group of task rows in one list: "Running", then "Finished". */
+.joc-taskgroup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  padding: var(--space-1) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-base);
+}
+
+.joc-taskgroup__title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.joc-taskgroup__count {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.joc-taskgroup__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 button.joc-task.is-toggle {
   width: 100%;
   border: 0;
