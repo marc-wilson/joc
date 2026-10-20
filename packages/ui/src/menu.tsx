@@ -18,13 +18,15 @@ export interface OverflowMenuProps {
   /** The button's accessible name, e.g. "Session actions". */
   label: string;
   items: MenuItem[];
+  /** The button: `sm` (24px) in headers, `md` (30px) at the end of a History row. */
+  size?: 'sm' | 'md';
 }
 
 /**
  * A "more" button that opens a short list of actions below it. Arrow keys move, Enter chooses,
  * Escape or a click elsewhere closes, and focus goes back to the button.
  */
-export function OverflowMenu({ label, items }: OverflowMenuProps) {
+export function OverflowMenu({ label, items, size = 'sm' }: OverflowMenuProps) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const id = useId();
@@ -67,7 +69,7 @@ export function OverflowMenu({ label, items }: OverflowMenuProps) {
       <Button
         className="joc-menu__button"
         variant="ghost"
-        size="sm"
+        size={size}
         icon="more"
         aria-label={label}
         title={label}
