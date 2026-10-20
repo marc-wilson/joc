@@ -20,10 +20,10 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { NoteAnswers } from './Answering.tsx';
 import { droppedAnswers, useSent } from './answers.ts';
 import { apiFetch } from './auth.ts';
-import { useAlerts, useGitHub, useNotifications, useNow, useSessions } from './hooks.ts';
+import { useGitHub, useNow, useSessions } from './hooks.ts';
 import { sessionForThread } from './links.ts';
 import { NotificationSettingsDialog } from './NotificationSettings.tsx';
-import { applyLocal, clearNotes, markRead, useNoteChanges } from './note-actions.ts';
+import { clearNotes, markRead, useNoteData } from './note-data.ts';
 import {
   allNotes,
   arrived,
@@ -49,25 +49,28 @@ import { age, ago } from './time.ts';
 const PANEL_ID = 'joc-notifications';
 const MAX_TOASTS = 3;
 
-/** Every note with what was done here applied, and whether all their sources have loaded. */
+/**
+ * Every note, from the one note store (note-data.ts) with what was done here applied, and
+ * whether all their sources have loaded. Every view builds its notes here, so they agree.
+ */
 export function useNotes(records = false): {
   notes: Note[];
   loaded: boolean;
   sessions: Session[];
   connected: boolean;
   snapshot: NotificationsSnapshot | undefined;
+  /** Why the last mark read or clear didn't take, until the next one. */
+  problem?: string;
 } {
   const { sessions, connected } = useSessions();
-  const alerts = useAlerts();
-  const snapshot = useNotifications();
-  useNoteChanges();
-  const threads = snapshot?.state === 'reported' ? snapshot.threads : [];
+  const { alerts, snapshot, threads, readThreads, problem } = useNoteData();
   return {
-    notes: applyLocal(allNotes(sessions, alerts ?? [], threads, records)),
+    notes: allNotes(sessions, alerts ?? [], threads, records, readThreads),
     loaded: connected && alerts !== undefined && snapshot !== undefined,
     sessions,
     connected,
     snapshot,
+    problem,
   };
 }
 
@@ -93,7 +96,7 @@ function useAction(
   prs: PullRequest[],
 ): NotificationAction & { run: () => void } {
   const [, rerender] = useState(0);
-  const read = () => void markRead([note]);
+  const read = () => markRead([note]);
   const open = (label = 'Open'): NotificationAction & { run: () => void } => ({
     label,
     href: note.href,
@@ -170,8 +173,8 @@ export function NoteRow({ note, gone, now, sessions, prs, time }: NoteRowProps) 
       needs={note.live}
       answers={note.live ? <NoteAnswers note={note} sessions={sessions} /> : undefined}
       action={action}
-      onMarkRead={note.live ? undefined : () => void markRead([note])}
-      onClear={note.live ? undefined : () => void clearNotes([note])}
+      onMarkRead={note.live ? undefined : () => markRead([note])}
+      onClear={note.live ? undefined : () => clearNotes([note])}
       gone={gone}
       label={`${note.title}, ${ago(note.at, now)}`}
     />
@@ -227,12 +230,13 @@ interface PanelProps {
   notes: Note[];
   sessions: Session[];
   snapshot?: NotificationsSnapshot;
+  problem?: string;
   anchor: React.RefObject<HTMLButtonElement | null>;
   onClose: () => void;
 }
 
 /** The open panel: the notes by group, held still while you read them. */
-function Panel({ notes, sessions, snapshot, anchor, onClose }: PanelProps) {
+function Panel({ notes, sessions, snapshot, problem, anchor, onClose }: PanelProps) {
   const prefs = usePrefs();
   const now = useNow();
   const github = useGitHub();
@@ -266,7 +270,9 @@ function Panel({ notes, sessions, snapshot, anchor, onClose }: PanelProps) {
   const waiting = (held?.waiting ?? []).flatMap((id) => byId.get(id) ?? []);
   const unread = notes.filter((n) => n.unread);
   const read = notes.filter((n) => !n.unread && !n.live);
-  const count = (t: NotificationTab) => notes.filter((n) => inTab(n, t)).length || undefined;
+  // Unread, as the bell counts them, so the bell, the tabs and the summary always agree.
+  const count = (t: NotificationTab) =>
+    notes.filter((n) => n.unread && inTab(n, t)).length || undefined;
 
   function showArrivals() {
     setHeld(hold(held, inThisTab, { arrivals: false, slots: false }));
@@ -277,7 +283,7 @@ function Panel({ notes, sessions, snapshot, anchor, onClose }: PanelProps) {
     <>
       <NotificationPanel
         id={PANEL_ID}
-        summary={unread.length ? `${unread.length} unread` : 'Nothing unread'}
+        summary={problem ?? (unread.length ? `${unread.length} unread` : 'Nothing unread')}
         tabs={[
           { id: 'all', label: 'All', count: count('all') },
           { id: 'needs', label: 'Needs you', state: 'needs', count: count('needs') },
@@ -291,8 +297,8 @@ function Panel({ notes, sessions, snapshot, anchor, onClose }: PanelProps) {
             setHeld(undefined);
           }
         }}
-        onMarkAllRead={unread.some((n) => !n.live) ? () => void markRead(unread) : undefined}
-        onClearRead={read.length ? () => void clearNotes(read) : undefined}
+        onMarkAllRead={unread.some((n) => !n.live) ? () => markRead(unread) : undefined}
+        onClearRead={read.length ? () => clearNotes(read) : undefined}
         onSettings={() => setSettings(true)}
         historyHref="/notifications"
         onClose={() => {
@@ -353,7 +359,7 @@ function showDesktop(note: Note) {
   const n = new Notification(note.title, { body: note.text ?? note.source, tag: note.id });
   n.onclick = () => {
     window.focus();
-    void markRead([note]);
+    markRead([note]);
     if (note.external) window.open(note.href, '_blank', 'noopener,noreferrer');
     else location.assign(note.href);
     n.close();
@@ -426,7 +432,7 @@ export function useNotificationCenter(viewing: string | undefined): {
   overlay: ReactNode;
 } {
   const prefs = usePrefs();
-  const { notes, loaded, sessions, snapshot } = useNotes();
+  const { notes, loaded, sessions, snapshot, problem } = useNotes();
   const panel = panelNotes(notes, prefs);
   const counts = bellCounts(panel);
   const [open, setOpen] = useState(false);
@@ -481,6 +487,7 @@ export function useNotificationCenter(viewing: string | undefined): {
             notes={panel}
             sessions={sessions}
             snapshot={snapshot}
+            problem={problem}
             anchor={bell}
             onClose={() => setOpen(false)}
           />

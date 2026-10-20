@@ -1,5 +1,5 @@
 import {
-  Alert,
+  type Alert,
   type ConversationItem,
   DeleteRefused,
   Deletion,
@@ -7,7 +7,6 @@ import {
   HistorySession,
   Launch,
   type LaunchRequest,
-  NotificationsSnapshot,
   ReviewSettings,
   Session,
   SessionCommands,
@@ -18,6 +17,7 @@ import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { apiFetch } from './auth.ts';
 import { type DiffFile, parseDiff } from './diff.ts';
+import { readAlerts } from './note-data.ts';
 import { subscribe } from './stream.ts';
 
 const Sessions = z.array(Session);
@@ -292,72 +292,10 @@ export function useGitHub(): GitHubSnapshot | undefined {
   return github;
 }
 
-/** The person's unread GitHub notifications, refetched whenever their plugin reports new ones. */
-export function useNotifications(): NotificationsSnapshot | undefined {
-  const [notifications, setNotifications] = useState<NotificationsSnapshot>();
-  useEffect(() => {
-    let cancelled = false;
-    const load = () =>
-      apiFetch('/api/notifications')
-        .then(async (r) => {
-          if (r.ok && !cancelled) setNotifications(NotificationsSnapshot.parse(await r.json()));
-        })
-        // Unreachable for now: the next notifications event or reconnect snapshot loads it again.
-        .catch(() => {});
-    const unsubscribe = subscribe((event) => {
-      if (event.type === 'notifications' || event.type === 'snapshot') void load();
-    });
-    void load();
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, []);
-  return notifications;
-}
-
-const Alerts = z.array(Alert);
-
-/** The person's alerts, newest first, refetched whenever the server says they changed. */
-export function useAlerts(): Alert[] | undefined {
-  const [alerts, setAlerts] = useState<Alert[]>();
-  useEffect(() => {
-    let cancelled = false;
-    const load = () =>
-      apiFetch('/api/alerts')
-        .then(async (r) => {
-          if (r.ok && !cancelled) setAlerts(Alerts.parse(await r.json()));
-        })
-        // Unreachable for now: the next alerts event or reconnect snapshot loads it again.
-        .catch(() => {});
-    const unsubscribe = subscribe((event) => {
-      if (event.type === 'alerts' || event.type === 'snapshot') void load();
-    });
-    void load();
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, []);
-  return alerts;
-}
-
-/**
- * Marks alerts read or clears them: these, or all of them. False when the server didn't take
- * it.
- */
-export async function changeAlerts(action: 'read' | 'clear', ids?: string[]): Promise<boolean> {
-  const res = await apiFetch(ids ? `/api/alerts/${action}` : `/api/alerts/${action}-all`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(ids ? { ids } : {}),
-  }).catch(() => undefined); // Unreachable: reported as not done.
-  return res?.ok === true;
-}
-
 /**
  * Marks the alerts about the session read while it's on screen: looking at it is reading them.
- * Each is sent once; if that fails, the notifications still have it.
+ * Each is sent once, and reads at once everywhere; if the server didn't take it, it's unread
+ * again.
  */
 export function useReadWhileViewing(alerts: Alert[] | undefined, sessionId: string | undefined) {
   const sent = useRef(new Set<string>());
@@ -374,7 +312,7 @@ export function useReadWhileViewing(alerts: Alert[] | undefined, sessionId: stri
       .map((a) => a.id);
     if (!ids.length) return;
     for (const id of ids) sent.current.add(id);
-    void changeAlerts('read', ids);
+    readAlerts(ids);
   }, [alerts, sessionId, visible]);
 }
 

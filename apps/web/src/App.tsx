@@ -30,7 +30,6 @@ import { Conversation } from './Conversation.tsx';
 import { DeleteDialog } from './DeleteSessions.tsx';
 import { cantDelete, deletionLine, deletionOf, machineLive, removedLine } from './deletes.ts';
 import {
-  useAlerts,
   useChanges,
   useCmdlistMax,
   useCommands,
@@ -44,6 +43,7 @@ import {
 } from './hooks.ts';
 import { Nav } from './Nav.tsx';
 import { NewSessionDialog } from './NewSession.tsx';
+import { useNoteData } from './note-data.ts';
 import { delivered, type PendingPrompt } from './pending.ts';
 import { plain } from './plain.ts';
 import { updatePrefs, usePrefs } from './prefs.ts';
@@ -173,7 +173,7 @@ export default function App() {
   const keep = useSessionSettings();
   // The repo a new session is being started on.
   const [newIn, setNewIn] = useState<string>();
-  useReadWhileViewing(useAlerts(), selected?.id);
+  useReadWhileViewing(useNoteData().alerts, selected?.id);
   const items = useConversation(selected?.id);
   const changes = useChanges(selected?.id);
   const commands = useCommands(selected?.id);
