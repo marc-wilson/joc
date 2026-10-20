@@ -498,6 +498,13 @@ interface RunningCall {
 const running = new Map<string, RunningCall[]>();
 
 /**
+ * The main loop's turns running now, by id; none between turns. Turns start only after
+ * session.start, where the sync that reads this begins, and every turn heard starting is heard
+ * ending, an aborted one too.
+ */
+const turns = new Set<string>();
+
+/**
  * The running call a permission request is about, found by its input; failing that, the newest
  * call of that tool.
  */
@@ -668,6 +675,9 @@ export const register: Register = (on) => {
         cwd: await $.session.cwd(),
         // A -p run has no terminal to notify in, so it leaves GitHub's news for one that does.
         can_notify: e.isInteractive,
+        // So hook.ts can settle a state left stale between turns (src/settle.ts).
+        between_turns: turns.size === 0 && running.size === 0,
+        checked_at: Date.now(),
       };
       // hook.ts records its own problems; this catches the ones where it can't run at all (Node
       // missing, a syntax error after an edit), which it then can't tell anyone about.
@@ -903,6 +913,16 @@ export const register: Register = (on) => {
     $.clock.every(POLL_MS, oneAtATime(takePrompts, failedIn('module')));
     $.clock.every(LAUNCH_POLL_MS, oneAtATime(takeLaunches, failedIn('module')));
     return result;
+  });
+
+  // Keeps track of whether a turn runs, so a sync only settles a session's state between turns.
+  on('turn.start', async (_$, e, next) => {
+    if (e.agentId === undefined) turns.add(e.turnId);
+    return next(e);
+  });
+  on('turn.complete', async (_$, e, next) => {
+    if (e.agentId === undefined) turns.delete(e.turnId);
+    return next(e);
   });
 
   // Keeps track of the running tool calls, so a question or permission request offered to JOC
