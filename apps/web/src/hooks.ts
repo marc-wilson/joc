@@ -5,6 +5,8 @@ import {
   GitHubSnapshot,
   HistorySession,
   NotificationsSnapshot,
+  Review,
+  ReviewSettings,
   Session,
   SessionSettings,
   type SessionState,
@@ -328,6 +330,60 @@ export function useReadWhileViewing(alerts: Alert[] | undefined, sessionId: stri
     for (const id of ids) sent.current.add(id);
     void changeAlerts('read', ids);
   }, [alerts, sessionId, visible]);
+}
+
+const Reviews = z.array(Review);
+
+/** The person's reviews of one PR, oldest first, refetched whenever one is asked for or changes. */
+export function useReviews(pr: { repo: string; number: number } | undefined): Review[] {
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const repo = pr?.repo;
+  const number = pr?.number;
+  useEffect(() => {
+    setReviews([]);
+    if (!repo || !number) return;
+    let cancelled = false;
+    const query = new URLSearchParams({ repo, number: String(number) });
+    const load = () =>
+      apiFetch(`/api/reviews?${query}`)
+        .then(async (r) => {
+          if (r.ok && !cancelled) setReviews(Reviews.parse(await r.json()));
+        })
+        // Unreachable for now: the next reviews event or reconnect snapshot loads them again.
+        .catch(() => {});
+    const unsubscribe = subscribe((event) => {
+      if (event.type === 'reviews' || event.type === 'snapshot') void load();
+    });
+    void load();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [repo, number]);
+  return reviews;
+}
+
+/** How the person reviews by default, once loaded. */
+export function useReviewSettings(): ReviewSettings | undefined {
+  const [settings, setSettings] = useState<ReviewSettings>();
+  useEffect(() => {
+    let cancelled = false;
+    const fallback = () => {
+      // Unreadable: the form starts from Claude's standard review.
+      if (!cancelled) setSettings({ method: 'standard' });
+    };
+    apiFetch('/api/settings/review')
+      .then(async (r) => {
+        if (cancelled) return;
+        if (!r.ok) return fallback();
+        setSettings(ReviewSettings.parse(await r.json()));
+      })
+      .catch(fallback);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return settings;
 }
 
 const History = z.array(HistorySession);

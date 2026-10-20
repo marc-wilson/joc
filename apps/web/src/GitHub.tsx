@@ -3,6 +3,7 @@ import { EmptyState, PRRow, SectionHeader, SetupCheck } from '@joc/ui';
 import { useGitHub, useNow, useSessions } from './hooks.ts';
 import { sessionFor } from './links.ts';
 import { Nav } from './Nav.tsx';
+import { prHref } from './reviews.ts';
 import { ago } from './time.ts';
 
 function PullRequests({
@@ -40,7 +41,7 @@ function PullRequests({
                 href: `/?session=${encodeURIComponent(session.id)}`,
               }
             }
-            onOpen={() => window.open(pr.url, '_blank', 'noopener,noreferrer')}
+            onOpen={() => location.assign(prHref(pr))}
           />
         );
       })}
