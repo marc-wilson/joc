@@ -313,10 +313,24 @@ export interface MessageProps extends Partial<ToolCallProps> {
   /** Who the message is from. */
   from?: 'user' | 'claude' | 'tool';
   time?: string;
+  /** Claude's messages: shows one line in place of the body. */
+  collapsed?: boolean;
+  /** Claude's messages: the line a collapsed message shows. */
+  preview?: string;
+  /** Claude's messages: makes the header a toggle that collapses the message. */
+  onToggle?: () => void;
   children?: ReactNode;
 }
 
-export function Message({ from = 'claude', time, children, ...tool }: MessageProps) {
+export function Message({
+  from = 'claude',
+  time,
+  collapsed,
+  preview,
+  onToggle,
+  children,
+  ...tool
+}: MessageProps) {
   if (from === 'tool') {
     return (
       <ToolCall {...tool} name={tool.name ?? ''}>
@@ -324,16 +338,34 @@ export function Message({ from = 'claude', time, children, ...tool }: MessagePro
       </ToolCall>
     );
   }
+  const who = (
+    <>
+      <span className="joc-msg__mark" aria-hidden="true" />
+      Claude
+      {time ? <span className="joc-msg__time">{time}</span> : null}
+    </>
+  );
+  const folded = from === 'claude' && collapsed;
   return (
-    <div className={cx('joc-msg', `joc-msg--${from}`, 'joc-fade-in')}>
-      {from === 'claude' ? (
-        <div className="joc-msg__who">
-          <span className="joc-msg__mark" aria-hidden="true" />
-          Claude
-          {time ? <span className="joc-msg__time">{time}</span> : null}
-        </div>
+    <div className={cx('joc-msg', `joc-msg--${from}`, folded && 'is-collapsed', 'joc-fade-in')}>
+      {from === 'claude' && onToggle ? (
+        <button
+          type="button"
+          className="joc-msg__who is-toggle"
+          aria-expanded={!collapsed}
+          onClick={onToggle}
+        >
+          <Icon name={collapsed ? 'chevronRight' : 'chevronDown'} size={12} />
+          {who}
+        </button>
+      ) : from === 'claude' ? (
+        <div className="joc-msg__who">{who}</div>
       ) : null}
-      <div className="joc-msg__body">{children}</div>
+      {folded ? (
+        <div className="joc-msg__preview joc-fade-in">{preview}</div>
+      ) : (
+        <div className="joc-msg__body">{children}</div>
+      )}
       {from === 'user' && time ? (
         <div className="joc-msg__time joc-msg__time--user">{time}</div>
       ) : null}

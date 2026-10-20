@@ -1,0 +1,45 @@
+/* Collapsing messages and diff files. Not in the JOC design system yet: move it into
+   styles/components.css when the design system has it, and delete this file. Tokens only. */
+
+.joc-msg__who.is-toggle {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--duration-instant) linear;
+}
+
+.joc-msg__who.is-toggle:hover {
+  color: var(--text-primary);
+}
+
+.joc-msg__preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+}
+
+.joc-dfh__toggle {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  transition: background-color var(--duration-instant) linear;
+}
+
+.joc-dfh__toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}

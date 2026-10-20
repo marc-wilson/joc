@@ -259,8 +259,12 @@ export interface DiffFileHeaderProps {
   mode?: 'unified' | 'split';
   viewed?: boolean;
   showToggle?: boolean;
+  /** The file's lines are hidden. */
+  collapsed?: boolean;
   onModeChange?: (mode: 'unified' | 'split') => void;
   onViewedChange?: (viewed: boolean) => void;
+  /** Makes the chevron a toggle that collapses the file. */
+  onToggle?: () => void;
 }
 
 export function DiffFileHeader({
@@ -270,12 +274,27 @@ export function DiffFileHeader({
   mode = 'unified',
   viewed,
   showToggle = true,
+  collapsed,
   onModeChange,
   onViewedChange,
+  onToggle,
 }: DiffFileHeaderProps) {
+  const chevron = <Icon name={collapsed ? 'chevronRight' : 'chevronDown'} size={12} />;
   return (
     <div className="joc-dfh">
-      <Icon name="chevronDown" size={12} />
+      {onToggle ? (
+        <button
+          type="button"
+          className="joc-dfh__toggle"
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? `Expand ${path}` : `Collapse ${path}`}
+          onClick={onToggle}
+        >
+          {chevron}
+        </button>
+      ) : (
+        chevron
+      )}
       <span className="joc-dfh__path">{path}</span>
       <DiffStat additions={additions} deletions={deletions} />
       <span className="joc-dfh__spacer" />
