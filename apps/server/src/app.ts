@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { getClient } from '@joc/db';
 import {
+  AlertIdsRequest,
   type AuthStatus,
   ChangesReport,
   DeviceApproveRequest,
@@ -24,6 +25,7 @@ import {
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
+import { clearAlerts, listAlerts, onAlerts, readAlerts } from './alerts.ts';
 import {
   bearerToken,
   clearSessionCookie,
@@ -346,6 +348,34 @@ export function createApp({
     return c.json({ ids: await claimReads(c.get('owner')) } satisfies ReadsClaim);
   });
 
+  // ── Alerts: raised by the server from reports, kept to look back on ─────────
+
+  app.get('/api/alerts', async (c) => c.json(await listAlerts(c.get('owner'))));
+
+  app.post('/api/alerts/read', async (c) => {
+    const parsed = AlertIdsRequest.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    await readAlerts(c.get('owner'), parsed.data.ids);
+    return c.body(null, 204);
+  });
+
+  app.post('/api/alerts/read-all', async (c) => {
+    await readAlerts(c.get('owner'));
+    return c.body(null, 204);
+  });
+
+  app.post('/api/alerts/clear', async (c) => {
+    const parsed = AlertIdsRequest.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    await clearAlerts(c.get('owner'), parsed.data.ids);
+    return c.body(null, 204);
+  });
+
+  app.post('/api/alerts/clear-all', async (c) => {
+    await clearAlerts(c.get('owner'));
+    return c.body(null, 204);
+  });
+
   app.post('/api/messages', async (c) => {
     const parsed = MessagesReport.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
@@ -444,6 +474,7 @@ export function createApp({
           onChanges(owner, (sessionId) => publish({ type: 'changes', sessionId })),
           onGitHub(owner, () => publish({ type: 'github' })),
           onNotifications(owner, () => publish({ type: 'notifications' })),
+          onAlerts(owner, () => publish({ type: 'alerts' })),
         ];
         const unsubscribeAll = () => {
           for (const unsubscribe of unsubscribers) unsubscribe();
