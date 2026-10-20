@@ -1,5 +1,5 @@
 {
   "name": "joc",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Reports this Claude Code session to JOC and relays prompts back from the dashboard."
 }

@@ -3,7 +3,15 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { type GraphNode, githubDue, type Rollup, toChecks, toPullRequest } from './github.ts';
+import { MAX_PR_CHECKS as PROTOCOL_MAX_PR_CHECKS } from '@joc/protocol';
+import {
+  type GraphNode,
+  githubDue,
+  MAX_PR_CHECKS,
+  type Rollup,
+  toChecks,
+  toPullRequest,
+} from './github.ts';
 
 const node = (rollup: Rollup, extra: Partial<GraphNode> = {}): GraphNode => ({
   number: 238,
@@ -123,4 +131,8 @@ test("a pull request lists its last commit's checks, each with its outcome", () 
   ]);
   assert.equal(toChecks(undefined), undefined);
   assert.equal(toPullRequest(node(null))?.checks, undefined);
+});
+
+test("the check limit matches the protocol's", () => {
+  assert.equal(MAX_PR_CHECKS, PROTOCOL_MAX_PR_CHECKS);
 });
