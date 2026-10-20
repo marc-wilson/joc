@@ -21,7 +21,14 @@ import type {
 import { changesHash, collectChanges, lastSentHash, rememberSent } from './changes.ts';
 import { contextLeft } from './context.ts';
 import { connection, readCredentials } from './credentials.ts';
-import { branchOf, repoOf } from './git.ts';
+import {
+  lastOwnCwd,
+  movesFolder,
+  rememberedFolder,
+  rememberFolder,
+  sessionFolder,
+} from './folder.ts';
+import { placeOf } from './git.ts';
 import { githubDue, readGitHub } from './github.ts';
 import { imageType, isImageId } from './images.ts';
 import { syncNotifications } from './notifications.ts';
@@ -198,11 +205,33 @@ async function uploadImage(image: TranscriptImage): Promise<ImageRef | undefined
   return { id: body.id, type, ...(bytes ? { bytes } : {}) };
 }
 
-function newConversation(input: HookInput): NewConversation {
+/**
+ * The session's own folder (folder.ts): a subagent's hook fires from the subagent's folder, which
+ * may be another worktree on another branch. Never throws.
+ */
+function folderOf(input: HookInput): string {
+  if (movesFolder(input)) {
+    rememberFolder(input.session_id, input.cwd, at);
+    return input.cwd;
+  }
+  return sessionFolder(input, rememberedFolder(input.session_id), () => {
+    if (!input.transcript_path) return undefined;
+    try {
+      return lastOwnCwd(readTail(input.transcript_path, FOLDER_TAIL_BYTES));
+    } catch {
+      return undefined;
+    }
+  });
+}
+
+/** How much of the transcript's end is read for the session's folder, when none is remembered. */
+const FOLDER_TAIL_BYTES = 256 * 1024;
+
+function newConversation(input: HookInput, folder: string): NewConversation {
   if (!input.transcript_path) return nothingNew;
   try {
     const { lines, commit } = readNewLines(input.session_id, input.transcript_path);
-    return { ...parseLines(lines, input.cwd), commit };
+    return { ...parseLines(lines, folder), commit };
   } catch {
     return nothingNew;
   }
@@ -219,6 +248,7 @@ async function main() {
   // A sync reports no state of its own, so the server keeps the one it has, unless the session
   // was left showing background work that has since ended.
   const settled = syncing ? settle(input) : undefined;
+  const folder = folderOf(input);
   const fields = syncing ? (settled ?? {}) : eventFields(input);
   // A settled state counts from when register.ts saw no turn running: a turn that started since
   // reports a later time, so the server keeps that one whatever arrives first.
@@ -228,16 +258,15 @@ async function main() {
 
   // Claude Code writes the transcript asynchronously, so give the final reply a moment to land.
   if (event === 'Stop') await sleep(750);
-  const conversation = ending ? nothingNew : newConversation(input);
+  const conversation = ending ? nothingNew : newConversation(input, folder);
 
   if (fields) {
     const report: SessionReport = {
       sessionId: input.session_id,
       at: reportAt,
-      repo: repoOf(input.cwd),
-      branch: branchOf(input.cwd),
+      ...placeOf(folder),
       machine,
-      cwd: input.cwd,
+      cwd: folder,
       contextLeft: ending ? undefined : contextLeft(input.transcript_path),
       ...fields,
       name: fields.name ?? conversation.aiTitle,
@@ -257,10 +286,10 @@ async function main() {
     if (!response?.ok) return; // Keep the old position so the next hook resends.
   }
   conversation.commit();
-  if (!ending) await sendSubagentSteps(input);
+  if (!ending) await sendSubagentSteps(input, folder);
 
   if (event === 'Stop' || event === 'SessionStart' || syncing) {
-    await sendChanges(input);
+    await sendChanges(input, folder);
   }
   // The person's pull requests, from whichever session's sync comes due first. JOC_GITHUB=0
   // keeps them on this machine.
@@ -299,7 +328,7 @@ function remember(sessionId: string, fields: EventFields, reportAt: number) {
 }
 
 /** What background subagents did, from their own transcripts, as steps of their tasks. */
-async function sendSubagentSteps(input: HookInput) {
+async function sendSubagentSteps(input: HookInput, folder: string) {
   if (!input.transcript_path) return;
   let found: ReturnType<typeof readSubagents>;
   try {
@@ -309,7 +338,7 @@ async function sendSubagentSteps(input: HookInput) {
   }
   for (const { task, lines, commit } of found) {
     // Pasted images stay out: a subagent's prompts come from Claude, not you.
-    const { items } = parseLines(lines, input.cwd, task);
+    const { items } = parseLines(lines, folder, task);
     for (let i = 0; i < items.length; i += BATCH) {
       const batch: MessagesReport = {
         sessionId: input.session_id,
@@ -323,8 +352,8 @@ async function sendSubagentSteps(input: HookInput) {
 }
 
 /** The diff, once per turn, when a session starts and on each sync, and only when it changed. */
-async function sendChanges(input: HookInput) {
-  const changes = collectChanges(input.cwd);
+async function sendChanges(input: HookInput, folder: string) {
+  const changes = collectChanges(folder);
   if (!changes) return;
   const hash = changesHash(changes);
   if (hash === lastSentHash(input.session_id)) return;

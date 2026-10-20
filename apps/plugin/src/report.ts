@@ -7,6 +7,9 @@ export interface HookInput {
   hook_event_name: string;
   cwd: string;
   transcript_path?: string;
+  /** Set when the hook fires inside a subagent: its `cwd` is then the subagent's folder. */
+  agent_id?: string;
+  agent_type?: string;
   source?: string;
   prompt?: string;
   session_title?: string;
