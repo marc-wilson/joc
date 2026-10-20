@@ -23,3 +23,12 @@ export function ago(iso: string, now = Date.now()): string {
   const a = age(iso, now);
   return a === 'now' ? 'just now' : `${a} ago`;
 }
+
+/** The clock time it started today, "09:12"; "00:00" for anything that started before today. */
+export function clock(iso: string, now = Date.now()): string {
+  const at = new Date(iso);
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  if (at < midnight) return '00:00';
+  return at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
