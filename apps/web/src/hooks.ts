@@ -1,4 +1,5 @@
 import {
+  Alert,
   type ConversationItem,
   type GitHubNotification,
   GitHubSnapshot,
@@ -265,6 +266,68 @@ export function useBrowserAlerts(
     states.current = new Map(sessions.map((s) => [s.id, s.state]));
     if (before) for (const s of newlyNeeding(before, sessions)) show(sessionAlert(s));
   }, [sessions, connected]);
+}
+
+const Alerts = z.array(Alert);
+
+/** The person's alerts, newest first, refetched whenever the server says they changed. */
+export function useAlerts(): Alert[] | undefined {
+  const [alerts, setAlerts] = useState<Alert[]>();
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      apiFetch('/api/alerts')
+        .then(async (r) => {
+          if (r.ok && !cancelled) setAlerts(Alerts.parse(await r.json()));
+        })
+        // Unreachable for now: the next alerts event or reconnect snapshot loads it again.
+        .catch(() => {});
+    const unsubscribe = subscribe((event) => {
+      if (event.type === 'alerts' || event.type === 'snapshot') void load();
+    });
+    void load();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+  return alerts;
+}
+
+/**
+ * Marks alerts read or clears them: these, or all of them. False when the server didn't take
+ * it.
+ */
+export async function changeAlerts(action: 'read' | 'clear', ids?: string[]): Promise<boolean> {
+  const res = await apiFetch(ids ? `/api/alerts/${action}` : `/api/alerts/${action}-all`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(ids ? { ids } : {}),
+  }).catch(() => undefined); // Unreachable: reported as not done.
+  return res?.ok === true;
+}
+
+/**
+ * Marks the alerts about the session read while it's on screen: looking at it is reading them.
+ * Each is sent once; if that fails, the Inbox still has it.
+ */
+export function useReadWhileViewing(alerts: Alert[] | undefined, sessionId: string | undefined) {
+  const sent = useRef(new Set<string>());
+  const [visible, setVisible] = useState(() => document.visibilityState === 'visible');
+  useEffect(() => {
+    const update = () => setVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
+  useEffect(() => {
+    if (!visible || !sessionId || !alerts) return;
+    const ids = alerts
+      .filter((a) => !a.read && a.sessionId === sessionId && !sent.current.has(a.id))
+      .map((a) => a.id);
+    if (!ids.length) return;
+    for (const id of ids) sent.current.add(id);
+    void changeAlerts('read', ids);
+  }, [alerts, sessionId, visible]);
 }
 
 const History = z.array(HistorySession);

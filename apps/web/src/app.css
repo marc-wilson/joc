@@ -307,6 +307,30 @@
   width: 104px;
 }
 
+/* Where an alert's toast shows, over the page: it never pushes content. */
+.app-toasts {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: var(--z-toast);
+  max-width: calc(100vw - 2 * var(--space-4));
+}
+
+.app-toasts .joc-toast {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* A JOC alert's row also clears: the icon button sits after "Mark read". */
+.joc-ibrow__action.has-clear {
+  flex-basis: 144px;
+  gap: var(--space-1);
+}
+
+.joc-ibrow__action .joc-btn + .joc-btn {
+  width: auto;
+}
+
 .joc-sr {
   position: absolute;
   width: 1px;
