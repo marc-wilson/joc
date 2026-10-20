@@ -338,3 +338,101 @@ h4.joc-taskd__label { margin: 0; }
 .joc-composer__text.has-args.is-empty::before { font-family: var(--font-mono); font-size: 13px; }
 .joc-composer.is-disabled .joc-composer__text { color: var(--text-secondary); cursor: not-allowed; }
 /* ===== End slash commands ============================================================= */
+
+/* ===== Sort and reviews (#64, #65) =================================================
+   Copied from Claude Design's pass "JOC design pass: sort, reviews, resume"
+   (joc-additions.css, sections 1 and 2; Resume is #68's). The last part fits it to JOC's
+   markup. */
+
+:root {
+  --row-review: 48px;      /* review row: two 20px lines + space-1 top and bottom */
+  --sortmenu-w: 240px;     /* sort menu width */
+  --delay-settle: 400ms;   /* wait after the pointer leaves before a re-sort settles */
+}
+
+/* ---------- 1. Sort ---------- */
+
+.joc-sortbar { position: relative; display: flex; align-items: center; gap: var(--space-2); height: var(--row-dense); padding: 0 var(--space-3) 0 var(--space-1); background: var(--bg-base); border-bottom: 1px solid var(--border-subtle); font-size: 12px; line-height: 16px; color: var(--text-tertiary); }
+.joc-sortbar__btn { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--control-sm); padding: 0 var(--space-1\.5) 0 var(--space-2); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-secondary); font-size: 12px; line-height: 16px; cursor: pointer; transition: background-color var(--duration-instant) linear, color var(--duration-instant) linear; }
+.joc-sortbar__btn strong { font-weight: 550; color: var(--text-primary); }
+.joc-sortbar__btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.joc-sortbar__btn[aria-expanded="true"] { background: var(--bg-selected); color: var(--text-primary); }
+.joc-sortbar__btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.joc-sortbar__held { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; opacity: 0; transition: opacity var(--duration-fade) var(--ease-standard); }
+.joc-sortbar.is-held .joc-sortbar__held { opacity: 1; }
+
+.joc-sortmenu { position: absolute; top: calc(100% + var(--space-1)); left: var(--space-1); z-index: var(--z-popover); width: var(--sortmenu-w); padding: var(--space-1); border-radius: var(--radius-lg); background: var(--bg-overlay); box-shadow: var(--shadow-2); animation: joc-fade var(--duration-fast) var(--ease-standard) both; }
+.joc-sortmenu__label { padding: var(--space-1\.5) var(--space-2) var(--space-1); font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-tertiary); }
+.joc-sortmenu__opt { position: relative; display: flex; align-items: center; gap: var(--space-2); width: 100%; height: var(--row); padding: 0 var(--space-2) 0 var(--space-3); border: 0; border-radius: var(--radius-md); background: none; color: var(--text-primary); font-size: 13px; line-height: 20px; text-align: left; cursor: pointer; transition: background-color var(--duration-instant) linear; }
+.joc-sortmenu__opt:hover { background: var(--bg-hover); }
+.joc-sortmenu__opt:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.joc-sortmenu__desc { margin-left: auto; font-size: 12px; line-height: 16px; color: var(--text-tertiary); white-space: nowrap; }
+.joc-sortmenu__opt[aria-checked="true"] { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); font-weight: 550; }
+.joc-sortmenu__opt[aria-checked="true"] .joc-sortmenu__desc { color: var(--text-secondary); font-weight: 400; }
+.joc-sortmenu__foot { margin-top: var(--space-1); padding: var(--space-2) var(--space-2) var(--space-1); border-top: 1px solid var(--border-subtle); font-size: 12px; line-height: 16px; color: var(--text-tertiary); }
+
+/* A row that changes position fades out, the list reorders while it is invisible, then it fades in.
+   Rows that keep their slot never animate. */
+.joc-slist__item { transition: opacity var(--duration-fade) var(--ease-standard); }
+.joc-slist__item.is-leaving, .joc-slist__item.is-arriving { opacity: 0; }
+
+/* ---------- 2. PR review rows ---------- */
+
+.joc-rgh--reviews { text-transform: uppercase; }
+.joc-rgh__action { height: 20px; margin-left: var(--space-2); padding: 0 var(--space-1\.5); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-tertiary); font: 400 12px/16px var(--font-sans); letter-spacing: 0; text-transform: none; cursor: pointer; }
+.joc-rgh__action:hover { background: var(--bg-hover); color: var(--text-primary); }
+.joc-rgh--reviews .joc-rgh__spacer { margin-left: auto; }
+
+.joc-rrow { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: var(--space-2); height: var(--row-review); padding: var(--space-1) var(--space-3); background: var(--bg-raised); border-bottom: 1px solid var(--border-subtle); color: var(--text-primary); transition: background-color var(--duration-instant) linear; }
+.joc-rrow:hover { background: var(--bg-hover); }
+.joc-rrow.is-selected { background: var(--bg-selected); }
+.joc-rrow--needs { background: var(--state-needs-soft); }
+.joc-rrow--needs:hover, .joc-rrow--needs.is-selected { background: var(--state-needs-soft); box-shadow: inset 0 0 0 1px var(--state-needs); }
+
+.joc-rrow__rail { position: absolute; left: 0; top: 0; bottom: 0; width: var(--rail); }
+.joc-rrow--working .joc-rrow__rail { background: var(--state-working); }
+.joc-rrow--background .joc-rrow__rail { background: repeating-linear-gradient(to bottom, var(--state-background) 0 6px, transparent 6px 10px); }
+.joc-rrow--needs .joc-rrow__rail { background: var(--state-needs); width: 4px; }
+.joc-rrow--offline .joc-rrow__rail { background: repeating-linear-gradient(to bottom, var(--state-offline) 0 2px, transparent 2px 5px); }
+
+.joc-rrow__glyph { display: flex; align-items: center; justify-content: center; height: 20px; }
+.joc-rrow__main { display: grid; grid-template-rows: 20px 20px; min-width: 0; }
+.joc-rrow__line1, .joc-rrow__line2 { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.joc-rrow__link { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; text-decoration: none; font-size: 13px; line-height: 20px; font-weight: 550; }
+.joc-rrow__link::after { content: ""; position: absolute; inset: 0; }
+.joc-rrow__link:focus-visible { outline: none; }
+.joc-rrow:focus-within { box-shadow: inset 0 0 0 2px var(--focus-ring); }
+.joc-rrow__line1 .joc-sbadge { height: 18px; font-size: 11px; flex: none; }
+.joc-rrow__time { margin-left: auto; flex: none; font-size: 12px; line-height: 16px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.joc-rrow__pr { display: inline-flex; align-items: center; gap: var(--space-1); flex: none; font-family: var(--font-mono); font-size: 12px; line-height: 16px; font-weight: 450; color: var(--text-secondary); }
+.joc-rrow__activity { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+.joc-rrow--needs .joc-rrow__activity { color: var(--text-primary); }
+
+/* Finished: the session is over, so no state dot and no rail. The PR glyph takes the dot's slot. */
+.joc-rrow--done .joc-rrow__glyph { color: var(--text-tertiary); }
+.joc-rrow--done .joc-rrow__link { color: var(--text-secondary); font-weight: 500; }
+.joc-rrow__dismiss { position: relative; z-index: 1; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-right: calc(-1 * var(--space-1)); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-tertiary); cursor: pointer; opacity: 0; transition: opacity var(--duration-instant) linear, background-color var(--duration-instant) linear; }
+.joc-rrow:hover .joc-rrow__dismiss, .joc-rrow:focus-within .joc-rrow__dismiss { opacity: 1; }
+.joc-rrow__dismiss:hover { background: var(--bg-selected); color: var(--text-primary); }
+
+/* Folded rail */
+.joc-rail__group--reviews .joc-rail__item { height: var(--control-sm); }
+.joc-rail__item--done { color: var(--text-tertiary); }
+
+@media (prefers-reduced-motion: reduce) {
+  .joc-slist__item, .joc-sortbar__held, .joc-rrow__dismiss { transition: none; }
+  .joc-sortmenu { animation: none; }
+}
+
+/* ---------- Fitted to JOC's markup ---------- */
+/* A group header with an action (Reviews): the fold and the action are two buttons side by side,
+   so the fold carries the header's look and the header itself is not a button. */
+.joc-rgh--split { cursor: default; }
+.joc-rgh__fold { display: flex; align-items: center; gap: var(--space-1\.5); flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; }
+.joc-rgh__fold:focus-visible, .joc-rgh__action:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+/* The row is the option (it takes focus, as SessionRow does), so its title is plain text. */
+.joc-rrow { cursor: default; }
+.joc-rrow:focus-visible { outline: none; }
+/* Each live list item wraps one row; the wrapper only fades. */
+.joc-slist__item { display: block; }
+/* ===== End sort and reviews ========================================================== */

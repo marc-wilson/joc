@@ -5,6 +5,7 @@ import { type TabItem, Tabs } from './controls.tsx';
 import { cx } from './cx.ts';
 import { Icon } from './Icon.tsx';
 import { Branch, WorktreeTag } from './inline.tsx';
+import { ReviewSessionRow, type ReviewSessionRowProps } from './review-session.tsx';
 import { STATE_LABEL, StateBadge, StateDot } from './state.tsx';
 
 export interface SessionRowProps {
@@ -151,6 +152,10 @@ export interface RepoGroupHeaderProps {
   collapsed?: boolean;
   /** Heads the Pinned group: a pin glyph, and it doesn't fold. */
   pinned?: boolean;
+  /** `reviews` heads the Reviews group, pinned above the repos. */
+  kind?: 'repo' | 'reviews';
+  /** A quiet action at the header's end, such as "Clear 2 finished". */
+  action?: { label: string; onClick: () => void };
   onToggle?: () => void;
 }
 
@@ -160,6 +165,8 @@ export function RepoGroupHeader({
   needs,
   collapsed,
   pinned,
+  kind = 'repo',
+  action,
   onToggle,
 }: RepoGroupHeaderProps) {
   if (pinned) {
@@ -172,12 +179,37 @@ export function RepoGroupHeader({
       </h3>
     );
   }
-  return (
-    <button className="joc-rgh" aria-expanded={!collapsed} type="button" onClick={onToggle}>
+  const head = (
+    <>
       <Icon name={collapsed ? 'chevronRight' : 'chevronDown'} size={12} />
       <span className="joc-rgh__name">{repo}</span>
       <span className="joc-rgh__count">{count}</span>
       {needs ? <StateBadge state="needs" label={String(needs)} /> : null}
+    </>
+  );
+  if (kind === 'reviews' || action) {
+    // The fold and the action are two buttons side by side, never one inside the other.
+    return (
+      <div className={cx('joc-rgh', 'joc-rgh--split', kind === 'reviews' && 'joc-rgh--reviews')}>
+        <button
+          className="joc-rgh__fold"
+          aria-expanded={!collapsed}
+          type="button"
+          onClick={onToggle}
+        >
+          {head}
+        </button>
+        {action ? (
+          <button className="joc-rgh__action" type="button" onClick={action.onClick}>
+            {action.label}
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+  return (
+    <button className="joc-rgh" aria-expanded={!collapsed} type="button" onClick={onToggle}>
+      {head}
     </button>
   );
 }
@@ -300,15 +332,30 @@ export interface SessionRailGroup {
 
 export interface SessionRailProps {
   groups: SessionRailGroup[];
+  /** Review sessions, listed first under `rv`; a finished one shows the PR glyph, no dot. */
+  reviews?: ReviewSessionRowProps[];
   peek?: boolean;
   onExpand?: () => void;
   onSelect?: (session: SessionRowProps) => void;
+  onSelectReview?: (review: ReviewSessionRowProps) => void;
 }
 
 /** The session list collapsed to state dots, for screens that need the width. */
-export function SessionRail({ groups, peek, onExpand, onSelect }: SessionRailProps) {
-  const needs = groups.flatMap((g) => g.sessions).filter((s) => s.state === 'needs').length;
+export function SessionRail({
+  groups,
+  reviews = [],
+  peek,
+  onExpand,
+  onSelect,
+  onSelectReview,
+}: SessionRailProps) {
+  const needs = [...reviews.filter((r) => !r.done), ...groups.flatMap((g) => g.sessions)].filter(
+    (s) => s.state === 'needs',
+  ).length;
   const describe = (s: SessionRowProps) => `${s.title} — ${STATE_LABEL[s.state ?? 'idle']}`;
+  const describeReview = (r: ReviewSessionRowProps) =>
+    `${r.title}, ${r.done ? 'finished review' : `review, ${STATE_LABEL[r.state ?? 'idle']}`}`;
+  const reviewsNeed = reviews.filter((r) => !r.done && r.state === 'needs').length;
   return (
     <nav className={cx('joc-rail', peek && 'is-peek')} aria-label="Sessions (collapsed)">
       <button
@@ -328,6 +375,40 @@ export function SessionRail({ groups, peek, onExpand, onSelect }: SessionRailPro
         </span>
       ) : null}
       <div className="joc-rail__list">
+        {reviews.length ? (
+          // biome-ignore lint/a11y/useSemanticElements: a fieldset would bring form semantics to a nav list
+          <div
+            className="joc-rail__group joc-rail__group--reviews"
+            role="group"
+            aria-label="Reviews"
+          >
+            <span className="joc-rail__repo" title="Reviews" aria-hidden="true">
+              rv
+            </span>
+            {reviews.map((r) => (
+              <button
+                key={r.id ?? r.pr}
+                type="button"
+                className={cx(
+                  'joc-rail__item',
+                  !r.done && `joc-rail__item--${r.state ?? 'idle'}`,
+                  r.done && 'joc-rail__item--done',
+                  r.selected && 'is-selected',
+                )}
+                aria-label={describeReview(r)}
+                aria-current={r.selected ? 'true' : undefined}
+                title={r.title}
+                onClick={() => onSelectReview?.(r)}
+              >
+                {r.done ? (
+                  <Icon name="pr" size={12} />
+                ) : (
+                  <StateDot state={r.state} label={describeReview(r)} />
+                )}
+              </button>
+            ))}
+          </div>
+        ) : null}
         {groups.map((g) => (
           // biome-ignore lint/a11y/useSemanticElements: a fieldset would bring form semantics to a nav list
           <div key={g.repo} className="joc-rail__group" role="group" aria-label={g.repo}>
@@ -361,6 +442,19 @@ export function SessionRail({ groups, peek, onExpand, onSelect }: SessionRailPro
         ))}
       </div>
       <div className="joc-rail__peek" aria-hidden={peek ? undefined : 'true'}>
+        {reviews.length ? (
+          <>
+            <RepoGroupHeader
+              repo="Reviews"
+              kind="reviews"
+              count={reviews.length}
+              needs={reviewsNeed}
+            />
+            {reviews.map((r) => (
+              <ReviewSessionRow key={r.id ?? r.pr} {...r} onDismiss={undefined} />
+            ))}
+          </>
+        ) : null}
         {groups.map((g) => (
           <Fragment key={g.repo}>
             <RepoGroupHeader repo={g.repo} count={g.sessions.length} pinned={g.pinned} />
