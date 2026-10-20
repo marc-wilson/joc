@@ -4,7 +4,7 @@ import { ContextMeter } from './ContextMeter.tsx';
 import { type TabItem, Tabs } from './controls.tsx';
 import { cx } from './cx.ts';
 import { Icon } from './Icon.tsx';
-import { Branch } from './inline.tsx';
+import { Branch, WorktreeTag } from './inline.tsx';
 import { STATE_LABEL, StateBadge, StateDot } from './state.tsx';
 
 export interface SessionRowProps {
@@ -15,6 +15,8 @@ export interface SessionRowProps {
   /** Accepted but not shown: the repo group header carries the repo. */
   repo?: string;
   branch?: string;
+  /** The linked worktree it works in, by name; shown as a tag beside the branch. */
+  worktree?: string;
   contextLeft?: number;
   activity?: ReactNode;
   time?: string;
@@ -38,6 +40,7 @@ export function SessionRow({
   state = 'idle',
   title,
   branch,
+  worktree,
   contextLeft,
   activity,
   time,
@@ -95,8 +98,12 @@ export function SessionRow({
           )}
         </span>
         <span className="joc-srow__line2">
-          <span className="joc-srow__where" title={branch}>
+          <span
+            className="joc-srow__where"
+            title={worktree ? `${branch ?? ''} in worktree ${worktree}`.trim() : branch}
+          >
             {branch ? <Branch>{branch}</Branch> : null}
+            {worktree ? <WorktreeTag name={worktree} /> : null}
           </span>
           <span className="joc-srow__meter">
             {/* No meter until the context is known: an empty one would read as 100%. */}
@@ -201,6 +208,8 @@ export interface SessionHeaderProps {
   stateLabel?: string;
   repo?: string;
   branch?: string;
+  /** The linked worktree it works in, by name. */
+  worktree?: string;
   machine?: string;
   model?: string;
   contextLeft?: number;
@@ -216,6 +225,7 @@ export function SessionHeader({
   stateLabel,
   repo,
   branch,
+  worktree,
   machine,
   model,
   contextLeft,
@@ -236,6 +246,7 @@ export function SessionHeader({
       <div className="joc-shead__meta">
         {repo ? <span>{repo}</span> : null}
         {branch ? <Branch>{branch}</Branch> : null}
+        {worktree ? <WorktreeTag name={worktree} /> : null}
         {machine ? (
           <span className="joc-shead__machine">
             <Icon name="terminal" size={12} />
