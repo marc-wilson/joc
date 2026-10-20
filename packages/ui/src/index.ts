@@ -4,15 +4,19 @@ export {
   AgentTeam,
   type AgentTeamMember,
   type AgentTeamProps,
+  TaskAsked,
   TaskDetails,
-  type TaskDetailsProps,
-  type TaskFact,
-  TaskGroupHeader,
-  type TaskGroupHeaderProps,
+  TaskOutput,
+  TaskPending,
+  TaskReport,
   TaskRow,
   type TaskRowProps,
   TaskSection,
   type TaskSectionProps,
+  TaskShowAll,
+  type TaskShowAllProps,
+  type TaskStep,
+  TaskSteps,
 } from './background.tsx';
 export { NotificationBell, type NotificationBellProps } from './bell.tsx';
 export { ContextMeter, type ContextMeterProps } from './ContextMeter.tsx';
