@@ -1,10 +1,4 @@
-import {
-  IMAGE_TYPES,
-  ImageRef,
-  MAX_IMAGE_BYTES,
-  MAX_IMAGES_PER_MESSAGE,
-  type Session,
-} from '@joc/protocol';
+import { IMAGE_TYPES, ImageRef, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE } from '@joc/protocol';
 import {
   Button,
   Composer,
@@ -27,14 +21,8 @@ import { Nav } from './Nav.tsx';
 import { delivered, type PendingPrompt } from './pending.ts';
 import { plain } from './plain.ts';
 import { toggled, usePref } from './prefs.ts';
+import { groupSessions, PINNED_GROUP } from './sessions.ts';
 import { age } from './time.ts';
-
-// Repos in first-seen order, so groups never reorder as sessions update.
-function groupByRepo(list: Session[]): [string, Session[]][] {
-  const groups = new Map<string, Session[]>();
-  for (const s of list) groups.set(s.repo, [...(groups.get(s.repo) ?? []), s]);
-  return [...groups];
-}
 
 const UNTITLED = 'New session';
 
@@ -73,6 +61,9 @@ export default function App() {
   const railed = listFolded || (tab === 'changes' && !listOpen);
   // Session list groups you folded, remembered in this browser.
   const [folded, setFolded] = usePref<string[]>('joc:folded-groups', []);
+  // Sessions you pinned to the top of the list, in the order you pinned them.
+  const [pinned, setPinned] = usePref<string[]>('joc:pinned', []);
+  const groups = groupSessions(sessions, pinned);
   const [pending, setPending] = useState<PendingPrompt[]>([]);
   // A sent prompt shows until the session's own transcript has it.
   const waiting = pending.filter((p) => p.sessionId === selected?.id && !delivered(items, p));
@@ -107,9 +98,9 @@ export default function App() {
         {railed ? (
           <aside className="joc-app__side is-rail">
             <SessionRail
-              groups={groupByRepo(sessions).map(([repo, list]) => ({
-                repo,
-                sessions: list.map((s) => ({
+              groups={groups.map((g) => ({
+                repo: g.label,
+                sessions: g.sessions.map((s) => ({
                   id: s.id,
                   state: s.state,
                   title: s.title ?? UNTITLED,
@@ -137,20 +128,18 @@ export default function App() {
               />
             </div>
             <div className="app-side__list" role="listbox" aria-label="Sessions">
-              {groupByRepo(sessions).map(([repo, list]) => (
-                <Fragment key={repo}>
+              {groups.map((g) => (
+                <Fragment key={g.id}>
                   <RepoGroupHeader
-                    repo={repo}
-                    count={list.length}
-                    needs={list.filter((s) => s.state === 'needs').length}
-                    collapsed={folded.includes(`repo:${repo}`)}
-                    onToggle={() =>
-                      setFolded(toggled(folded, `repo:${repo}`, !folded.includes(`repo:${repo}`)))
-                    }
+                    repo={g.label}
+                    count={g.sessions.length}
+                    needs={g.sessions.filter((s) => s.state === 'needs').length}
+                    collapsed={folded.includes(g.id)}
+                    onToggle={() => setFolded(toggled(folded, g.id, !folded.includes(g.id)))}
                   />
-                  {folded.includes(`repo:${repo}`) ? null : (
+                  {folded.includes(g.id) ? null : (
                     <>
-                      {list.map((s) => (
+                      {g.sessions.map((s) => (
                         <SessionRow
                           key={s.id}
                           state={s.state}
@@ -160,10 +149,12 @@ export default function App() {
                           activity={s.activity && plain(s.activity)}
                           time={age(s.updatedAt, now)}
                           selected={s.id === selected?.id}
+                          pinned={g.id === PINNED_GROUP}
                           onSelect={() => setSelectedId(s.id)}
+                          onPinChange={(on) => setPinned(toggled(pinned, s.id, on))}
                         />
                       ))}
-                      <NewSessionButton repo={repo} />
+                      {g.id === PINNED_GROUP ? null : <NewSessionButton repo={g.label} />}
                     </>
                   )}
                 </Fragment>
