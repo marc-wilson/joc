@@ -19,6 +19,8 @@ export type ResumeStepStatus = 'done' | 'pending' | 'todo';
 
 export interface ResumeStep {
   label: ReactNode;
+  /** The label is a command, shown in mono. */
+  mono?: boolean;
   status: ResumeStepStatus;
 }
 
@@ -36,7 +38,7 @@ export function ResumeSteps({ steps }: { steps: ResumeStep[] }) {
           {step.status === 'todo' ? null : (
             <CIMark status={step.status === 'done' ? 'pass' : 'pending'} />
           )}
-          {step.label}
+          {step.mono ? <code>{step.label}</code> : step.label}
         </span>
       ))}
     </div>
