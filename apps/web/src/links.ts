@@ -22,16 +22,17 @@ export const sessionFor = (pr: PullRequest, sessions: Session[]): Session | unde
  * branch when it's one of the person's or waiting on their review.
  */
 export function sessionForThread(
-  thread: GitHubNotification,
+  thread: Pick<GitHubNotification, 'repo' | 'number' | 'branch'>,
   prs: PullRequest[],
   sessions: Session[],
 ): Session | undefined {
   const branch =
     thread.branch ??
-    (thread.type === 'PullRequest'
+    (thread.number
       ? prs.find((pr) => pr.repo === thread.repo && pr.number === thread.number)?.branch
       : undefined);
-  return branch ? latestOn({ repo: thread.repo, branch }, sessions) : undefined;
+  const live = sessions.filter((s) => s.state !== 'offline');
+  return branch ? latestOn({ repo: thread.repo, branch }, live) : undefined;
 }
 
 /** The PR a session's branch is in, if any. */

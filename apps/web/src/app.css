@@ -227,151 +227,8 @@
   justify-content: center;
 }
 
-/* The Inbox row and the settings switch, from the JOC design system's Inbox design. Their
+/* The settings switch, from the JOC design system's Inbox design. Its
    styles belong in the design system's components.css; move them there when it next syncs. */
-.joc-ibrow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  column-gap: var(--space-3);
-  row-gap: var(--space-1\.5, 6px);
-  min-height: 56px;
-  box-sizing: border-box;
-  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
-  background: var(--bg-base);
-  transition: background-color var(--duration-instant) var(--ease-standard, ease);
-}
-
-.joc-ibrow.is-unread {
-  background: var(--bg-raised);
-}
-
-.joc-ibrow:hover {
-  background: var(--bg-hover);
-}
-
-.joc-ibrow + .joc-ibrow {
-  border-top: 1px solid var(--border-subtle);
-}
-
-.joc-ibrow__mark {
-  width: 20px;
-  height: 20px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-}
-
-.joc-ibrow__main {
-  flex: 999 1 320px;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-0\.5, 2px);
-}
-
-.joc-ibrow__line1 {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.joc-ibrow__title {
-  color: var(--text-secondary);
-  font-weight: 400;
-  text-decoration: none;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-.joc-ibrow.is-unread .joc-ibrow__title {
-  color: var(--text-primary);
-  font-weight: 550;
-}
-
-.joc-ibrow__title:hover {
-  color: var(--text-primary);
-  text-decoration: underline;
-}
-
-.joc-ibrow__title:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-  border-radius: var(--radius-xs);
-}
-
-.joc-ibrow__ref {
-  flex: none;
-  color: var(--text-tertiary);
-}
-
-.joc-ibrow__meta {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1\.5, 6px);
-  min-width: 0;
-  color: var(--text-secondary);
-}
-
-.joc-ibrow__verb {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.joc-ibrow__sep,
-.joc-ibrow__time {
-  flex: none;
-  color: var(--text-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-
-.joc-ibrow__session {
-  flex: 0 0 220px;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-}
-
-.joc-ibrow__action {
-  flex: 0 0 112px;
-  display: flex;
-  justify-content: flex-end;
-}
-
-.joc-ibrow__action .joc-btn {
-  width: 104px;
-}
-
-/* Where an alert's toast shows, over the page: it never pushes content. */
-.app-toasts {
-  position: fixed;
-  right: var(--space-4);
-  bottom: var(--space-4);
-  z-index: var(--z-toast);
-  max-width: calc(100vw - 2 * var(--space-4));
-}
-
-.app-toasts .joc-toast {
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-/* A JOC alert's row also clears: the icon button sits after "Mark read". */
-.joc-ibrow__action.has-clear {
-  flex-basis: 144px;
-  gap: var(--space-1);
-}
-
-.joc-ibrow__action .joc-btn + .joc-btn {
-  width: auto;
-}
-
 .joc-sr {
   position: absolute;
   width: 1px;
@@ -448,13 +305,6 @@
 .joc-switch:disabled,
 .joc-switchbar.is-disabled .joc-switchbar__label {
   cursor: not-allowed;
-}
-
-/* The Inbox: groups stacked, each a header over its rows. */
-.app-inbox-group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
 }
 
 /* Images waiting in the composer (@joc/ui Composer, PastedImage) and an attachment that opens
@@ -756,4 +606,174 @@
   flex: 1;
   min-width: 0;
   color: var(--text-tertiary);
+}
+
+/* Notification settings (the panel's dialog and /settings): layout only; the matrix is @joc/ui's
+   NotificationMatrix. */
+.app-notif-dialog .joc-dialog__panel {
+  max-width: calc(var(--sidebar) * 2);
+}
+
+.app-notif-dialog__desc {
+  margin: 0;
+  padding: var(--space-4) var(--space-4) 0;
+  color: var(--text-secondary);
+}
+
+.app-notif-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.app-notif-dialog .app-notif-settings {
+  padding: var(--space-4);
+}
+
+.app-notif-desktop {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+}
+
+.app-notif-desktop__lead {
+  flex: none;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.app-notif-desktop__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.app-notif-desktop__title {
+  font-weight: 550;
+}
+
+.app-notif-desktop__hint {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+}
+
+.app-notif-desktop__check,
+.app-notif-filters__check,
+.app-notif-filters__repo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+}
+
+/* /notifications: filters on the left, the day groups in the middle. */
+.app-notif-filters {
+  flex: 1 1 var(--notif-history-filters);
+  max-width: var(--notif-history-filters);
+  min-width: 0;
+  box-sizing: border-box;
+  padding: var(--space-5) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.app-notif-filters__views {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0\.5);
+}
+
+.app-notif-filters__views .joc-nav__link {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.app-notif-filters__views .joc-nav__link.is-active {
+  background: var(--bg-selected);
+}
+
+.app-notif-filters__count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-notif-filters__repos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.app-notif-filters__repos legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+}
+
+.app-notif-filters__repo {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.app-notif-filters__check {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.app-notif-history {
+  overflow-y: auto;
+  padding: var(--space-6) var(--space-8) var(--space-12);
+  box-sizing: border-box;
+}
+
+.app-notif-history__inner {
+  width: 100%;
+  max-width: calc(var(--notif-row) * 15);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.app-notif-history__list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg-overlay);
+}
+
+@media (max-width: 720px) {
+  .app-notif-page .joc-app__body {
+    flex-direction: column;
+  }
+
+  .app-notif-filters {
+    max-width: none;
+    flex: none;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .app-notif-history {
+    padding: var(--space-4);
+  }
 }
