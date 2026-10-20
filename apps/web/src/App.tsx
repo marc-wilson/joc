@@ -32,6 +32,8 @@ import { cantDelete, deletionLine, deletionOf, machineLive, removedLine } from '
 import {
   useAlerts,
   useChanges,
+  useCmdlistMax,
+  useCommands,
   useConversation,
   useDeletes,
   useHistory,
@@ -47,6 +49,7 @@ import { plain } from './plain.ts';
 import { updatePrefs, usePrefs } from './prefs.ts';
 import { isQuiet, keepNote, matchesFilter } from './session-list.ts';
 import { groupSessions, PINNED_GROUP } from './sessions.ts';
+import { sessionSuggestions } from './slash-commands.ts';
 import { age } from './time.ts';
 import { toggled } from './toggled.ts';
 
@@ -173,6 +176,10 @@ export default function App() {
   useReadWhileViewing(useAlerts(), selected?.id);
   const items = useConversation(selected?.id);
   const changes = useChanges(selected?.id);
+  const commands = useCommands(selected?.id);
+  const dockRef = useCmdlistMax();
+  // What the composer suggests on `/`: the session's own commands, the built-ins until then.
+  const slash = selected ? sessionSuggestions(selected, commands) : undefined;
   const tasks = selected ? backgroundTasks(items, selected.state, selected.background) : [];
   const running = runningCount(tasks);
   const [tab, setTab] = useState('conversation');
@@ -411,17 +418,24 @@ export default function App() {
                     state={selected.state}
                     session={selected}
                   />
-                  <div className="app-main__dock">
-                    {selected.state === 'offline' ? (
-                      <Composer disabled hint="This session is offline" />
-                    ) : (
-                      <Composer
-                        key={selected.id}
-                        working={selected.state === 'working'}
-                        imageLimits={IMAGE_LIMITS}
-                        onSubmit={(text, images) => void send(selected.id, text, images)}
-                      />
-                    )}
+                  <div className="app-main__dock" ref={dockRef}>
+                    {/* One composer whether or not the session is online, so going offline keeps
+                        what you typed. */}
+                    <Composer
+                      key={selected.id}
+                      disabled={selected.state === 'offline'}
+                      hint={
+                        selected.state === 'offline'
+                          ? 'Session went offline. You can send again when it reconnects.'
+                          : undefined
+                      }
+                      placeholder={selected.state === 'offline' ? 'Session is offline' : undefined}
+                      working={selected.state === 'working'}
+                      imageLimits={IMAGE_LIMITS}
+                      suggestions={slash?.suggestions}
+                      commandsStatus={slash?.status}
+                      onSubmit={(text, images) => void send(selected.id, text, images)}
+                    />
                   </div>
                 </>
               )}
