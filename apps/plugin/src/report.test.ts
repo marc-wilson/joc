@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseGitHubRepo } from './git.ts';
-import { describeTool, eventFields, firstLine, type HookInput } from './report.ts';
+import { describeTool, eventFields, firstLine, type HookInput, runningTasks } from './report.ts';
 
 const base: HookInput = { session_id: 's1', hook_event_name: '', cwd: '/work/atlas-web' };
 const event = (hook_event_name: string, extra: Partial<HookInput> = {}) =>
@@ -75,14 +75,60 @@ test('stop is idle, or background while tasks still run', () => {
     event('Stop', { last_assistant_message: 'All tests pass.' })?.activity,
     'All tests pass.',
   );
-  assert.deepEqual(event('Stop', { background_tasks: [{}, {}] }), {
+  const tasks = [
+    { id: 'b7k2m9', type: 'shell', status: 'running', description: 'Dev', command: 'pnpm dev' },
+    { id: 'a3f81c', type: 'subagent', status: 'running', description: 'Map auth' },
+  ];
+  assert.deepEqual(event('Stop', { background_tasks: tasks, session_crons: [] }), {
     state: 'background',
     activity: '2 background tasks running',
+    background: [
+      { id: 'b7k2m9', type: 'shell', status: 'running', description: 'Dev', command: 'pnpm dev' },
+      { id: 'a3f81c', type: 'subagent', status: 'running', description: 'Map auth' },
+    ],
+  });
+});
+
+test("stop sends claude code's list, bounded, and an empty one when nothing runs", () => {
+  assert.deepEqual(event('Stop', { background_tasks: [], session_crons: [] })?.background, []);
+  // An older Claude Code sends no list: none is sent, so the server keeps the last one.
+  assert.equal('background' in (event('Stop') ?? {}), false);
+  const many = Array.from({ length: 60 }, (_, i) => ({
+    id: `t${i}`,
+    type: 'monitor',
+    status: 'running',
+    description: 'x'.repeat(1200),
+    server: 'harbor',
+    tool: 'watch',
+    extra: 'dropped',
+  }));
+  const sent = runningTasks({ ...base, hook_event_name: 'Stop', background_tasks: many });
+  assert.equal(sent?.length, 50);
+  assert.equal(sent?.[0]?.description?.length, 1000);
+  assert.deepEqual(Object.keys(sent?.[0] ?? {}).sort(), [
+    'description',
+    'id',
+    'server',
+    'status',
+    'tool',
+    'type',
+  ]);
+  // Entries without an id can't be matched to anything, so they're left out.
+  assert.deepEqual(runningTasks({ ...base, hook_event_name: 'Stop', background_tasks: [{}] }), []);
+});
+
+test('a scheduled wakeup is background work too', () => {
+  const crons = [{ id: 'c1', schedule: '*/5 * * * *', recurring: true, prompt: 'check ci' }];
+  assert.deepEqual(event('Stop', { background_tasks: [], session_crons: crons }), {
+    state: 'background',
+    activity: '1 background task running',
+    background: [{ id: 'c1', type: 'cron', description: 'check ci', schedule: '*/5 * * * *' }],
   });
 });
 
 test('session end is offline, and compaction changes nothing', () => {
   assert.equal(event('SessionEnd')?.state, 'offline');
+  assert.deepEqual(event('SessionEnd')?.background, []);
   assert.equal(event('SessionStart', { source: 'compact' }), undefined);
   assert.equal(event('SubagentStop'), undefined);
 });
