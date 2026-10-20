@@ -66,6 +66,13 @@ export const DEFAULT_NOTIFICATION_CHANNELS: Record<NotificationKind, Notificatio
   github: { panel: true, toast: false, desktop: false },
 };
 
+/**
+ * How the session list orders the sessions in each group: by state (needs you first), last
+ * activity (newest first), name (A to Z) or first seen (earliest first).
+ */
+export const SessionSort = z.enum(['state', 'activity', 'name', 'seen']);
+export type SessionSort = z.infer<typeof SessionSort>;
+
 /** The notification panel's filter. */
 export const NotificationTab = z.enum(['all', 'needs', 'github']);
 export type NotificationTab = z.infer<typeof NotificationTab>;
@@ -88,6 +95,10 @@ export const Prefs = z.object({
   foldedGroups: Entries,
   /** The session list folded into its rail. */
   listFolded: z.boolean(),
+  /** How the session list orders each group. */
+  sessionSort: SessionSort,
+  /** Finished reviews cleared from the list (they stay in the history), oldest first. */
+  dismissedReviews: Entries,
   diffMode: DiffMode,
   /** The Background tab lists every finished task, not just the latest few. */
   showAllFinishedTasks: z.boolean(),
@@ -107,6 +118,8 @@ export const DEFAULT_PREFS: Prefs = {
   pinned: [],
   foldedGroups: [],
   listFolded: false,
+  sessionSort: 'state',
+  dismissedReviews: [],
   diffMode: 'unified',
   showAllFinishedTasks: false,
   sessions: [],
