@@ -325,12 +325,14 @@ export async function listStaleSessions(
   return stale;
 }
 
-/** What deleting one of the owner's sessions needs to know of it. */
+/** What deleting or resuming one of the owner's sessions needs to know of it. */
 export interface DeletableSession {
   sessionId: string;
   title?: string;
   machine?: string;
   device?: string;
+  /** Its folder, where `claude --resume` runs. */
+  cwd?: string;
   /** Claude Code ended it (SessionEnd), or it has been quiet long enough to have stopped. */
   ended: boolean;
 }
@@ -350,6 +352,7 @@ export async function deletableSessions(
     title: d.name ?? d.title,
     machine: d.machine,
     device: d.device,
+    cwd: d.cwd,
     ended: d.state === 'offline' || now - d.updatedAt.getTime() > QUIET_AFTER_MS,
   }));
 }

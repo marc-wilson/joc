@@ -22,6 +22,7 @@ import { forgetMessages, imagesShown } from './messages.ts';
 import { type Owner, sessionKey } from './owner.ts';
 import { getPrefs, patchPrefs } from './prefs.ts';
 import { forgetPrompts, imagesSent } from './prompts.ts';
+import { forgetResumes, resumeUnderWay } from './resumes.ts';
 import { deletableSessions, forgetSession } from './sessions.ts';
 
 interface DeletionDoc {
@@ -112,6 +113,16 @@ export async function isDeleted(owner: Owner, sessionId: string, now = Date.now(
 }
 
 export const STILL_RUNNING = 'Still running. Quit it first.';
+export const RESUMING = "It's being resumed.";
+
+/** Whether a delete of the session is under way: asked for, or taken and not yet reported on. */
+export async function openDeletion(owner: Owner, sessionId: string, now = Date.now()) {
+  const open = await deletions().findOne(
+    { owner, sessionId, status: { $in: ['waiting', 'deleting'] } },
+    { sort: { createdAt: -1 } },
+  );
+  return open !== null && toDeletion(open, now).status !== 'failed';
+}
 
 export type RequestOutcome =
   | { ok: true; deletions: Deletion[] }
@@ -143,6 +154,7 @@ export async function requestDeletes(
             ? STILL_RUNNING
             : undefined;
     if (reason) refused.push({ id, reason });
+    else if (await resumeUnderWay(owner, id, now)) refused.push({ id, reason: RESUMING });
   }
   if (refused.length) return { ok: false, refused };
 
@@ -279,6 +291,7 @@ async function forget(owner: Owner, sessionId: string, now: number): Promise<voi
   await forgetAnswers(owner, sessionId);
   await forgetAlerts(owner, sessionId);
   await forgetLaunches(owner, sessionId);
+  await forgetResumes(owner, sessionId);
   await forgetSession(owner, sessionId);
   // With the session gone, its pin and folds are pruned on the next write: make it now.
   const { saved, prefs } = await getPrefs(owner);

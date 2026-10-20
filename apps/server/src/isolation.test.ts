@@ -11,6 +11,7 @@ import {
   ClaimedDeletes,
   ClaimedLaunch,
   ClaimedPrompt,
+  ClaimedResumes,
   ConversationItem,
   DeleteRefused,
   Deletion,
@@ -24,6 +25,7 @@ import {
   Prefs,
   PrefsSnapshot,
   ReadsClaim,
+  Resume,
   ReviewSettings,
   Session,
   SessionCommands,
@@ -37,6 +39,7 @@ import { claimDeletes, DELETE_WAIT_MS, listDeletes, requestDeletes } from './del
 import type { GitHubAuth } from './github.ts';
 import { createDeviceToken, createWebSession, signInGitHubUser } from './identity.ts';
 import type { Owner } from './owner.ts';
+import { claimResumes, listResumes, RESUME_WAIT_MS, requestResume } from './resumes.ts';
 
 type Who = 'alice' | 'bob';
 
@@ -153,6 +156,11 @@ test('every API route needs an owner', async () => {
     ['POST', '/api/deletes'],
     ['POST', '/api/deletes/claim'],
     ['POST', '/api/deletes/d/result'],
+    ['GET', '/api/resumes'],
+    ['POST', '/api/resumes'],
+    ['POST', '/api/resumes/r/cancel'],
+    ['POST', '/api/resumes/claim'],
+    ['POST', '/api/resumes/r/result'],
   ] as const) {
     const res = await app.request(path, { method });
     assert.equal(res.status, 401, `${method} ${path}`);
@@ -1540,6 +1548,123 @@ test('a delete no machine takes in time fails, and says so', async () => {
   // And no plugin takes it any more.
   assert.deepEqual(
     await claimDeletes(owner, 'alice-mini', undefined, now + DELETE_WAIT_MS + 1),
+    [],
+  );
+});
+
+// ── Resuming ended sessions ──────────────────────────────────────────────────
+
+const Resumes = z.array(Resume);
+const resumesOf = async (who: Who) => read(await asPerson(who, '/api/resumes'), Resumes);
+const resumeClaims = async (who: Who, machine: string) =>
+  (await read(await call(who, '/api/resumes/claim', { machine }), ClaimedResumes)).resumes;
+const Refused = z.object({ error: z.string() });
+
+const BACK = '3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f';
+
+test('a session is resumed only by its owner, from a browser, and only once it ended', async () => {
+  const alice = { machine: 'alice-laptop', title: 'Alice to resume', cwd: '/work/atlas-web' };
+  await call('alice', '/api/reports', report(BACK, alice));
+  await call('bob', '/api/reports', report(BACK, { machine: 'bob-laptop', state: 'offline' }));
+
+  // Still running: refused, and says why. A machine never asks for a resume.
+  const running = await asPerson('alice', '/api/resumes', { sessionId: BACK });
+  assert.equal(running.status, 400);
+  assert.equal((await read(running, Refused)).error, "It's still running.");
+  assert.equal((await call('alice', '/api/resumes', { sessionId: BACK })).status, 403);
+
+  await call('alice', '/api/reports', report(BACK, { ...alice, state: 'offline' }));
+  const asked = await asPerson('alice', '/api/resumes', { sessionId: BACK });
+  assert.equal(asked.status, 202);
+  const resume = await read(asked, Resume);
+  assert.deepEqual([resume.status, resume.machine], ['waiting', 'alice-laptop']);
+  // Asked twice, it's the same resume.
+  const twice = await read(await asPerson('alice', '/api/resumes', { sessionId: BACK }), Resume);
+  assert.equal(twice.id, resume.id);
+  assert.deepEqual(await resumesOf('bob'), []);
+
+  // Only Alice's plugin on that machine takes it: not Bob's, not a browser, not another machine.
+  assert.deepEqual(await resumeClaims('bob', 'alice-laptop'), []);
+  const browserClaim = await asPerson('alice', '/api/resumes/claim', { machine: 'alice-laptop' });
+  assert.equal(browserClaim.status, 403);
+  assert.deepEqual(await resumeClaims('alice', 'alice-desktop'), []);
+  assert.deepEqual(await resumeClaims('alice', 'alice-laptop'), [
+    { id: resume.id, sessionId: BACK, cwd: '/work/atlas-web' },
+  ]);
+  assert.deepEqual(await resumeClaims('alice', 'alice-laptop'), []);
+  assert.equal((await resumesOf('alice'))[0]?.status, 'starting');
+  // Taken, it can't be withdrawn, nor deleted meanwhile.
+  assert.equal((await asPerson('alice', `/api/resumes/${resume.id}/cancel`, {})).status, 409);
+  const deleting = await asPerson('alice', '/api/deletes', { sessionIds: [BACK] });
+  assert.equal((await read(deleting, DeleteRefused)).error, "It's being resumed.");
+
+  // Only Alice's plugin says how it went.
+  const result = `/api/resumes/${resume.id}/result`;
+  assert.equal((await call('bob', result, { ok: true })).status, 404);
+  assert.equal((await asPerson('alice', result, { ok: true })).status, 403);
+  assert.equal((await call('alice', result, { ok: true })).status, 204);
+  const started = (await resumesOf('alice'))[0];
+  assert.equal(started?.status, 'started');
+  assert.ok(started?.startedAt);
+
+  // Its plugin reports again under the same id: the same row is live again.
+  await call('alice', '/api/reports', report(BACK, { ...alice, state: 'idle' }));
+  const sessions = await read(await call('alice', '/api/sessions'), Sessions);
+  assert.equal(sessions.find((s) => s.id === BACK)?.state, 'idle');
+  // Bob's session of that id stays ended.
+  assert.equal((await historyOf('bob')).find((s) => s.id === BACK)?.state, 'offline');
+});
+
+test('a resume can be withdrawn until a machine takes it, by its owner only', async () => {
+  const id = '4d5e6f7a-8b9c-4d0e-8f1a-2b3c4d5e6f7a';
+  await call('alice', '/api/reports', report(id, { machine: 'alice-laptop', state: 'offline' }));
+  const resume = await read(await asPerson('alice', '/api/resumes', { sessionId: id }), Resume);
+  assert.equal((await asPerson('bob', `/api/resumes/${resume.id}/cancel`, {})).status, 409);
+  assert.equal((await call('alice', `/api/resumes/${resume.id}/cancel`, {})).status, 403);
+  assert.equal((await asPerson('alice', `/api/resumes/${resume.id}/cancel`, {})).status, 204);
+  assert.equal((await resumesOf('alice')).find((r) => r.id === resume.id)?.status, 'cancelled');
+  assert.deepEqual(await resumeClaims('alice', 'alice-laptop'), []);
+});
+
+test('a failed resume says why, and a deleted session cannot be resumed', async () => {
+  const id = '5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b';
+  await call('alice', '/api/reports', report(id, { machine: 'alice-laptop', state: 'offline' }));
+  const resume = await read(await asPerson('alice', '/api/resumes', { sessionId: id }), Resume);
+  await resumeClaims('alice', 'alice-laptop');
+  const failure = { ok: false, reason: 'session file not found', detail: `${id}.jsonl is missing` };
+  await call('alice', `/api/resumes/${resume.id}/result`, failure);
+  const failed = (await resumesOf('alice')).find((r) => r.id === resume.id);
+  assert.deepEqual(
+    [failed?.status, failed?.reason, failed?.detail],
+    ['failed', failure.reason, failure.detail],
+  );
+
+  // Deleted, there's nothing left to resume.
+  const [deletion] = await read(
+    await asPerson('alice', '/api/deletes', { sessionIds: [id] }),
+    Deletions,
+  );
+  await deleteClaims('alice', 'alice-laptop');
+  await call('alice', `/api/deletes/${deletion?.id}/result`, { ok: true });
+  const gone = await asPerson('alice', '/api/resumes', { sessionId: id });
+  assert.equal((await read(gone, Refused)).error, 'No such session');
+});
+
+test('a resume no machine takes in time fails, and says so', async () => {
+  const owner = owners.get('alice');
+  assert.ok(owner);
+  const id = '6f7a8b9c-0d1e-4f2a-8b3c-4d5e6f7a8b9c';
+  await call('alice', '/api/reports', report(id, { machine: 'alice-mini', state: 'offline' }));
+  const now = Date.now();
+  const outcome = await requestResume(owner, id, undefined, now);
+  assert.ok(outcome.ok);
+  const later = (await listResumes(owner, now + RESUME_WAIT_MS + 1)).find(
+    (r) => r.sessionId === id,
+  );
+  assert.equal(later?.status, 'failed');
+  assert.match(later?.detail ?? '', /Start Claude Code on alice-mini/);
+  assert.deepEqual(
+    await claimResumes(owner, 'alice-mini', undefined, now + RESUME_WAIT_MS + 1),
     [],
   );
 });
