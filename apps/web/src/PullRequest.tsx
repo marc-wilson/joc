@@ -1,13 +1,20 @@
-import { type Launch, type PullRequest, type Session, STANDARD_REVIEW } from '@joc/protocol';
+import { type Launch, type PullRequest, reviewPrompt, type Session } from '@joc/protocol';
 import {
   Button,
+  Card,
+  CardNote,
+  ChangedFile,
+  CIBadge,
+  CIRow,
   Code,
+  DiffStat,
   EmptyState,
-  FileTree,
-  PRRow,
+  PRHeader,
+  ReviewAction,
+  ReviewRow,
   SectionHeader,
   SessionLink,
-  TaskRow,
+  TextLink,
 } from '@joc/ui';
 import { useEffect, useState } from 'react';
 import {
@@ -27,7 +34,14 @@ import { age, ago } from './time.ts';
 const UNTITLED = 'New session';
 
 const sessionHref = (id: string) => `/?session=${encodeURIComponent(id)}`;
-const openOnGitHub = (pr: PullRequest) => window.open(pr.url, '_blank', 'noopener,noreferrer');
+
+/** How long a check ran: "48s", "2m 10s", "1h 5m". */
+function ran(seconds: number | undefined): string | undefined {
+  if (seconds == null) return undefined;
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  return m < 60 ? `${m}m ${seconds % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
 
 interface ReviewProps {
   pr: PullRequest;
@@ -79,26 +93,29 @@ function Review({ pr, sessions, launches }: ReviewProps) {
     );
   }
 
-  const own = settings?.instructions;
+  const own = settings?.instructions?.trim();
   const failed = launch?.status === 'failed';
-  // Where it stands shows in the list below; only a failure shows here too.
+  // Where it stands shows in the list beside it; only a failure shows here too.
   const note = error ?? (launch && failed ? launchStatus(launch, started) : undefined);
+  // A command reads as what runs; a prompt of the person's own is too long to show here.
+  const runs = !own || own.startsWith('/') ? reviewPrompt(pr, own) : undefined;
   return (
-    <div className="app-review">
-      <div className="app-review__send">
-        <span className="app-review__prompt">
-          {own ? (
-            'Runs your review instructions'
-          ) : (
-            <>
-              Runs <Code>{`${STANDARD_REVIEW} ${pr.number}`}</Code>
-            </>
-          )}{' '}
-          in a new session, in the folder of "{from.title ?? UNTITLED}".
-          <Button variant="ghost" size="sm" onClick={() => location.assign('/settings')}>
-            Change
-          </Button>
-        </span>
+    <>
+      <ReviewAction
+        what={
+          <>
+            {runs ? (
+              <>
+                Runs <Code>{runs}</Code>
+              </>
+            ) : (
+              'Sends your review prompt'
+            )}{' '}
+            in a new session beside "{from.title ?? UNTITLED}".{' '}
+            <TextLink href="/settings#review">Change</TextLink>
+          </>
+        }
+      >
         <Button
           variant="primary"
           loading={sending || (!!launch && !failed && !started)}
@@ -106,12 +123,13 @@ function Review({ pr, sessions, launches }: ReviewProps) {
         >
           {failed ? 'Try again' : 'Review'}
         </Button>
-      </div>
+      </ReviewAction>
       {note ? <p className="app-review__error">{note}</p> : null}
-    </div>
+    </>
   );
 }
 
+/** The reviews JOC started here: the session's state while it runs, a cross if it couldn't start. */
 function ReviewList({
   launches,
   sessions,
@@ -121,34 +139,20 @@ function ReviewList({
   sessions: Session[];
   now: number;
 }) {
-  return (
-    <div className="app-tasks">
-      {launches.map((launch) => {
-        const session = launched(launch, sessions);
-        return (
-          <TaskRow
-            key={launch.id}
-            kind="subagent"
-            kindLabel="New session"
-            title={session?.title ?? `Review #${launch.review?.number ?? ''}`}
-            command={launch.prompt}
-            tail={launchStatus(launch, session)}
-            elapsed={age(launch.createdAt, now)}
-            state={session?.state ?? 'idle'}
-            result={launch.status === 'failed' ? 'fail' : undefined}
-          >
-            {session ? (
-              <SessionLink
-                title={session.title ?? UNTITLED}
-                state={session.state}
-                href={sessionHref(session.id)}
-              />
-            ) : null}
-          </TaskRow>
-        );
-      })}
-    </div>
-  );
+  return launches.map((launch) => {
+    const session = launched(launch, sessions);
+    return (
+      <ReviewRow
+        key={launch.id}
+        session={session?.title ?? `Review #${launch.review?.number ?? ''}`}
+        href={session ? sessionHref(session.id) : undefined}
+        state={session?.state ?? 'idle'}
+        result={launch.status === 'failed' ? 'fail' : undefined}
+        status={launchStatus(launch, session)}
+        time={age(launch.createdAt, now)}
+      />
+    );
+  });
 }
 
 /** /pr?repo=&number=: one of the person's pull requests, and reviewing it in a new session. */
@@ -163,6 +167,8 @@ export function PullRequestPage() {
       ? findPR([github.reviewRequested, github.mine], target)
       : undefined;
 
+  // The session already on its branch, if one is.
+  const session = pr && sessionFor(pr, sessions);
   let body: React.ReactNode = null;
   if (!target) {
     body = <EmptyState title="No pull request named" body="Open one from the GitHub page." />;
@@ -174,90 +180,112 @@ export function PullRequestPage() {
       />
     );
   } else if (pr) {
-    const session = sessionFor(pr, sessions);
     const shown = pr.files?.length ?? 0;
     const more = (pr.changedFiles ?? shown) - shown;
     body = (
-      <>
-        <div className="app-list">
-          <PRRow
-            number={pr.number}
-            repo={pr.repo.split('/')[1]}
-            title={pr.title}
-            branch={pr.branch}
-            author={pr.author}
-            updated={ago(pr.updatedAt, now)}
-            ci={pr.ci}
-            ciDetail={pr.ciDetail}
-            review={pr.review}
-            draft={pr.draft}
-            additions={pr.additions}
-            deletions={pr.deletions}
-            session={
-              session && {
-                title: session.title ?? UNTITLED,
-                state: session.state,
-                href: sessionHref(session.id),
-              }
-            }
-            onOpen={() => openOnGitHub(pr)}
-          />
+      <div className="joc-prgrid">
+        <div className="joc-prgrid__main">
+          <Card
+            title="Checks"
+            count={pr.checks?.length}
+            aside={pr.ci === 'skipped' ? null : <CIBadge status={pr.ci} detail={pr.ciDetail} />}
+          >
+            {pr.checks?.length ? (
+              pr.checks.map((c, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: two checks can share a name
+                <CIRow key={i} status={c.status} name={c.name} time={ran(c.seconds)} />
+              ))
+            ) : pr.ci === 'skipped' ? (
+              <CardNote>No checks ran on the last commit.</CardNote>
+            ) : (
+              <CardNote>Plugins from 0.8.1 list each check. See them on GitHub.</CardNote>
+            )}
+          </Card>
+          <Card
+            title="Changed files"
+            count={pr.changedFiles}
+            aside={<DiffStat additions={pr.additions} deletions={pr.deletions} />}
+          >
+            {pr.files?.length ? (
+              pr.files.map((f) => (
+                <ChangedFile
+                  key={f.path}
+                  path={f.path}
+                  status={f.status}
+                  additions={f.additions}
+                  deletions={f.deletions}
+                  href={`${pr.url}/files`}
+                />
+              ))
+            ) : (
+              <CardNote>
+                No file list yet. Plugins from 0.6.0 send it with the pull request; see the diff on
+                GitHub.
+              </CardNote>
+            )}
+            {more > 0 ? (
+              <CardNote>
+                {more} more {more === 1 ? 'file' : 'files'} on GitHub.
+              </CardNote>
+            ) : null}
+          </Card>
         </div>
-
-        <SectionHeader title="Review" />
-        <Review pr={pr} sessions={sessions} launches={launches} />
-
-        {launches.length ? (
-          <>
-            <SectionHeader title="Reviews from JOC" count={launches.length} />
-            <ReviewList launches={launches} sessions={sessions} now={now} />
-          </>
-        ) : null}
-
-        <SectionHeader title="Changed files" count={pr.changedFiles} />
-        {pr.files?.length ? (
-          <div className="app-list">
-            <FileTree
-              items={pr.files.map((f) => ({ name: f.path, type: 'file', status: f.status }))}
-            />
-          </div>
-        ) : (
-          <EmptyState
-            compact
-            title="No file list yet"
-            body="Plugins from 0.6.0 send it with the pull request. See the diff on GitHub."
-          />
-        )}
-        {more > 0 ? (
-          <p className="app-changes__note">
-            {more} more {more === 1 ? 'file' : 'files'} on GitHub.
-          </p>
-        ) : null}
-      </>
+        <aside className="joc-prgrid__side">
+          <Card label="Review">
+            <Review pr={pr} sessions={sessions} launches={launches} />
+          </Card>
+          {launches.length ? (
+            <Card title="Reviews from JOC" count={launches.length}>
+              <ReviewList launches={launches} sessions={sessions} now={now} />
+            </Card>
+          ) : null}
+        </aside>
+      </div>
     );
   }
 
   return (
     <div className="joc-app app">
       <Nav page="github" connected={connected} />
-      <main className="joc-app__main app-page app-pr">
-        <SectionHeader
-          size="lg"
-          title={pr?.title ?? (target ? `${target.repo}#${target.number}` : 'Pull request')}
-          description={
-            pr && `${pr.repo}#${pr.number}: ${pr.branch} into ${pr.base ?? 'the default branch'}`
-          }
-        >
-          <Button variant="ghost" onClick={() => location.assign('/github')}>
-            All pull requests
-          </Button>
+      <main className="joc-app__main app-pr">
+        <div className="joc-prpage">
           {pr ? (
-            <Button variant="secondary" onClick={() => openOnGitHub(pr)}>
-              Open on GitHub
-            </Button>
-          ) : null}
-        </SectionHeader>
-        {body}
+            <PRHeader
+              back={{ label: `GitHub · ${pr.repo.split('/')[1] ?? pr.repo}`, href: '/github' }}
+              title={pr.title}
+              number={pr.number}
+              draft={pr.draft}
+              branch={pr.branch}
+              base={pr.base}
+              byline={`${pr.author} · updated ${ago(pr.updatedAt, now)}`}
+              additions={pr.additions}
+              deletions={pr.deletions}
+              review={pr.review}
+              links={
+                <>
+                  {session ? (
+                    <SessionLink
+                      title={session.title ?? UNTITLED}
+                      state={session.state}
+                      href={sessionHref(session.id)}
+                    />
+                  ) : null}
+                  <TextLink href={pr.url}>Open on GitHub</TextLink>
+                </>
+              }
+            />
+          ) : (
+            <SectionHeader
+              size="lg"
+              title={target ? `${target.repo}#${target.number}` : 'Pull request'}
+            >
+              <Button variant="ghost" onClick={() => location.assign('/github')}>
+                All pull requests
+              </Button>
+            </SectionHeader>
+          )}
+          {body}
+        </div>
       </main>
     </div>
   );

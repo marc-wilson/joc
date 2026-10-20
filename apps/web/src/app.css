@@ -74,16 +74,6 @@
   color: var(--text-secondary);
 }
 
-.app-tasks {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-}
-
-.app-tasks > :last-child {
-  border-bottom: 0;
-}
-
 /* Markdown tables in messages. The design system's .joc-md has no table styles yet; these
    belong there, so move them when it next syncs. */
 .app-md-table {
@@ -538,7 +528,7 @@
   min-width: 0;
 }
 
-/* /pr: the review form. Layout only; its parts are @joc/ui's. */
+/* /pr: the page scrolls. Layout only; its parts are @joc/ui's. */
 .app-pr {
   overflow-y: auto;
 }
@@ -548,37 +538,15 @@
   flex-shrink: 0;
 }
 
-.app-review {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--bg-raised);
-}
-
-.app-review__send {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
-
-.app-review__prompt {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1) var(--space-2);
-  min-width: 0;
-  color: var(--text-secondary);
-  overflow-wrap: anywhere;
-}
-
 .app-review__error,
 .app-launch__error {
   margin: 0;
   color: var(--ci-fail);
+}
+
+/* Under the Review button, inside its card. */
+.app-review__error {
+  padding: 0 var(--space-4) var(--space-4);
 }
 
 /* /settings: a page of the person's settings. Layout only. */
