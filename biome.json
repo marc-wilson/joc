@@ -35,7 +35,11 @@
   },
   "overrides": [
     {
-      "includes": ["packages/ui/src/styles/**", "packages/ui/src/notif.css"],
+      "includes": [
+        "packages/ui/src/styles/**",
+        "packages/ui/src/notif.css",
+        "packages/ui/src/additions.css"
+      ],
       "formatter": {
         "enabled": false
       },

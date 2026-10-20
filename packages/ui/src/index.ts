@@ -30,6 +30,8 @@ export {
   type ButtonProps,
   ChoiceField,
   type ChoiceFieldProps,
+  CollapseButton,
+  type CollapseButtonProps,
   SegmentedControl,
   type SegmentedControlProps,
   Switch,

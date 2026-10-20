@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { CIMark } from './ci.tsx';
-import { Button } from './controls.tsx';
+import { Button, CollapseButton } from './controls.tsx';
 import { cx } from './cx.ts';
 import { Icon } from './Icon.tsx';
 import { attachedHint, formatBytes, imageTypeName } from './media.ts';
@@ -345,27 +345,28 @@ export function Message({
       {time ? <span className="joc-msg__time">{time}</span> : null}
     </>
   );
-  const folded = from === 'claude' && collapsed;
-  return (
-    <div className={cx('joc-msg', `joc-msg--${from}`, folded && 'is-collapsed', 'joc-fade-in')}>
-      {from === 'claude' && onToggle ? (
-        <button
-          type="button"
-          className="joc-msg__who is-toggle"
-          aria-expanded={!collapsed}
+  if (from === 'claude' && onToggle) {
+    // The chevron sits in its own gutter, so folding never moves the text sideways.
+    return (
+      <div className={cx('joc-msg', 'joc-msg--claude', 'joc-fold', 'joc-fade-in')}>
+        <CollapseButton
+          expanded={!collapsed}
+          label={collapsed ? 'Unfold message' : 'Fold message'}
           onClick={onToggle}
-        >
-          <Icon name={collapsed ? 'chevronRight' : 'chevronDown'} size={12} />
-          {who}
-        </button>
-      ) : from === 'claude' ? (
-        <div className="joc-msg__who">{who}</div>
-      ) : null}
-      {folded ? (
-        <div className="joc-msg__preview joc-fade-in">{preview}</div>
-      ) : (
-        <div className="joc-msg__body">{children}</div>
-      )}
+        />
+        <div className="joc-fold__head">
+          <span className="joc-fold__who">Claude</span>
+          {time ? <span className="joc-fold__time">{time}</span> : null}
+          {collapsed ? <span className="joc-fold__summary joc-fade-in">{preview}</span> : null}
+        </div>
+        {collapsed ? null : <div className="joc-msg__body joc-fold__body">{children}</div>}
+      </div>
+    );
+  }
+  return (
+    <div className={cx('joc-msg', `joc-msg--${from}`, 'joc-fade-in')}>
+      {from === 'claude' ? <div className="joc-msg__who">{who}</div> : null}
+      <div className="joc-msg__body">{children}</div>
       {from === 'user' && time ? (
         <div className="joc-msg__time joc-msg__time--user">{time}</div>
       ) : null}

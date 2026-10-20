@@ -3,9 +3,9 @@
 @import "./styles/tokens.css";
 @import "./styles/components.css";
 @import "./banner.css";
-@import "./collapse.css";
 @import "./notif.css";
 @import "./pin.css";
 @import "./session-list.css";
 @import "./task-details.css";
 @import "./textarea.css";
+@import "./additions.css";
