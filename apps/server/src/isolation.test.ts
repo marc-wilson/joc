@@ -934,6 +934,7 @@ test("preferences are each owner's own, only a signed-in person's, and heard onl
       foldedGroups: [],
       listFolded: false,
       diffMode: 'unified',
+      showAllFinishedTasks: false,
       sessions: [],
     },
   });
