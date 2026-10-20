@@ -1,4 +1,10 @@
-import { IMAGE_TYPES, ImageRef, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE } from '@joc/protocol';
+import {
+  IMAGE_TYPES,
+  ImageRef,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGES_PER_MESSAGE,
+  type Session,
+} from '@joc/protocol';
 import {
   Button,
   Composer,
@@ -6,25 +12,60 @@ import {
   NewSessionButton,
   RepoGroupHeader,
   SessionHeader,
+  SessionListNote,
   SessionRail,
   SessionRow,
   TextInput,
 } from '@joc/ui';
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { apiFetch } from './auth.ts';
 import { BackgroundView } from './Background.tsx';
 import { backgroundTasks } from './background.ts';
 import { ChangesView } from './Changes.tsx';
 import { Conversation } from './Conversation.tsx';
-import { useChanges, useConversation, useNow, useSessions } from './hooks.ts';
+import {
+  useChanges,
+  useConversation,
+  useHistory,
+  useNow,
+  useSessionSettings,
+  useSessions,
+} from './hooks.ts';
 import { Nav } from './Nav.tsx';
 import { delivered, type PendingPrompt } from './pending.ts';
 import { plain } from './plain.ts';
 import { toggled, usePref } from './prefs.ts';
+import { SessionSettingsDialog } from './SessionSettings.tsx';
+import { isQuiet, keepNote, matchesFilter } from './session-list.ts';
 import { groupSessions, PINNED_GROUP } from './sessions.ts';
 import { age } from './time.ts';
 
 const UNTITLED = 'New session';
+
+const FILTER_ID = 'session-filter';
+
+/** The row's activity line: what Claude is doing, unless the session stopped reporting. */
+function activityOf(s: Session, now: number): string | undefined {
+  if (isQuiet(s, now)) return 'No word from its machine';
+  return s.activity && plain(s.activity);
+}
+
+/** `/` jumps to the session filter, unless the person is already typing somewhere. */
+function useFilterShortcut() {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const at = e.target;
+      if (at instanceof HTMLElement && (at.isContentEditable || at.closest('input, textarea'))) {
+        return;
+      }
+      e.preventDefault();
+      document.getElementById(FILTER_ID)?.focus();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+}
 
 const IMAGE_LIMITS = { types: IMAGE_TYPES, maxBytes: MAX_IMAGE_BYTES, max: MAX_IMAGES_PER_MESSAGE };
 
@@ -41,13 +82,31 @@ async function uploadImage(file: File): Promise<ImageRef | undefined> {
 }
 
 export default function App() {
-  const { sessions, connected } = useSessions();
+  const { sessions, connected, reload } = useSessions();
   const now = useNow();
   // A link like /?session=<id> (from a PR on the GitHub page) opens that session.
   const [selectedId, setSelectedId] = useState(
     () => new URLSearchParams(location.search).get('session') ?? undefined,
   );
-  const selected = sessions.find((s) => s.id === selectedId) ?? sessions[0];
+  const [filter, setFilter] = useState('');
+  const filtering = filter.trim() !== '';
+  useFilterShortcut();
+  // Sessions no longer on the live list, read once the filter has text to match them against.
+  const history = useHistory(filtering);
+  const older = filtering
+    ? (history ?? []).filter(
+        (h) => matchesFilter(h, filter) && !sessions.some((s) => s.id === h.id),
+      )
+    : [];
+  // An older session opened from the filter, kept selected after the filter clears.
+  const [opened, setOpened] = useState<Session>();
+  const shown = sessions.filter((s) => matchesFilter(s, filter));
+  const selected =
+    sessions.find((s) => s.id === selectedId) ??
+    (opened?.id === selectedId ? opened : undefined) ??
+    sessions[0];
+  const keep = useSessionSettings();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const needs = sessions.filter((s) => s.state === 'needs').length;
   const items = useConversation(selected?.id);
   const changes = useChanges(selected?.id);
@@ -63,7 +122,7 @@ export default function App() {
   const [folded, setFolded] = usePref<string[]>('joc:folded-groups', []);
   // Sessions you pinned to the top of the list, in the order you pinned them.
   const [pinned, setPinned] = usePref<string[]>('joc:pinned', []);
-  const groups = groupSessions(sessions, pinned);
+  const groups = groupSessions(shown, pinned);
   const [pending, setPending] = useState<PendingPrompt[]>([]);
   // A sent prompt shows until the session's own transcript has it.
   const waiting = pending.filter((p) => p.sessionId === selected?.id && !delivered(items, p));
@@ -117,7 +176,13 @@ export default function App() {
         ) : (
           <aside className="joc-app__side">
             <div className="app-side__filter">
-              <TextInput placeholder="Filter sessions" kbd="/" />
+              <TextInput
+                id={FILTER_ID}
+                placeholder="Filter sessions"
+                kbd="/"
+                value={filter}
+                onChange={setFilter}
+              />
               <Button
                 variant="ghost"
                 size="sm"
@@ -146,7 +211,7 @@ export default function App() {
                           title={s.title ?? UNTITLED}
                           branch={s.branch}
                           contextLeft={s.contextLeft}
-                          activity={s.activity && plain(s.activity)}
+                          activity={activityOf(s, now)}
                           time={age(s.updatedAt, now)}
                           selected={s.id === selected?.id}
                           pinned={g.id === PINNED_GROUP}
@@ -154,11 +219,58 @@ export default function App() {
                           onPinChange={(on) => setPinned(toggled(pinned, s.id, on))}
                         />
                       ))}
-                      {g.id === PINNED_GROUP ? null : <NewSessionButton repo={g.label} />}
+                      {filtering || g.id === PINNED_GROUP ? null : (
+                        <NewSessionButton repo={g.label} />
+                      )}
                     </>
                   )}
                 </Fragment>
               ))}
+              {filtering && !shown.length && history && !older.length ? (
+                <SessionListNote>No sessions match.</SessionListNote>
+              ) : null}
+              {older.length ? (
+                <>
+                  <SessionListNote>Older sessions, no longer on this list</SessionListNote>
+                  {groupSessions(older, []).map((g) => (
+                    <Fragment key={g.id}>
+                      <RepoGroupHeader repo={g.label} count={g.sessions.length} />
+                      {g.sessions.map((s) => (
+                        <SessionRow
+                          key={s.id}
+                          state={s.state}
+                          title={s.title ?? UNTITLED}
+                          branch={s.branch}
+                          contextLeft={s.contextLeft}
+                          activity={activityOf(s, now)}
+                          time={age(s.updatedAt, now)}
+                          selected={s.id === selected?.id}
+                          onSelect={() => {
+                            setOpened(s);
+                            setSelectedId(s.id);
+                          }}
+                        />
+                      ))}
+                    </Fragment>
+                  ))}
+                </>
+              ) : null}
+              {keep.settings ? (
+                <SessionListNote
+                  actions={
+                    <>
+                      <Button variant="ghost" size="sm" onClick={() => location.assign('/history')}>
+                        History
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}>
+                        Change
+                      </Button>
+                    </>
+                  }
+                >
+                  {keepNote(keep.settings)} Filter to find older ones.
+                </SessionListNote>
+              ) : null}
             </div>
           </aside>
         )}
@@ -238,6 +350,18 @@ export default function App() {
           )}
         </main>
       </div>
+      {settingsOpen && keep.settings ? (
+        <SessionSettingsDialog
+          settings={keep.settings}
+          onSave={async (next) => {
+            const ok = await keep.save(next);
+            // The person asked for a different list, so it's read afresh.
+            if (ok) reload();
+            return ok;
+          }}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
