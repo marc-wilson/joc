@@ -24,7 +24,8 @@ export interface DialogProps {
 }
 
 /**
- * A modal frame over the page. Render it to open it: it focuses its first control, keeps Tab
+ * A modal frame over the page. Render it to open it: it focuses its first text field, or else
+ * its first control, keeps Tab
  * inside, and hands focus back to whatever had it when it goes.
  */
 export function Dialog({
@@ -45,7 +46,11 @@ export function Dialog({
     if (!el) return;
     const opener = document.activeElement;
     el.showModal();
-    el.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    // A field to type in takes focus first; otherwise the first control, the close button.
+    const field = el.querySelector<HTMLElement>(
+      '.joc-dialog__body :is(textarea, input:not([type="radio"], [type="checkbox"])):not(:disabled)',
+    );
+    (field ?? el.querySelector<HTMLElement>(FOCUSABLE))?.focus();
     return () => {
       el.close();
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
