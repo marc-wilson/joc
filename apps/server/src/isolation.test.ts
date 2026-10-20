@@ -90,6 +90,7 @@ test('every API route needs an owner', async () => {
     ['GET', '/api/sessions'],
     ['GET', '/api/stream'],
     ['GET', '/api/sessions/s/messages'],
+    ['GET', '/api/sessions/s/tasks/t/messages'],
     ['GET', '/api/sessions/s/changes'],
     ['POST', '/api/reports'],
     ['POST', '/api/messages'],
@@ -168,6 +169,31 @@ test('conversations stay with their owner', async () => {
     bob.map((i) => ('text' in i ? i.text : '')),
     ['Bob only'],
   );
+});
+
+test("a subagent's steps stay with their owner and out of the conversation", async () => {
+  const step = {
+    id: 'step-1',
+    at: new Date().toISOString(),
+    kind: 'claude',
+    text: 'Alice subagent',
+    task: 'toolu_1',
+  };
+  await call('alice', '/api/messages', { sessionId: 'task-id', items: [step] });
+  await call('bob', '/api/messages', {
+    sessionId: 'task-id',
+    items: [{ ...step, text: 'Bob subagent' }],
+  });
+
+  const steps = async (who: Who) =>
+    (await read(await call(who, '/api/sessions/task-id/tasks/toolu_1/messages'), Items)).map((i) =>
+      'text' in i ? i.text : '',
+    );
+  assert.deepEqual(await steps('alice'), ['Alice subagent']);
+  assert.deepEqual(await steps('bob'), ['Bob subagent']);
+  // Neither shows in the session's own conversation.
+  assert.deepEqual(await read(await call('alice', '/api/sessions/task-id/messages'), Items), []);
+  assert.deepEqual(await read(await call('bob', '/api/sessions/task-id/messages'), Items), []);
 });
 
 test('diffs stay with their owner', async () => {

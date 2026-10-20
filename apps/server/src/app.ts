@@ -402,6 +402,11 @@ export function createApp({
     c.json(await listMessages(c.get('owner'), c.req.param('id'))),
   );
 
+  // A background subagent's own steps, from its transcript.
+  app.get('/api/sessions/:id/tasks/:task/messages', async (c) =>
+    c.json(await listMessages(c.get('owner'), c.req.param('id'), { task: c.req.param('task') })),
+  );
+
   app.post('/api/changes', async (c) => {
     const parsed = ChangesReport.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
