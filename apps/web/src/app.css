@@ -597,3 +597,23 @@
     animation: none;
   }
 }
+
+/* The session list settings: a small dialog of choices. */
+.app-settings-dialog .joc-dialog__panel {
+  max-width: calc(var(--sidebar) * 1.5);
+}
+
+.app-settings {
+  padding: var(--space-4);
+}
+
+.app-settings__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.app-settings__foot > :first-child {
+  flex: 1;
+  min-width: 0;
+}

@@ -4,7 +4,8 @@ import {
   GitHubSnapshot,
   HistorySession,
   NotificationsSnapshot,
-  type Session,
+  Session,
+  SessionSettings,
   type SessionState,
 } from '@joc/protocol';
 import { useEffect, useRef, useState } from 'react';
@@ -15,8 +16,13 @@ import { type DiffFile, parseDiff } from './diff.ts';
 import { show } from './notify.ts';
 import { subscribe } from './stream.ts';
 
-/** Live sessions, in first-seen order. */
-export function useSessions(): { sessions: Session[]; connected: boolean } {
+const Sessions = z.array(Session);
+
+/**
+ * Live sessions, in first-seen order. `reload` reads the list afresh, for when the person changed
+ * which sessions it keeps.
+ */
+export function useSessions(): { sessions: Session[]; connected: boolean; reload: () => void } {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [connected, setConnected] = useState(false);
 
@@ -38,7 +44,51 @@ export function useSessions(): { sessions: Session[]; connected: boolean } {
     [],
   );
 
-  return { sessions, connected };
+  const reload = () =>
+    apiFetch('/api/sessions')
+      .then(async (r) => {
+        if (r.ok) setSessions(Sessions.parse(await r.json()));
+      })
+      // Unreachable for now: the next reconnect snapshot has the list.
+      .catch(() => {});
+
+  return { sessions, connected, reload };
+}
+
+/** Which sessions the live list keeps, and a way to change it. Undefined until loaded. */
+export function useSessionSettings(): {
+  settings: SessionSettings | undefined;
+  save: (settings: SessionSettings) => Promise<boolean>;
+} {
+  const [settings, setSettings] = useState<SessionSettings>();
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch('/api/settings/sessions')
+      .then(async (r) => {
+        if (r.ok && !cancelled) setSettings(SessionSettings.parse(await r.json()));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function save(next: SessionSettings): Promise<boolean> {
+    try {
+      const res = await apiFetch('/api/settings/sessions', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) return false;
+      setSettings(SessionSettings.parse(await res.json()));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  return { settings, save };
 }
 
 const byTime = (a: ConversationItem, b: ConversationItem) =>
@@ -223,9 +273,10 @@ const History = z.array(HistorySession);
  * Past sessions, loaded when the page opens and again after a reconnect (the stream's snapshot),
  * but not on every update, so the list holds still while it's read.
  */
-export function useHistory(): HistorySession[] | undefined {
+export function useHistory(enabled = true): HistorySession[] | undefined {
   const [history, setHistory] = useState<HistorySession[]>();
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     const load = () =>
       apiFetch('/api/history')
@@ -242,6 +293,6 @@ export function useHistory(): HistorySession[] | undefined {
       cancelled = true;
       unsubscribe();
     };
-  }, []);
+  }, [enabled]);
   return history;
 }
