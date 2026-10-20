@@ -73,7 +73,7 @@ export {
   type ToolCallProps,
 } from './conversation.tsx';
 export { cx } from './cx.ts';
-export { Dialog, type DialogProps } from './dialog.tsx';
+export { ConfirmDialog, type ConfirmDialogProps, Dialog, type DialogProps } from './dialog.tsx';
 export {
   DiffFileHeader,
   type DiffFileHeaderProps,
@@ -122,6 +122,13 @@ export {
   type ToastProps,
 } from './layout.tsx';
 export { formatBytes, imageTypeName } from './media.ts';
+export {
+  Checkbox,
+  type CheckboxProps,
+  type MenuItem,
+  OverflowMenu,
+  type OverflowMenuProps,
+} from './menu.tsx';
 export {
   ArrivalsPill,
   type ArrivalsPillProps,
