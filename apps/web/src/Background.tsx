@@ -11,7 +11,7 @@ import { useState } from 'react';
 import { type BackgroundTask, elapsed } from './background.ts';
 import { MarkdownText, ThreadItems } from './Conversation.tsx';
 import { useConversation, useNow } from './hooks.ts';
-import { toggled } from './prefs.ts';
+import { toggled } from './toggled.ts';
 
 interface Props {
   sessionId: string;

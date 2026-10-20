@@ -1,4 +1,4 @@
-import { ConversationItem, Session } from '@joc/protocol';
+import { ConversationItem, Prefs, Session } from '@joc/protocol';
 import { z } from 'zod';
 import { checkAuth } from './auth.ts';
 
@@ -11,6 +11,7 @@ const GitHubEvent = z.object({ type: z.literal('github') });
 const NotificationsEvent = z.object({ type: z.literal('notifications') });
 const AlertsEvent = z.object({ type: z.literal('alerts') });
 const LaunchesEvent = z.object({ type: z.literal('launches') });
+const PrefsEvent = z.object({ type: z.literal('prefs'), prefs: Prefs });
 const Messages = z.object({
   type: z.literal('messages'),
   sessionId: z.string(),
@@ -26,6 +27,7 @@ export type LiveEvent =
   | z.infer<typeof NotificationsEvent>
   | z.infer<typeof AlertsEvent>
   | z.infer<typeof LaunchesEvent>
+  | z.infer<typeof PrefsEvent>
   | { type: 'status'; connected: boolean };
 
 // The server pings every 15s. A proxy can keep a connection open after the server behind it
@@ -63,6 +65,7 @@ function start(): () => void {
     on('notifications', NotificationsEvent);
     on('alerts', AlertsEvent);
     on('launches', LaunchesEvent);
+    on('prefs', PrefsEvent);
     source.addEventListener('ping', () => {
       lastMessage = Date.now();
     });

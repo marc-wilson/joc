@@ -21,41 +21,71 @@ import {
 } from './inbox.ts';
 import { sessionForThread } from './links.ts';
 import { Nav } from './Nav.tsx';
-import { alertsOn, setAlertsOn, supported } from './notify.ts';
+import { supported } from './notify.ts';
+import { updatePrefs, usePrefs } from './prefs.ts';
 import { ago } from './time.ts';
 
 type Permission = 'unsupported' | NotificationPermission;
 
-/** The one switch for browser notifications, remembered in this browser. */
-function AlertsSwitch() {
-  const [on, setOn] = useState(alertsOn);
-  const [permission, setPermission] = useState<Permission>(() =>
-    supported() ? Notification.permission : 'unsupported',
-  );
+const permissionHere = (): Permission => (supported() ? Notification.permission : 'unsupported');
 
-  async function toggle(next: boolean) {
-    const answer =
-      !next || permission === 'granted' ? permission : await Notification.requestPermission();
-    setPermission(answer);
-    const enabled = next && answer === 'granted';
-    setAlertsOn(enabled);
-    setOn(enabled);
+/**
+ * The one switch for browser notifications. The switch is the person's, wherever they sign in;
+ * whether this browser may show them is the browser's own, so it's asked here when needed.
+ */
+function AlertsSwitch() {
+  const on = usePrefs().browserNotifications;
+  const [permission, setPermission] = useState<Permission>(permissionHere);
+
+  // Allowed or blocked in the browser's own settings while the page is open.
+  useEffect(() => {
+    let status: PermissionStatus | undefined;
+    const update = () => setPermission(permissionHere());
+    navigator.permissions
+      ?.query({ name: 'notifications' })
+      .then((s) => {
+        status = s;
+        s.addEventListener('change', update);
+      })
+      .catch(() => {});
+    return () => status?.removeEventListener('change', update);
+  }, []);
+
+  async function allow() {
+    setPermission(await Notification.requestPermission());
+  }
+
+  function toggle(next: boolean) {
+    updatePrefs({ browserNotifications: next });
+    if (next && permission === 'default') void allow();
   }
 
   const hint =
     permission === 'unsupported'
       ? "This browser can't show notifications."
-      : permission === 'denied'
-        ? "Notifications are blocked for this site. Allow them in your browser's settings."
-        : undefined;
+      : !on
+        ? undefined
+        : permission === 'denied'
+          ? "On, but blocked in this browser. Allow notifications for this site in the browser's settings."
+          : permission === 'default'
+            ? "On, but this browser hasn't been allowed to show them yet."
+            : undefined;
   return (
     <Switch
       label="Browser notifications"
       description="Review requests, mentions, failing CI and sessions that need you, while JOC is open."
       hint={hint}
-      checked={on && permission === 'granted'}
-      disabled={hint !== undefined}
-      onChange={(next) => void toggle(next)}
+      checked={on}
+      // Unsupported here, it can still be turned off.
+      disabled={permission === 'unsupported' && !on}
+      action={
+        on && permission === 'default' ? (
+          <Button variant="secondary" size="sm" onClick={() => void allow()}>
+            Allow in this browser
+          </Button>
+        ) : undefined
+      }
+      onChange={toggle}
     />
   );
 }

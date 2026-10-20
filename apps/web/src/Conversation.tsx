@@ -16,7 +16,8 @@ import remarkGfm from 'remark-gfm';
 import { commandLine } from './commands.ts';
 import type { PendingPrompt } from './pending.ts';
 import { plain } from './plain.ts';
-import { toggled, usePref } from './prefs.ts';
+import { updateSessionPrefs, useSessionPrefs } from './prefs.ts';
+import { toggled } from './toggled.ts';
 
 const time = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -236,7 +237,7 @@ export function Conversation({ sessionId, items, pending, state }: Props) {
   const pinned = useRef(true);
   const [viewing, setViewing] = useState<Viewing>();
   // Claude's messages you folded, remembered per session.
-  const [folded, setFolded] = usePref<string[]>(`joc:folded-messages:${sessionId}`, []);
+  const folded = useSessionPrefs(sessionId).foldedMessages;
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -259,7 +260,12 @@ export function Conversation({ sessionId, items, pending, state }: Props) {
             items={items}
             working={state === 'working'}
             folded={folded}
-            onFold={(id) => setFolded(toggled(folded, id, !folded.includes(id)))}
+            onFold={(id) =>
+              updateSessionPrefs({
+                id: sessionId,
+                foldedMessages: toggled(folded, id, !folded.includes(id)),
+              })
+            }
             onOpen={setViewing}
           />
           {pending.map((p) => (
