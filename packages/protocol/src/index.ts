@@ -423,110 +423,105 @@ export const ClaimedPrompt = z.object({
 });
 export type ClaimedPrompt = z.infer<typeof ClaimedPrompt>;
 
-// Reviewing a pull request from the dashboard. A review is a prompt run in a real Claude Code
-// session: one already open on the repo, or a new one that a session on the repo starts beside
-// itself (`claude --bg`, in that session's folder). The server only queues; the plugin runs it.
-
-/** Claude's standard review, or the person's own skill or command. */
-export const ReviewMethod = z.enum(['standard', 'own']);
-export type ReviewMethod = z.infer<typeof ReviewMethod>;
+// Starting a new Claude Code session from the dashboard, such as one that reviews a pull
+// request. Nothing reaches into the machine: a session already running on the repo takes the
+// launch on its next poll and starts `claude --bg` in its own folder. The new session is a real
+// one; its plugin reports it like any other. The server only queues and records how it went.
 
 /** The command Claude's standard review runs, given the PR number. */
 export const STANDARD_REVIEW = '/code-review';
 
-/** The person's own review command, e.g. `/prep-pr` or `/harbor:review {pr}`. */
-export const ReviewCommand = z.string().trim().min(1).max(500);
-export type ReviewCommand = z.infer<typeof ReviewCommand>;
+/**
+ * How the person reviews a pull request: a skill or command to run (`/prep-pr`), or a prompt of
+ * their own, which can be long. Empty means Claude's standard review.
+ */
+export const ReviewInstructions = z.string().trim().max(20_000);
+export type ReviewInstructions = z.infer<typeof ReviewInstructions>;
 
 /**
- * The prompt a review sends. The standard review gets the PR number. The person's own command
- * gets `{pr}` replaced with the number and `{url}` with the PR's address; with neither, the
- * address goes after it, so the command always knows which PR.
+ * The prompt a review starts with. With no instructions, Claude's standard review of the PR
+ * number. Otherwise the instructions with `{pr}` replaced by the number and `{url}` by the PR's
+ * address; with neither, the address goes after a command, or on its own line after a prompt,
+ * so Claude always knows which PR.
  */
-export function reviewPrompt(
-  pr: { number: number; url: string },
-  method: ReviewMethod,
-  command?: string,
-): string {
-  const own = command?.trim();
-  if (method === 'standard' || !own) return `${STANDARD_REVIEW} ${pr.number}`;
-  if (!/\{pr\}|\{url\}/.test(own)) return `${own} ${pr.url}`;
-  return own.replaceAll('{pr}', String(pr.number)).replaceAll('{url}', pr.url);
+export function reviewPrompt(pr: { number: number; url: string }, instructions?: string): string {
+  const own = instructions?.trim();
+  if (!own) return `${STANDARD_REVIEW} ${pr.number}`;
+  if (/\{pr\}|\{url\}/.test(own)) {
+    return own.replaceAll('{pr}', String(pr.number)).replaceAll('{url}', pr.url);
+  }
+  const command = own.startsWith('/') && !own.includes('\n');
+  return command ? `${own} ${pr.url}` : `${own}\n\nThe pull request: ${pr.url}`;
 }
 
-/** Where a review runs: a new session started from one on the repo, or that session itself. */
-export const ReviewTarget = z.discriminatedUnion('kind', [
-  /** `from` is the live session whose plugin starts the new one, in its own folder. */
-  z.object({ kind: z.literal('new'), from: z.string().min(1).max(200) }),
-  z.object({ kind: z.literal('session'), sessionId: z.string().min(1).max(200) }),
-]);
-export type ReviewTarget = z.infer<typeof ReviewTarget>;
+/** `GET` and `PUT /api/settings/review`: the person's review instructions, if they set any. */
+export const ReviewSettings = z.object({ instructions: ReviewInstructions.optional() });
+export type ReviewSettings = z.infer<typeof ReviewSettings>;
 
-/** `POST /api/reviews`, from the dashboard. */
-export const ReviewRequest = z
-  .object({
-    repo: z.string().min(1).max(200),
-    number: z.number().int().positive(),
-    url: z.url().max(500),
-    method: ReviewMethod,
-    /** The person's own command; needed for `own`. */
-    command: ReviewCommand.optional(),
-    target: ReviewTarget,
-  })
-  .refine((r) => r.method === 'standard' || !!r.command, {
-    message: 'Your own review needs a command',
-  });
-export type ReviewRequest = z.infer<typeof ReviewRequest>;
+/** The pull request a new session reviews. */
+export const LaunchReview = z.object({
+  repo: z.string().min(1).max(200),
+  number: z.number().int().positive(),
+  url: z.url().max(500),
+});
+export type LaunchReview = z.infer<typeof LaunchReview>;
 
 /**
- * - `sent`: queued as a prompt for an open session.
- * - `starting`: waiting for the session on the repo to start the new one.
- * - `started`: the new session is running.
- * - `failed`: the new session couldn't be started; `detail` says why.
+ * `POST /api/launches`, from the dashboard: start a new session beside a running one, in its
+ * folder. With `review`, it reviews that PR with the person's review instructions (the session
+ * must be on the PR's repo); otherwise it starts with `prompt`, or with none.
  */
-export const ReviewStatus = z.enum(['sent', 'starting', 'started', 'failed']);
-export type ReviewStatus = z.infer<typeof ReviewStatus>;
+export const LaunchRequest = z.object({
+  /** The live session whose plugin starts the new one. */
+  from: z.string().min(1).max(200),
+  prompt: z.string().trim().max(20_000).optional(),
+  review: LaunchReview.optional(),
+});
+export type LaunchRequest = z.infer<typeof LaunchRequest>;
 
-/** A review asked for from the dashboard, as `GET /api/reviews` lists them for a PR. */
-export const Review = z.object({
+/**
+ * - `starting`: waiting for the session on the repo to start it.
+ * - `started`: running; `sessionId` names it once the plugin found its id.
+ * - `failed`: it couldn't be started; `detail` says why.
+ */
+export const LaunchStatus = z.enum(['starting', 'started', 'failed']);
+export type LaunchStatus = z.infer<typeof LaunchStatus>;
+
+/** A new session asked for from the dashboard, as `GET /api/launches` lists them. */
+export const Launch = z.object({
   id: z.string(),
-  repo: z.string(),
-  number: z.number().int().positive(),
-  /** The session it runs in. A new one's id is chosen up front, so it links before it starts. */
-  sessionId: z.string(),
-  /** Whether that session was started for it or was already open. */
-  kind: z.enum(['new', 'session']),
-  prompt: z.string(),
-  status: ReviewStatus,
+  /** The repo of the session it starts from, if it has one. */
+  repo: z.string().optional(),
+  /** The session whose plugin starts it. */
+  from: z.string(),
+  /** The PR it reviews. */
+  review: LaunchReview.optional(),
+  prompt: z.string().optional(),
+  status: LaunchStatus,
+  /** The new session, once started. */
+  sessionId: z.string().optional(),
   detail: z.string().optional(),
   createdAt: z.iso.datetime(),
 });
-export type Review = z.infer<typeof Review>;
-
-/** `GET` and `PUT /api/settings/review`: how the person reviews unless they choose otherwise. */
-export const ReviewSettings = z.object({
-  method: ReviewMethod,
-  /** Their own command, remembered even while the standard review is the default. */
-  command: ReviewCommand.optional(),
-});
-export type ReviewSettings = z.infer<typeof ReviewSettings>;
+export type Launch = z.infer<typeof Launch>;
 
 /**
  * A new session to start, as `POST /api/sessions/:id/launches/claim` hands it to that session's
- * plugin, which runs `claude --bg --session-id <sessionId> --name <name> <prompt>` in its folder.
+ * plugin, which runs `claude --bg [--name <name>] [-- <prompt>]` in its folder.
  */
 export const ClaimedLaunch = z.object({
   id: z.string(),
-  sessionId: z.uuid(),
-  name: z.string(),
-  prompt: z.string(),
+  name: z.string().optional(),
+  prompt: z.string().optional(),
 });
 export type ClaimedLaunch = z.infer<typeof ClaimedLaunch>;
 
 /** `POST /api/launches/:id/result`, from the plugin: whether the new session started. */
 export const LaunchResult = z.object({
   ok: z.boolean(),
-  /** Why it didn't, one line. */
+  /** The new session's id, as `claude agents` lists it. */
+  sessionId: z.uuid().optional(),
+  /** Why it didn't start, one line. */
   detail: z.string().max(500).optional(),
 });
 export type LaunchResult = z.infer<typeof LaunchResult>;
@@ -544,8 +539,8 @@ export type StreamEvent =
   | { type: 'notifications' }
   /** The person's alerts changed; fetch them from `/api/alerts`. */
   | { type: 'alerts' }
-  /** A review was asked for or changed; fetch a PR's from `/api/reviews`. */
-  | { type: 'reviews' };
+  /** A new session was asked for or changed; fetch them from `/api/launches`. */
+  | { type: 'launches' };
 
 /** A signed-in person, as the dashboard shows them. */
 export const User = z.object({
