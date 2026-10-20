@@ -12,8 +12,19 @@
 // log (problems.ts), which `/joc-status` reads on demand. The one thing it does say unasked: when
 // the server answers that this plugin is behind, a toast once per session pointing at
 // `/joc-update`, which updates it.
+//
+// It also tells the server which slash commands this session has (src/commands.ts), so the
+// dashboard's composer can suggest them: when the session starts, and again whenever the list
+// changes, such as after /reload-plugins.
 import type { MessagesReport } from '@joc/protocol';
 import type { EngineInterface, HttpResponse, ProcessRunResult, Register } from 'claude-code';
+import {
+  type DescribedCommand,
+  describedKey,
+  type ListedCommand,
+  providerOf,
+  slashCommands,
+} from './commands.ts';
 import { backgroundId, launchArgv, sessionIdFor } from './launch.ts';
 import {
   age,
@@ -72,6 +83,15 @@ const UPDATE_STEPS = [
   ['claude', 'plugin', 'update', 'joc@joc'],
 ];
 const RELOAD = 'reload-plugins';
+/** Where the session's slash commands go, for the dashboard's composer. */
+const COMMANDS_PATH = '/api/commands';
+/** `$.command.list()` answers at once; past this, the list waits for the next sync. */
+const LIST_TIMEOUT_MS = 5000;
+const COMMANDS_HTTP_TIMEOUT_MS = 10_000;
+/** Skill folders looked for in one go, past which the rest list as plain commands. */
+const MAX_SKILL_CHECKS = 200;
+/** Describe events kept; a session lists a few hundred commands, each a few times. */
+const MAX_DESCRIBED = 5000;
 
 interface Credentials {
   url: string;
@@ -599,6 +619,79 @@ async function answerFromJoc(
 /** Set once the session starts: reports the conversation a moment from now. */
 let syncSoon: (() => void) | undefined;
 
+/** Set once the session starts: reports its slash commands a moment from now, if they changed. */
+let commandsSoon: (() => void) | undefined;
+
+/** What the `command.describe` events said about each command, by provider and name. */
+const described = new Map<string, DescribedCommand>();
+
+/** The session and list last sent, so an unchanged list isn't sent again. */
+let commandsSent: string | undefined;
+
+/**
+ * Which of the project's and the user's commands are skills: those with a `SKILL.md` under
+ * `.claude/skills`, as `project\nname` / `user\nname` keys (see commands.ts).
+ */
+async function skillKeys($: EngineInterface, listed: ListedCommand[]): Promise<Set<string>> {
+  const cwd = await $.session.cwd();
+  const config = (await $.env.get('CLAUDE_CONFIG_DIR')) || (await homePath($, '.claude'));
+  const names = listed
+    .filter((c) => c.source === 'user' && /^[\w.-]+$/.test(c.name))
+    .map((c) => c.name)
+    .slice(0, MAX_SKILL_CHECKS);
+  const keys = new Set<string>();
+  const has = (path: string) => $.fs.exists(path).catch(() => false);
+  await Promise.all(
+    names.flatMap((name) => [
+      has(`${cwd}/.claude/skills/${name}/SKILL.md`).then((yes) => {
+        if (yes) keys.add(`project\n${name}`);
+      }),
+      config
+        ? has(`${config}/skills/${name}/SKILL.md`).then((yes) => {
+            if (yes) keys.add(`user\n${name}`);
+          })
+        : Promise.resolve(),
+    ]),
+  );
+  return keys;
+}
+
+/**
+ * Sends the session's slash commands to the server unless it already has this list for this
+ * session. A /clear starts a new session id, so the list goes again under it.
+ */
+async function reportCommands($: EngineInterface, note: (outcome: Outcome) => void) {
+  const timeout = $.clock.sleep(LIST_TIMEOUT_MS).then(() => undefined);
+  const listed = await Promise.race([$.command.list(), timeout]);
+  if (!listed) return;
+  const sessionId = await $.session.id();
+  const commands = slashCommands(listed, described, await skillKeys($, listed));
+  const sent = `${sessionId}\n${JSON.stringify(commands)}`;
+  if (sent === commandsSent) return;
+  const { url, headers } = await connection($);
+  let res: HttpResponse | undefined;
+  try {
+    res = await fetchWithin($, COMMANDS_HTTP_TIMEOUT_MS, `${url}${COMMANDS_PATH}`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId, at: Date.now(), commands }),
+    });
+  } catch (error) {
+    note({
+      ok: false,
+      kind: 'unreachable',
+      where: url,
+      detail: errorDetail(error),
+      at: Date.now(),
+    });
+    return;
+  }
+  // No answer in time: the next sync tries again.
+  if (!res) return;
+  note(responseOutcome({ status: res.status, body: res.text }, COMMANDS_PATH, url, Date.now()));
+  if (res.ok) commandsSent = sent;
+}
+
 const shown = (argv: readonly string[]) => argv.join(' ');
 
 /** The last line a command printed, for saying how it went. */
@@ -918,6 +1011,11 @@ export const register: Register = (on) => {
       }
     }
 
+    const sendCommands = oneAtATime(() => reportCommands($, log.note), failedIn('module'));
+    $.clock.after(2000, sendCommands);
+    commandsSoon = () => $.clock.after(1500, sendCommands);
+    $.clock.every(SYNC_MS, sendCommands);
+
     $.clock.every(POLL_MS, oneAtATime(takePrompts, failedIn('module')));
     $.clock.every(LAUNCH_POLL_MS, oneAtATime(takeLaunches, failedIn('module')));
     return result;
@@ -990,11 +1088,29 @@ export const register: Register = (on) => {
     const result = await next(e);
     try {
       syncSoon?.();
+      // A reload or a /clear changes the list or the session it's for; unchanged, nothing goes.
+      commandsSoon?.();
     } catch {
       // Reporting is best effort; the command has run either way.
     }
     return result;
   });
+  // Each command's argument hint, whether the typeahead hides it, and whose it is: what
+  // $.command.list() leaves out. Only read; the menu gets the answer from below unchanged.
+  on('command.describe', async (_$, e, next) => {
+    const result = await next(e);
+    try {
+      if (described.size >= MAX_DESCRIBED) described.clear();
+      described.set(describedKey(providerOf(e.provider.plugin), e.command), {
+        argumentHint: result.argumentHint,
+        hidden: result.isHidden,
+      });
+    } catch {
+      // A shape this module doesn't know only costs the hint.
+    }
+    return result;
+  });
+
   on('command.run', { command: 'joc-login' }, async ($, e) => ({ text: await login($, e.args) }));
   on('command.run', { command: 'joc-logout' }, async ($) => ({ text: await logout($) }));
   on('command.run', { command: 'joc-update' }, async ($) => ({ text: await update($) }));
