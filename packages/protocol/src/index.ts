@@ -23,6 +23,11 @@ export const Session = z.object({
   model: z.string().optional(),
   /** The folder the session runs in, for resuming it later. */
   cwd: z.string().optional(),
+  /**
+   * The JOC plugin version this session runs: the copy it loaded, which stays until the session
+   * reloads plugins. Unset when its plugin is too old to say.
+   */
+  plugin: z.string().optional(),
   startedAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -605,22 +610,48 @@ export const PendingDevice = z.object({
 });
 export type PendingDevice = z.infer<typeof PendingDevice>;
 
+/** A live session on a machine that still runs a plugin copy older than the one JOC expects. */
+export const StaleSession = z.object({
+  id: z.string(),
+  title: z.string().optional(),
+  repo: z.string(),
+  state: SessionState,
+  /** The plugin version the session loaded. */
+  plugin: z.string(),
+});
+export type StaleSession = z.infer<typeof StaleSession>;
+
 /** A linked machine, as `GET /api/devices` lists it. */
 export const Device = z.object({
   id: z.string(),
   name: z.string(),
   createdAt: z.iso.datetime(),
   lastSeenAt: z.iso.datetime(),
-  /** The plugin version the machine last sent; unset when it sent none or hasn't been seen. */
+  /**
+   * The plugin version the machine's latest request ran. Any of its open sessions may have sent
+   * it, so it can be an old copy a session hasn't reloaded. Unset when it sent none or hasn't
+   * been seen.
+   */
   plugin: z.string().optional(),
-  /** Its plugin is behind the one JOC expects, or is too old to say its version. */
+  /** The plugin version installed on the machine; unset when its plugins are too old to say. */
+  installed: z.string().optional(),
+  /**
+   * The machine needs the update command: its installed plugin is behind the one JOC expects.
+   * When it doesn't say what's installed, the plugin its latest request ran is (or is too old to
+   * say its version).
+   */
   outdated: z.boolean(),
+  /** Its live sessions that still run an older plugin copy: `/reload-plugins` in each fixes it. */
+  stale: z.array(StaleSession),
 });
 export type Device = z.infer<typeof Device>;
 
 // Plugin versions. The plugin names its own version (apps/plugin/.claude-plugin/plugin.json) in
-// the `x-joc-plugin` header of every request. When that's behind the version the server ships
-// with, the answer carries `x-joc-plugin-latest` with that version, so the plugin can say so.
+// the `x-joc-plugin` header of every request: the copy the session loaded. From 0.7.1 its hooks
+// also name the version installed on the machine (`joc@joc` in Claude Code's
+// installed_plugins.json) in `x-joc-plugin-installed`. When the running version is behind the
+// one the server ships with, the answer carries `x-joc-plugin-latest` with that version, so the
+// plugin can say so.
 
 /** A plugin's `version`: `major.minor.patch`, with an optional `-prerelease`. */
 export const PluginVersion = z
