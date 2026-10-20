@@ -11,6 +11,8 @@ export interface MenuItem {
   danger?: boolean;
   /** Why it can't be chosen now, shown under the label; the item is then disabled. */
   disabledReason?: string;
+  /** The current choice, in a menu that picks one: marked with a check. */
+  checked?: boolean;
   onSelect: () => void;
 }
 
@@ -20,13 +22,17 @@ export interface OverflowMenuProps {
   items: MenuItem[];
   /** The button: `sm` (24px) in headers, `md` (30px) at the end of a History row. */
   size?: 'sm' | 'md';
+  /** A picker's button shows its current choice and a chevron in place of the "more" glyph. */
+  trigger?: string;
+  /** Opens above the button, for one near the bottom of the window such as the composer's. */
+  above?: boolean;
 }
 
 /**
  * A "more" button that opens a short list of actions below it. Arrow keys move, Enter chooses,
  * Escape or a click elsewhere closes, and focus goes back to the button.
  */
-export function OverflowMenu({ label, items, size = 'sm' }: OverflowMenuProps) {
+export function OverflowMenu({ label, items, size = 'sm', trigger, above }: OverflowMenuProps) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const id = useId();
@@ -70,7 +76,7 @@ export function OverflowMenu({ label, items, size = 'sm' }: OverflowMenuProps) {
         className="joc-menu__button"
         variant="ghost"
         size={size}
-        icon="more"
+        icon={trigger ? undefined : 'more'}
         aria-label={label}
         title={label}
         aria-haspopup="menu"
@@ -78,10 +84,16 @@ export function OverflowMenu({ label, items, size = 'sm' }: OverflowMenuProps) {
         aria-controls={open ? id : undefined}
         onClick={() => setOpen(!open)}
         onKeyDown={onKeyDown}
-      />
+      >
+        {trigger ? (
+          <>
+            {trigger} <Icon name="chevronDown" size={12} />
+          </>
+        ) : null}
+      </Button>
       {open ? (
         <div
-          className="joc-menu__list"
+          className={cx('joc-menu__list', above && 'is-above')}
           role="menu"
           id={id}
           aria-label={label}
@@ -92,6 +104,7 @@ export function OverflowMenu({ label, items, size = 'sm' }: OverflowMenuProps) {
               key={item.id}
               type="button"
               role="menuitem"
+              aria-current={item.checked || undefined}
               className={cx('joc-menu__item', item.danger && 'is-danger')}
               disabled={!!item.disabledReason}
               onClick={() => {
@@ -99,7 +112,13 @@ export function OverflowMenu({ label, items, size = 'sm' }: OverflowMenuProps) {
                 item.onSelect();
               }}
             >
-              {item.icon ? <Icon name={item.icon} size={14} /> : <span />}
+              {item.checked ? (
+                <Icon name="check" size={14} />
+              ) : item.icon ? (
+                <Icon name={item.icon} size={14} />
+              ) : (
+                <span />
+              )}
               <span className="joc-menu__text">
                 <span className="joc-menu__label">{item.label}</span>
                 {item.disabledReason ? (
