@@ -3,9 +3,9 @@
 // starts `claude --bg` in its folder, then says how it went and which session it started. The
 // server only records what was asked; the new session reports itself like any other.
 import { randomUUID } from 'node:crypto';
-import { EventEmitter } from 'node:events';
 import { getDb } from '@joc/db';
 import type { ClaimedLaunch, Launch, LaunchResult, LaunchReview } from '@joc/protocol';
+import { publish } from './bus.ts';
 import type { Owner } from './owner.ts';
 
 interface LaunchDoc {
@@ -40,15 +40,8 @@ const ensureIndexes = () => {
   return indexed;
 };
 
-// Same per-owner, in-process fan-out as session updates (see sessions.ts). Only a nudge goes
-// out; each dashboard fetches the launches.
-const updates = new EventEmitter().setMaxListeners(0);
-const changed = (owner: Owner) => updates.emit(`launches:${owner}`);
-
-export function onLaunches(owner: Owner, listener: () => void): () => void {
-  updates.on(`launches:${owner}`, listener);
-  return () => updates.off(`launches:${owner}`, listener);
-}
+// Only a nudge goes out to the owner's dashboards; each fetches the launches.
+const changed = (owner: Owner) => publish(owner, { type: 'launches' });
 
 const UNCLAIMED = "The session it starts from didn't pick it up. Is it still open?";
 

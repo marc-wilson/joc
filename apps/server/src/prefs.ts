@@ -1,6 +1,5 @@
 // The owner's dashboard preferences: pins, folds, the notifications switch. Kept in the owner's
 // settings document (see settings.ts) under `prefs`, so they follow them to every browser.
-import { EventEmitter } from 'node:events';
 import { getDb } from '@joc/db';
 import {
   applyPrefsPatch,
@@ -9,6 +8,7 @@ import {
   type PrefsPatch,
   type PrefsSnapshot,
 } from '@joc/protocol';
+import { publish } from './bus.ts';
 import type { Owner } from './owner.ts';
 import { knownSessionIds } from './sessions.ts';
 
@@ -25,15 +25,6 @@ const settings = () => getDb().collection<PrefsDoc>('settings');
 
 /** Well under Mongo's 16MB document limit, with room for the other settings. */
 const MAX_PREFS_BYTES = 256 * 1024;
-
-// Same per-owner, in-process fan-out as session updates (see sessions.ts): every open tab of the
-// owner hears the new prefs.
-const updates = new EventEmitter().setMaxListeners(0);
-
-export function onPrefs(owner: Owner, listener: (prefs: Prefs) => void): () => void {
-  updates.on(`prefs:${owner}`, listener);
-  return () => updates.off(`prefs:${owner}`, listener);
-}
 
 /** A stored value from an older shape keeps what still fits, over the defaults. */
 function parse(stored: unknown): Prefs {
@@ -75,7 +66,8 @@ export async function patchPrefs(owner: Owner, patch: PrefsPatch): Promise<Prefs
         { upsert: true },
       );
       if (matchedCount + upsertedCount === 1) {
-        updates.emit(`prefs:${owner}`, next);
+        // Every open tab of the owner hears the new prefs.
+        publish(owner, { type: 'prefs', prefs: next });
         return next;
       }
     } catch (error) {

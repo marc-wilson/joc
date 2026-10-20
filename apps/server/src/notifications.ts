@@ -3,9 +3,9 @@
 // Marking read is queued: any of the owner's machines takes the queue on its next read and tells
 // GitHub through `gh`. Until GitHub agrees, the snapshot hides those threads.
 import { randomUUID } from 'node:crypto';
-import { EventEmitter } from 'node:events';
 import { getDb } from '@joc/db';
 import type { NotificationsReport, NotificationsSnapshot } from '@joc/protocol';
+import { publish } from './bus.ts';
 import type { Owner } from './owner.ts';
 
 type SnapshotDoc = Omit<NotificationsReport, 'at'> & {
@@ -38,15 +38,8 @@ const ensureIndexes = () => {
   return indexed;
 };
 
-// Same per-owner, in-process fan-out as session updates (see sessions.ts). Only a nudge goes
-// out; each dashboard fetches the snapshot.
-const updates = new EventEmitter().setMaxListeners(0);
-const changed = (owner: Owner) => updates.emit(`notifications:${owner}`);
-
-export function onNotifications(owner: Owner, listener: () => void): () => void {
-  updates.on(`notifications:${owner}`, listener);
-  return () => updates.off(`notifications:${owner}`, listener);
-}
+// Only a nudge goes out to the owner's dashboards; each fetches the snapshot.
+const changed = (owner: Owner) => publish(owner, { type: 'notifications' });
 
 /** Keeps the owner's newest report; an older one than stored is dropped. */
 export async function saveNotifications(

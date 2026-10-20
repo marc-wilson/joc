@@ -1,6 +1,6 @@
-import { EventEmitter } from 'node:events';
 import { getDb } from '@joc/db';
 import type { ConversationItem, MessagesReport } from '@joc/protocol';
+import { publish } from './bus.ts';
 import { type Owner, sessionKey } from './owner.ts';
 
 /** `_id` is `owner/sessionId:itemId`; `owner` is filtered on every read. */
@@ -13,17 +13,6 @@ const ensureIndex = () => {
   indexed ??= messages().createIndex({ owner: 1, sessionId: 1, at: 1, id: 1 });
   return indexed;
 };
-
-// Same per-owner, in-process fan-out as session updates (see sessions.ts).
-const updates = new EventEmitter().setMaxListeners(0);
-
-export function onMessages(
-  owner: Owner,
-  listener: (sessionId: string, items: ConversationItem[]) => void,
-): () => void {
-  updates.on(`messages:${owner}`, listener);
-  return () => updates.off(`messages:${owner}`, listener);
-}
 
 function toItem({ _id: _, owner: _o, sessionId: _s, ...item }: MessageDoc): ConversationItem {
   return item as ConversationItem;
@@ -65,7 +54,7 @@ export async function addMessages(
     { ordered: false },
   );
   const fresh = Object.keys(result.upsertedIds).map((i) => items[Number(i)] as ConversationItem);
-  if (fresh.length) updates.emit(`messages:${owner}`, sessionId, fresh);
+  if (fresh.length) publish(owner, { type: 'messages', sessionId, items: fresh });
   return fresh.length;
 }
 

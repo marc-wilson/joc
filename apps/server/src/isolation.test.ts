@@ -1,5 +1,6 @@
 // Cross-user isolation: two owners share one server and database, and neither may read, change
-// or hear about the other's data through any route. Runs against an in-memory MongoDB.
+// or hear about the other's data through any route. Runs against an in-memory MongoDB replica
+// set, which live updates need to reach other server processes.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { closeClient, getDb } from '@joc/db';
@@ -28,9 +29,10 @@ import {
   SessionCommands,
   SessionSettings,
 } from '@joc/protocol';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { z } from 'zod';
 import { createApp } from './app.ts';
+import { bus, createBus } from './bus.ts';
 import { claimDeletes, DELETE_WAIT_MS, listDeletes, requestDeletes } from './deletes.ts';
 import type { GitHubAuth } from './github.ts';
 import { createDeviceToken, createWebSession, signInGitHubUser } from './identity.ts';
@@ -38,14 +40,16 @@ import type { Owner } from './owner.ts';
 
 type Who = 'alice' | 'bob';
 
-let mongo: MongoMemoryServer;
+let mongo: MongoMemoryReplSet;
+/** Stops the live update streams the tests start. */
+const stopBuses = new AbortController();
 const tokens = new Map<Who, string>();
 /** Each person's browser session, for the routes only a signed-in person may use. */
 const cookies = new Map<Who, string>();
 const owners = new Map<Who, Owner>();
 
 before(async () => {
-  mongo = await MongoMemoryServer.create();
+  mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   process.env.MONGODB_URI = mongo.getUri();
   process.env.MONGODB_DB = 'joc_isolation_test';
   // Real identities: two GitHub users, each with one linked machine.
@@ -61,6 +65,7 @@ before(async () => {
 });
 
 after(async () => {
+  stopBuses.abort();
   await closeClient();
   await mongo.stop();
 });
@@ -299,9 +304,17 @@ test("prompts reach only their owner's plugin", async () => {
 });
 
 /** Reads a server-sent event stream for `ms`, while `during` runs. */
-async function listen(who: Who, during: () => Promise<void>, ms = 600): Promise<string> {
+async function listen(
+  who: Who,
+  during: () => Promise<void>,
+  ms = 600,
+  server = app,
+): Promise<string> {
   const controller = new AbortController();
-  const res = await app.request('/api/stream', { headers: auth(who), signal: controller.signal });
+  const res = await server.request('/api/stream', {
+    headers: auth(who),
+    signal: controller.signal,
+  });
   assert.equal(res.status, 200);
   const reader = res.body?.getReader();
   assert.ok(reader);
@@ -347,6 +360,52 @@ test("a live stream hears only its owner's updates", async () => {
   assert.match(heard, /event: snapshot/);
   assert.match(heard, /Alice update/);
   assert.doesNotMatch(heard, /bob-live|Bob secret|event: notifications/);
+});
+
+/** The events of one kind in a stream's text that mention `text`. */
+const events = (heard: string, type: string, text = '') =>
+  heard.split('\n\n').filter((e) => e.startsWith(`event: ${type}\n`) && e.includes(text));
+
+test("a live update reaches the owner's streams on every server process, once", async () => {
+  // This process's bus, as server A, and a second one standing in for server B in another pod.
+  const other = createBus();
+  await Promise.all([bus.start(stopBuses.signal), other.start(stopBuses.signal)]);
+  const appB = createApp({
+    github,
+    publicUrl: 'http://joc.test',
+    pluginVersion: '1.0.0',
+    bus: other,
+  });
+
+  const [onA, onB, bobOnB] = await Promise.all([
+    listen('alice', async () => {}, 1500),
+    listen('alice', async () => {}, 1500, appB),
+    listen('bob', async () => {}, 1500, appB),
+    (async () => {
+      await new Promise((r) => setTimeout(r, 300));
+      await call('alice', '/api/reports', report('alice-pods', { title: 'Alice across pods' }));
+    })(),
+  ]);
+  assert.equal(events(onA, 'session', 'alice-pods').length, 1);
+  assert.equal(events(onB, 'session', 'alice-pods').length, 1);
+  assert.doesNotMatch(bobOnB, /alice-pods|Alice across pods/);
+});
+
+test('a stream that may have missed updates from another server process reloads', async () => {
+  await bus.start(stopBuses.signal);
+  const [alice, bob] = await Promise.all([
+    listen('alice', async () => {}, 1000),
+    listen('bob', async () => {}, 1000),
+    (async () => {
+      await new Promise((r) => setTimeout(r, 300));
+      // From another process, too big to pass on: Alice's browsers reload instead.
+      await getDb()
+        .collection('events')
+        .insertOne({ owner: owners.get('alice'), origin: 'another-pod', at: new Date() });
+    })(),
+  ]);
+  assert.equal(events(alice, 'snapshot').length, 2);
+  assert.equal(events(bob, 'snapshot').length, 1);
 });
 
 const pr = (title: string) => ({
