@@ -1,9 +1,17 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { CIMark } from './ci.tsx';
+import { CommandList } from './cmdlist.tsx';
 import { Button, CollapseButton } from './controls.tsx';
 import { cx } from './cx.ts';
 import { Icon } from './Icon.tsx';
 import { attachedHint, formatBytes, imageTypeName } from './media.ts';
+import {
+  type CommandsStatus,
+  type ComposerSuggestion,
+  matchSuggestions,
+  type SuggestionRow,
+  slashQuery,
+} from './slash.ts';
 import { StateDot } from './state.tsx';
 import { ImageViewer } from './viewer.tsx';
 
@@ -33,11 +41,6 @@ export function SlashPill({ command, arg, removable, onRemove }: SlashPillProps)
   );
 }
 
-export interface ComposerSuggestion {
-  command: string;
-  description: string;
-}
-
 /** Which pasted images the composer takes. Without it, pasting an image does nothing. */
 export interface ComposerImageLimits {
   /** MIME types, e.g. `image/png`. */
@@ -55,28 +58,30 @@ interface Pasted {
 export interface ComposerProps {
   value?: string;
   placeholder?: string;
+  /** The session's slash commands, suggested as you type `/`. */
   suggestions?: ComposerSuggestion[];
-  query?: string;
-  activeIndex?: number;
-  command?: string;
+  /** Whether `suggestions` holds the session's own commands yet, or the session is offline. */
+  commandsStatus?: CommandsStatus;
   working?: boolean;
   disabled?: boolean;
   hint?: ReactNode;
   /** Lets images be pasted in, within these limits. */
   imageLimits?: ComposerImageLimits;
   /** Called with the trimmed text and any pasted images on Enter or the send button; the box
-   * then clears. */
+   * then clears. A picked command leads the text: `/name args`. */
   onSubmit?: (text: string, images: File[]) => void;
 }
 
-/** The message box. `value` is its starting text; once typed in, the box owns its text. */
+/**
+ * The message box. `value` is its starting text; once typed in, the box owns its text. Typing
+ * `/` opens the session's slash commands above it (CommandList); picking one makes it a pill,
+ * with its arguments hinted until you type them.
+ */
 export function Composer({
   value,
   placeholder = 'Message Claude — / for commands',
   suggestions = [],
-  query = '',
-  activeIndex = 0,
-  command,
+  commandsStatus = 'ready',
   working,
   disabled,
   hint,
@@ -88,6 +93,31 @@ export function Composer({
   const [images, setImages] = useState<Pasted[]>([]);
   const [notice, setNotice] = useState<string>();
   const [viewing, setViewing] = useState<number>();
+  // The slash command list: what's typed, the command picked, the highlighted row, and whether
+  // it was closed (Esc, blur) while a command is still being typed.
+  const [text, setText] = useState(value ?? '');
+  const [picked, setPicked] = useState<SuggestionRow>();
+  const [active, setActive] = useState(0);
+  const [closed, setClosed] = useState(true);
+  const composer = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  const optionId = (i: number) => `${listId}-${i}`;
+
+  const query = picked ? undefined : slashQuery(text);
+  const open = query !== undefined && !closed;
+  const rows = open ? matchSuggestions(suggestions, query) : [];
+  const current = Math.max(0, Math.min(active, rows.length - 1));
+  const offline = commandsStatus === 'offline';
+
+  // A click anywhere else closes the list, as a blur does.
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      if (!composer.current?.contains(e.target as Node)) setClosed(true);
+    };
+    document.addEventListener('mousedown', away);
+    return () => document.removeEventListener('mousedown', away);
+  }, [open]);
 
   // Previews hold object URLs; free whatever is left when the composer goes.
   const shown = useRef(images);
@@ -128,12 +158,42 @@ export function Composer({
   const attached =
     images.length && imageLimits ? attachedHint(images.length, imageLimits.max, !empty) : '';
 
+  /** Puts `content` in the box with the caret at its end. */
+  function setBox(content: string) {
+    const el = box.current;
+    if (!el) return;
+    el.textContent = content;
+    setText(content);
+    setEmpty(!content.trim());
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
+  function pick(row: SuggestionRow) {
+    setPicked(row);
+    setActive(0);
+    setBox('');
+  }
+
+  function unpick(restore: string) {
+    setPicked(undefined);
+    setActive(0);
+    setClosed(false);
+    setBox(restore);
+  }
+
   function submit() {
     const el = box.current;
-    const text = el?.innerText.trim() ?? '';
-    if (!el || (!text && !images.length) || disabled || !onSubmit) return;
+    const typed = el?.innerText.trim() ?? '';
+    const line = picked ? `/${picked.insert}${typed ? ` ${typed}` : ''}` : typed;
+    if (!el || (!line && !images.length) || disabled || !onSubmit) return;
     onSubmit(
-      text,
+      line,
       images.map((p) => p.file),
     );
     for (const p of images) URL.revokeObjectURL(p.url);
@@ -142,11 +202,74 @@ export function Composer({
     setNotice(undefined);
     el.textContent = '';
     setEmpty(true);
+    setText('');
+    setPicked(undefined);
+    setActive(0);
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    // Leave every key alone while an IME composes.
+    if (e.nativeEvent.isComposing) return;
+    if (open && !offline && rows.length) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const step = e.key === 'ArrowDown' ? 1 : -1;
+        setActive((current + step + rows.length) % rows.length);
+        return;
+      }
+      const row = rows[current];
+      if (row && (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey))) {
+        e.preventDefault();
+        pick(row);
+        return;
+      }
+    }
+    if (open && e.key === 'Escape') {
+      e.preventDefault();
+      setClosed(true);
+      return;
+    }
+    if (e.key === 'Backspace' && picked && !e.currentTarget.innerText) {
+      e.preventDefault();
+      unpick(`/${picked.shown}`);
+      return;
+    }
+    // Enter sends, Shift+Enter is a new line.
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submit();
+    }
+  }
+
+  const argHint = picked?.command.args;
+  let barHint: ReactNode;
+  if (picked && argHint && empty) {
+    barHint = (
+      <span className="joc-arghint">
+        <code>/{picked.shown}</code>
+        <code>{argHint}</code>
+        <span>{picked.command.description}</span>
+      </span>
+    );
+  } else if (picked) {
+    barHint = (
+      <>
+        <kbd className="joc-kbd">↵</kbd> run <kbd className="joc-kbd">⇧↵</kbd> newline
+      </>
+    );
+  } else {
+    barHint = (
+      <>
+        <kbd className="joc-kbd">↵</kbd> send <kbd className="joc-kbd">⇧↵</kbd> newline{' '}
+        <kbd className="joc-kbd">/</kbd> commands
+      </>
+    );
   }
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: dropping images is a shortcut for pasting them
     <div
+      ref={composer}
       className={cx('joc-composer', disabled && 'is-disabled')}
       onDragOver={(e) => {
         if (imageLimits && !disabled && e.dataTransfer.types.includes('Files')) e.preventDefault();
@@ -157,29 +280,17 @@ export function Composer({
         addImages([...e.dataTransfer.files].filter((f) => f.type.startsWith('image/')));
       }}
     >
-      {suggestions.length ? (
-        <div className="joc-suggest" role="listbox" aria-label="Slash commands">
-          <div className="joc-suggest__head">Commands</div>
-          {suggestions.map((s, i) => {
-            const on = i === activeIndex;
-            return (
-              <div
-                key={s.command}
-                role="option"
-                aria-selected={on}
-                tabIndex={-1}
-                className={cx('joc-suggest__item', on && 'is-active')}
-              >
-                <span className="joc-suggest__cmd">
-                  <mark>/{query}</mark>
-                  {s.command.replace(/^\//, '').slice(query.length)}
-                </span>
-                <span className="joc-suggest__desc">{s.description}</span>
-                {on ? <kbd className="joc-kbd">↵</kbd> : null}
-              </div>
-            );
-          })}
-        </div>
+      {open ? (
+        <CommandList
+          id={listId}
+          rows={offline ? [] : rows}
+          active={current}
+          typed={text}
+          status={commandsStatus}
+          optionId={optionId}
+          onActive={setActive}
+          onPick={pick}
+        />
       ) : null}
       {images.length ? (
         <ul className="joc-composer__tray" aria-label="Attached images">
@@ -210,26 +321,37 @@ export function Composer({
         />
       ) : null}
       <div className="joc-composer__box">
-        {command ? <SlashPill command={command} removable /> : null}
-        {/* biome-ignore lint/a11y/useSemanticElements: contentEditable so the input can grow and hold rich content */}
+        {picked ? (
+          <SlashPill command={picked.shown} removable={!disabled} onRemove={() => unpick('/')} />
+        ) : null}
         <div
           ref={box}
-          className={cx('joc-composer__text', empty && 'is-empty')}
+          className={cx('joc-composer__text', empty && 'is-empty', argHint && 'has-args')}
           contentEditable={!disabled}
           suppressContentEditableWarning
-          data-placeholder={placeholder}
-          role="textbox"
-          tabIndex={0}
-          aria-multiline="true"
+          data-placeholder={picked ? argHint || 'Add a note, or press ↵ to run' : placeholder}
+          role="combobox"
+          tabIndex={disabled ? -1 : 0}
           aria-label="Message Claude"
-          onInput={(e) => setEmpty(!e.currentTarget.innerText.trim())}
-          onKeyDown={(e) => {
-            // Enter sends, Shift+Enter is a new line; leave Enter alone while an IME composes.
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              submit();
-            }
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-haspopup="listbox"
+          aria-activedescendant={open && !offline && rows.length ? optionId(current) : undefined}
+          aria-disabled={disabled || undefined}
+          onInput={(e) => {
+            const now = e.currentTarget.innerText;
+            setEmpty(!now.trim());
+            setText(now);
+            setActive(0);
+            setClosed(false);
           }}
+          onFocus={() => setClosed(false)}
+          onBlur={() => {
+            // Going offline takes the focus; the list then says why it has no rows.
+            if (!disabled) setClosed(true);
+          }}
+          onKeyDown={onKeyDown}
           onPaste={(e) => {
             // Paste as plain text, never the source's formatting; images go above the text.
             e.preventDefault();
@@ -243,13 +365,7 @@ export function Composer({
         </div>
       </div>
       <div className="joc-composer__bar">
-        <span className="joc-composer__hint">
-          {notice || attached || hint || (
-            <>
-              <kbd className="joc-kbd">↵</kbd> send <kbd className="joc-kbd">⇧↵</kbd> newline
-            </>
-          )}
-        </span>
+        <span className="joc-composer__hint">{notice || attached || hint || barHint}</span>
         {working ? (
           <Button variant="secondary" size="sm" icon="stop">
             Stop
@@ -259,7 +375,7 @@ export function Composer({
           variant="primary"
           size="sm"
           icon="send"
-          disabled={disabled || (empty && !images.length)}
+          disabled={disabled || (empty && !images.length && !picked)}
           aria-label="Send"
           onClick={submit}
         />
