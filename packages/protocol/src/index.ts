@@ -817,6 +817,71 @@ export const DeleteResult = z.object({
 });
 export type DeleteResult = z.infer<typeof DeleteResult>;
 
+// Resuming an ended session from the dashboard. Nothing reaches into the machine: the server
+// queues the resume for a machine, and a session running there takes it on its next poll,
+// checks Claude Code no longer runs the session and still has its transcript, and runs
+// `claude --bg --resume <id>` in the session's folder. The session keeps its id, so it comes
+// back as the same row once its plugin reports again.
+
+/** `POST /api/resumes`, from the dashboard: resume this ended session, on its machine or another. */
+export const ResumeRequest = z.object({
+  sessionId: ClaudeSessionId,
+  /** The machine to resume it on; the one it ran on when left out. */
+  machine: z.string().min(1).max(200).optional(),
+});
+export type ResumeRequest = z.infer<typeof ResumeRequest>;
+
+/**
+ * - `waiting`: for a running session on the machine to take it.
+ * - `starting`: a plugin there took it and runs `claude --resume`.
+ * - `started`: Claude Code runs it again; it's back once its plugin reports.
+ * - `failed`: it didn't start; `detail` says why.
+ * - `cancelled`: withdrawn from the dashboard before a machine took it.
+ */
+export const ResumeStatus = z.enum(['waiting', 'starting', 'started', 'failed', 'cancelled']);
+export type ResumeStatus = z.infer<typeof ResumeStatus>;
+
+/** A resume asked for from the dashboard, as `GET /api/resumes` lists them. */
+export const Resume = z.object({
+  id: z.string(),
+  sessionId: z.string(),
+  /** The machine it resumes on. */
+  machine: z.string(),
+  status: ResumeStatus,
+  /** Why it failed, short and lower case: "session file not found". */
+  reason: z.string().optional(),
+  /** The one fact that helps fix it: the missing path, the last line Claude Code printed. */
+  detail: z.string().optional(),
+  createdAt: z.iso.datetime(),
+  /** When Claude Code started it again. */
+  startedAt: z.iso.datetime().optional(),
+});
+export type Resume = z.infer<typeof Resume>;
+
+/** `POST /api/resumes/claim`, a machine's plugin: the resumes waiting for this machine. */
+export const ResumeClaim = z.object({ machine: z.string().min(1).max(200) });
+export type ResumeClaim = z.infer<typeof ResumeClaim>;
+
+/** A session to resume, as the claim hands it to the plugin: in its own folder. */
+export const ClaimedResume = z.object({
+  id: z.string(),
+  sessionId: ClaudeSessionId,
+  cwd: z.string().optional(),
+});
+export type ClaimedResume = z.infer<typeof ClaimedResume>;
+
+export const ClaimedResumes = z.object({ resumes: z.array(ClaimedResume) });
+export type ClaimedResumes = z.infer<typeof ClaimedResumes>;
+
+/** `POST /api/resumes/:id/result`, from the plugin: whether Claude Code runs the session again. */
+export const ResumeResult = z.object({
+  ok: z.boolean(),
+  /** Why it didn't, short and lower case: "session file not found", "claude exited with code 1". */
+  reason: z.string().max(200).optional(),
+  detail: z.string().max(1000).optional(),
+});
+export type ResumeResult = z.infer<typeof ResumeResult>;
+
 /** Server-sent events on `GET /api/stream`. */
 export type StreamEvent =
   | { type: 'snapshot'; sessions: Session[] }
@@ -838,6 +903,8 @@ export type StreamEvent =
   | { type: 'deletes' }
   /** The session was deleted: it's gone from the machine and from JOC. */
   | { type: 'deleted'; sessionId: string }
+  /** A resume was asked for or changed; fetch them from `/api/resumes`. */
+  | { type: 'resumes' }
   /** The person's preferences changed, maybe in another tab. */
   | { type: 'prefs'; prefs: Prefs };
 
