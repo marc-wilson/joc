@@ -9,6 +9,7 @@ import {
   DeviceTokenRequest,
   GitHubReport,
   ImageId,
+  LaunchResult,
   MAX_IMAGE_BYTES,
   MarkReadRequest,
   MessagesReport,
@@ -17,6 +18,9 @@ import {
   ProblemsReport,
   PromptRequest,
   type ReadsClaim,
+  ReviewRequest,
+  ReviewSettings,
+  reviewPrompt,
   type ServerVersion,
   SessionReport,
   SessionSettings,
@@ -68,9 +72,21 @@ import { type Owner, ownerFrom } from './owner.ts';
 import { listProblems, saveProblems } from './problems.ts';
 import { claimPrompts, queuePrompt } from './prompts.ts';
 import { RateLimit } from './rate-limit.ts';
+import { claimLaunches, createReview, finishLaunch, listReviews, onReviews } from './reviews.ts';
 import { newSecret, secretsEqual } from './secrets.ts';
-import { applyReport, listHistory, listSessions, onSessionUpdate } from './sessions.ts';
-import { getSessionSettings, saveSessionSettings } from './settings.ts';
+import {
+  applyReport,
+  getLiveSession,
+  listHistory,
+  listSessions,
+  onSessionUpdate,
+} from './sessions.ts';
+import {
+  getReviewSettings,
+  getSessionSettings,
+  saveReviewSettings,
+  saveSessionSettings,
+} from './settings.ts';
 import { isBehind, LATEST_HEADER, PLUGIN_HEADER } from './version.ts';
 
 export interface AppOptions {
@@ -417,6 +433,62 @@ export function createApp({
     c.json({ prompts: await claimPrompts(c.get('owner'), c.req.param('id')) }),
   );
 
+  // ── Reviewing a pull request in a session ──────────────────────────────────
+
+  app.get('/api/reviews', async (c) => {
+    const number = Number(c.req.query('number'));
+    const repo = c.req.query('repo');
+    if (!repo || !Number.isInteger(number) || number < 1) {
+      return c.json({ error: 'Name the PR with repo and number' }, 400);
+    }
+    return c.json(await listReviews(c.get('owner'), repo, number));
+  });
+
+  // From the dashboard: run a review in an open session on the PR's repo, or in a new session
+  // that one starts.
+  app.post('/api/reviews', async (c) => {
+    const owner = c.get('owner');
+    const parsed = ReviewRequest.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    const { target, ...pr } = parsed.data;
+    // Only the owner's own live session, and one on the PR's repo: the review needs a checkout.
+    const session = await getLiveSession(
+      owner,
+      target.kind === 'new' ? target.from : target.sessionId,
+    );
+    if (!session) return c.json({ error: 'No such live session' }, 400);
+    if (session.repo !== pr.repo) {
+      return c.json({ error: `That session isn't on ${pr.repo}` }, 400);
+    }
+    if (session.state === 'offline') return c.json({ error: 'That session is offline' }, 400);
+    const prompt = reviewPrompt(pr, pr.method, pr.command);
+    return c.json(await createReview(owner, pr, prompt, target), 201);
+  });
+
+  app.get('/api/settings/review', async (c) => c.json(await getReviewSettings(c.get('owner'))));
+
+  app.put('/api/settings/review', async (c) => {
+    const parsed = ReviewSettings.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    await saveReviewSettings(c.get('owner'), parsed.data);
+    return c.json(parsed.data);
+  });
+
+  // From a session's plugin: the new sessions to start beside it. A browser can't start one.
+  app.post('/api/sessions/:id/launches/claim', async (c) => {
+    if (c.get('via') === 'session') return c.json({ error: 'Forbidden' }, 403);
+    return c.json({ launches: await claimLaunches(c.get('owner'), c.req.param('id')) });
+  });
+
+  app.post('/api/launches/:id/result', async (c) => {
+    if (c.get('via') === 'session') return c.json({ error: 'Forbidden' }, 403);
+    const parsed = LaunchResult.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    return (await finishLaunch(c.get('owner'), c.req.param('id'), parsed.data))
+      ? c.body(null, 204)
+      : c.json({ error: 'No such launch' }, 404);
+  });
+
   // ── Images: pasted in the dashboard, or in a session's conversation ─────────
 
   // The raw bytes, with their type as the Content-Type. Named by the hash of the bytes.
@@ -475,6 +547,7 @@ export function createApp({
           onGitHub(owner, () => publish({ type: 'github' })),
           onNotifications(owner, () => publish({ type: 'notifications' })),
           onAlerts(owner, () => publish({ type: 'alerts' })),
+          onReviews(owner, () => publish({ type: 'reviews' })),
         ];
         const unsubscribeAll = () => {
           for (const unsubscribe of unsubscribers) unsubscribe();

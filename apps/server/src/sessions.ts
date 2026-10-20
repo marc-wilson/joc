@@ -96,6 +96,20 @@ export async function listSessions(owner: Owner, now = Date.now()): Promise<Sess
   return docs.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).map(toSession);
 }
 
+/** One of the owner's live sessions, or undefined when they have no such live session. */
+export async function getLiveSession(
+  owner: Owner,
+  sessionId: string,
+  now = Date.now(),
+): Promise<Session | undefined> {
+  const { quiet } = await getSessionSettings(owner);
+  const doc = await sessions().findOne({
+    _id: sessionKey(owner, sessionId),
+    ...activeWithin(quiet, now),
+  });
+  return doc ? toSession(doc) : undefined;
+}
+
 /** Every session the owner has had, most recently active first, with message counts. */
 export async function listHistory(owner: Owner, limit = 200): Promise<HistorySession[]> {
   const docs = await sessions().find({ owner }).sort({ updatedAt: -1 }).limit(limit).toArray();

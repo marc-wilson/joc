@@ -1,13 +1,14 @@
 // The owner's dashboard settings. One document per owner; an owner who never saved any gets the
-// defaults from @joc/protocol.
+// defaults.
 import { getDb } from '@joc/db';
-import { DEFAULT_SESSION_SETTINGS, SessionSettings } from '@joc/protocol';
+import { DEFAULT_SESSION_SETTINGS, type ReviewSettings, SessionSettings } from '@joc/protocol';
 import type { Owner } from './owner.ts';
 
 interface SettingsDoc {
   /** The owner. */
   _id: string;
   sessions?: SessionSettings;
+  review?: ReviewSettings;
   updatedAt: Date;
 }
 
@@ -25,6 +26,21 @@ export async function saveSessionSettings(owner: Owner, value: SessionSettings):
   await settings().updateOne(
     { _id: owner },
     { $set: { sessions: value, updatedAt: new Date() } },
+    { upsert: true },
+  );
+}
+
+/** Claude's standard review until the person picks their own. */
+const DEFAULT_REVIEW: ReviewSettings = { method: 'standard' };
+
+export async function getReviewSettings(owner: Owner): Promise<ReviewSettings> {
+  return (await settings().findOne({ _id: owner }))?.review ?? DEFAULT_REVIEW;
+}
+
+export async function saveReviewSettings(owner: Owner, review: ReviewSettings): Promise<void> {
+  await settings().updateOne(
+    { _id: owner },
+    { $set: { review, updatedAt: new Date() } },
     { upsert: true },
   );
 }
