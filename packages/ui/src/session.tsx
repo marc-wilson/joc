@@ -301,3 +301,19 @@ export function SessionRail({ groups, peek, onExpand, onSelect }: SessionRailPro
     </nav>
   );
 }
+
+export interface SessionListNoteProps {
+  children: ReactNode;
+  /** Small buttons or links after the text. */
+  actions?: ReactNode;
+}
+
+/** A quiet line in the session list: a section label, or what the list leaves out and why. */
+export function SessionListNote({ children, actions }: SessionListNoteProps) {
+  return (
+    <div className="joc-slnote">
+      <span className="joc-slnote__text">{children}</span>
+      {actions ? <span className="joc-slnote__actions">{actions}</span> : null}
+    </div>
+  );
+}
