@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { CIMark } from './ci.tsx';
 import { Button, CollapseButton } from './controls.tsx';
 import { cx } from './cx.ts';
@@ -380,47 +380,110 @@ export interface QuestionOption {
 }
 
 export interface QuestionCardProps {
-  question: string;
+  /** The question; a command or path goes in as `Code`. */
+  question: ReactNode;
+  /** Its accessible name, when `question` isn't plain text. */
+  label?: string;
   options: QuestionOption[];
   header?: string;
   selected?: number;
   otherValue?: string;
   multi?: boolean;
+  /** An "Other" free-text answer, last. On by default; off for a yes-or-no such as a permission. */
+  other?: boolean;
   answered?: boolean;
+  /**
+   * Makes the card answerable: Send answer hands over the chosen label, the chosen labels joined
+   * by `, ` (multi), or the words typed under Other. Keys 1–9 choose while focus is in the card.
+   */
+  onAnswer?: (answer: string) => void;
+  /** Sending: the controls hold still and Send waits. */
+  busy?: boolean;
+  /** One line in the foot in place of the key hint: "Sending…", "Answered in Claude Code". */
+  status?: ReactNode;
+  /** The send button's label; "Send answer" by default. */
+  sendLabel?: string;
 }
 
 /** Claude's multiple-choice question, with an "Other" free-text answer always last. */
 export function QuestionCard({
   question,
+  label,
   options,
   header,
   selected,
   otherValue,
   multi,
+  other = true,
   answered,
+  onAnswer,
+  busy,
+  status,
+  sendLabel = 'Send answer',
 }: QuestionCardProps) {
-  const [current, setCurrent] = useState<number | null>(selected ?? null);
+  const [chosen, setChosen] = useState<number[]>(selected == null ? [] : [selected]);
+  const [typed, setTyped] = useState(otherValue ?? '');
   const name = useId();
-  const all = [...options.map((o) => ({ ...o, other: false })), { label: 'Other', other: true }];
+  const all = [
+    ...options.map((o) => ({ ...o, other: false })),
+    ...(other ? [{ label: 'Other', other: true }] : []),
+  ];
+  const otherAt = other ? all.length - 1 : -1;
+  const locked = answered || busy;
+  const choose = (i: number) => {
+    if (locked || i < 0 || i >= all.length) return;
+    setChosen((was) =>
+      multi ? (was.includes(i) ? was.filter((n) => n !== i) : [...was, i].sort()) : [i],
+    );
+  };
+  const words = typed.trim();
+  const answer = chosen
+    .map((i) => (i === otherAt ? words : all[i]?.label))
+    .filter(Boolean)
+    .join(', ');
+  const ready = !!answer && !(chosen.includes(otherAt) && !words);
+
+  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    // Typing under Other is words, not keys.
+    if ((e.target as HTMLElement).matches('.joc-q__other')) {
+      if (e.key === 'Enter' && ready && onAnswer && !locked) {
+        e.preventDefault();
+        onAnswer(answer);
+      }
+      return;
+    }
+    if (!/^[1-9]$/.test(e.key) || Number(e.key) > all.length) return;
+    e.preventDefault();
+    const i = Number(e.key) - 1;
+    choose(i);
+    if (i === otherAt) e.currentTarget.querySelector<HTMLInputElement>('.joc-q__other')?.focus();
+  }
+
   return (
     // biome-ignore lint/a11y/useSemanticElements: styled card; a fieldset's legend layout fights the design
-    <div className={cx('joc-q', answered && 'is-answered')} role="group" aria-label={question}>
+    <div
+      className={cx('joc-q', answered && 'is-answered')}
+      role="group"
+      aria-label={label ?? (typeof question === 'string' ? question : undefined)}
+      onKeyDown={onAnswer ? onKeyDown : undefined}
+    >
       <div className="joc-q__head">
         <StateDot state="needs" />
         <span>{answered ? 'You answered' : header || 'Claude is asking'}</span>
       </div>
       <div className="joc-q__prompt">{question}</div>
-      <div className="joc-q__opts" role="radiogroup">
+      <div className="joc-q__opts" role={multi ? undefined : 'radiogroup'}>
         {all.map((o, i) => {
-          const on = current === i;
+          const on = chosen.includes(i);
           return (
             <label key={o.label} className={cx('joc-q__opt', on && 'is-on', o.other && 'is-other')}>
               <input
                 type={multi ? 'checkbox' : 'radio'}
                 name={name}
                 checked={on}
-                disabled={answered}
-                onChange={() => setCurrent(i)}
+                disabled={locked}
+                onChange={() => choose(i)}
               />
               <span className="joc-q__key">{i + 1}</span>
               <span className="joc-q__text">
@@ -432,9 +495,13 @@ export function QuestionCard({
                   <input
                     className="joc-q__other"
                     placeholder="Type your own answer…"
-                    defaultValue={otherValue}
-                    disabled={answered}
-                    onFocus={() => setCurrent(i)}
+                    aria-label="Your own answer"
+                    value={typed}
+                    disabled={locked}
+                    onChange={(e) => setTyped(e.target.value)}
+                    onFocus={() => {
+                      if (!chosen.includes(i)) choose(i);
+                    }}
                   />
                 ) : null}
               </span>
@@ -443,9 +510,16 @@ export function QuestionCard({
         })}
       </div>
       <div className="joc-q__foot">
-        <span className="joc-q__hint">Press 1–{all.length} to choose</span>
-        <Button variant="primary" size="sm" disabled={current == null || answered}>
-          {answered ? 'Answered' : 'Send answer'}
+        <span className="joc-q__hint" aria-live="polite">
+          {status ?? `Press 1–${all.length} to choose`}
+        </span>
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={!ready || locked}
+          onClick={onAnswer ? () => onAnswer(answer) : undefined}
+        >
+          {answered ? 'Answered' : busy ? 'Sending…' : sendLabel}
         </Button>
       </div>
     </div>

@@ -136,6 +136,8 @@ export interface ToastProps {
   action?: string;
   onAction?: () => void;
   onDismiss?: () => void;
+  /** A needs toast's answers (NeedsAnswers), under its body. */
+  answers?: ReactNode;
   /**
    * Stays until acted on or dismissed. Defaults to true for `needs`; otherwise the toast calls
    * `onDismiss` after TOAST_MS, paused while the pointer or focus is on it.
@@ -150,6 +152,7 @@ export function Toast({
   action,
   onAction,
   onDismiss,
+  answers,
   persist = tone === 'needs',
 }: ToastProps) {
   const [held, setHeld] = useState(false);
@@ -187,6 +190,7 @@ export function Toast({
       <div className="joc-toast__text">
         <div className="joc-toast__title">{title}</div>
         {body ? <div className="joc-toast__body">{body}</div> : null}
+        {answers ? <div className="jn-answers">{answers}</div> : null}
       </div>
       {action ? (
         <Button variant={tone === 'needs' ? 'primary' : 'ghost'} size="sm" onClick={onAction}>

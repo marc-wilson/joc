@@ -53,7 +53,7 @@ export interface NotificationPanelProps {
 /**
  * The notifications popover, under the nav bar's bell: never a page of its own. It fades in,
  * takes focus, and closes on Escape or a press outside it. Keys: ↑ ↓ move between rows, Enter
- * runs a row's action, e marks it read, Backspace clears it.
+ * runs a row's action, e marks it read, Backspace clears it, 1–9 pick a needs row's answer.
  */
 export function NotificationPanel({
   id,
@@ -125,7 +125,10 @@ export function NotificationPanel({
     if (e.key === 'Enter') press(target, 'action');
     else if (e.key === 'e') press(target, 'read');
     else if (e.key === 'Backspace') press(target, 'clear');
-    else return;
+    else if (/^[1-9]$/.test(e.key)) {
+      // A needs row's numbered answer.
+      target.querySelector<HTMLElement>(`[data-answer="${e.key}"]:not(:disabled)`)?.click();
+    } else return;
     e.preventDefault();
   }
 
@@ -357,6 +360,83 @@ export function NotificationRow({
         </div>
       ) : null}
     </article>
+  );
+}
+
+export interface NeedsAnswersProps {
+  /** A question's options, numbered 1–9 in order; `mono` for a value such as a domain or path. */
+  options?: { label: string; mono?: boolean }[];
+  onPick?: (index: number) => void;
+  /** "Other…": a free-text answer, given where there's room for one (the session's QuestionCard). */
+  onOther?: () => void;
+  /** Its label: "Other…" by default, "Answer…" when there are no options to pick. */
+  otherLabel?: string;
+  /** A permission request: Allow once and Deny. Never a rule for later calls. */
+  onAllow?: () => void;
+  onDeny?: () => void;
+  /** Sending, or sent: the answers hold still. */
+  busy?: boolean;
+  /** One line in place of the answers: "Sending…", "Answered in Claude Code". */
+  status?: ReactNode;
+}
+
+/**
+ * A needs row's (or a needs toast's) answers: a question's numbered options and Other…, or a
+ * permission request's Allow once and Deny. The panel's 1–9 keys press the numbered ones.
+ */
+export function NeedsAnswers({
+  options = [],
+  onPick,
+  onOther,
+  otherLabel = 'Other…',
+  onAllow,
+  onDeny,
+  busy,
+  status,
+}: NeedsAnswersProps) {
+  if (status) return <span className="jn-answers__note joc-fade-in">{status}</span>;
+  if (onAllow || onDeny) {
+    return (
+      <>
+        <Button variant="secondary" size="sm" disabled={busy} onClick={onAllow} data-answer="1">
+          Allow once
+        </Button>
+        <Button variant="secondary" size="sm" disabled={busy} onClick={onDeny} data-answer="2">
+          Deny
+        </Button>
+      </>
+    );
+  }
+  const shown = options.slice(0, onOther ? 8 : 9);
+  return (
+    <>
+      {shown.map((o, i) => (
+        <button
+          key={o.label}
+          type="button"
+          className={cx('jn-opt', o.mono && 'is-mono')}
+          disabled={busy}
+          title={o.label}
+          data-answer={i + 1}
+          onClick={() => onPick?.(i)}
+        >
+          <span className="jn-opt__n">{i + 1}</span>
+          <span className="jn-opt__label">{o.label}</span>
+        </button>
+      ))}
+      {onOther ? (
+        <button
+          type="button"
+          className="jn-opt"
+          disabled={busy}
+          data-answer={shown.length + 1}
+          onClick={onOther}
+        >
+          <span className="jn-opt__n">{shown.length + 1}</span>
+          <span className="jn-opt__label">{otherLabel}</span>
+        </button>
+      ) : null}
+    </>
   );
 }
 
