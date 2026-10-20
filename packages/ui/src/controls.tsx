@@ -281,6 +281,8 @@ export interface TabItem {
   label: string;
   count?: number;
   state?: SessionState;
+  /** Says what the count counts, e.g. "2 running", as the tab's tooltip and accessible name. */
+  countLabel?: string;
   disabled?: boolean;
 }
 
@@ -305,6 +307,8 @@ export function Tabs({ items, value, onChange }: TabsProps) {
             role="tab"
             aria-selected={on}
             disabled={it.disabled}
+            title={it.countLabel ? `${it.label}: ${it.countLabel}` : undefined}
+            aria-label={it.countLabel ? `${it.label}, ${it.countLabel}` : undefined}
             className={cx('joc-tab', on && 'is-active')}
             onClick={() => {
               setCurrent(it.id);
