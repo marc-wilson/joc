@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import type { Prefs } from './prefs.ts';
+import { SessionReview } from './session-review.ts';
 
 export * from './prefs.ts';
+export * from './session-review.ts';
 
 export const SessionState = z.enum(['working', 'background', 'needs', 'idle', 'offline']);
 export type SessionState = z.infer<typeof SessionState>;
@@ -175,8 +177,13 @@ export const Session = z.object({
   background: z
     .object({ at: z.iso.datetime(), tasks: z.array(RunningTask).max(MAX_RUNNING_TASKS) })
     .optional(),
+  /** The pull request it reviews: started from JOC's Review button, or a review command on one. */
+  review: SessionReview.optional(),
   startedAt: z.iso.datetime(),
+  /** When it last reported, the periodic sync included. */
   updatedAt: z.iso.datetime(),
+  /** When its last state report fired: what it last did, not just that it's still open. */
+  activeAt: z.iso.datetime().optional(),
 });
 export type Session = z.infer<typeof Session>;
 
