@@ -168,3 +168,48 @@ export function latestStep(steps: ConversationItem[]): string | undefined {
   }
   return undefined;
 }
+
+/** A running task's time on a clock, which keeps its width as it ticks: "0:08", "4:12", "1:02:03". */
+export function clock(from: string, to: string | number): string {
+  const end = typeof to === 'number' ? to : Date.parse(to);
+  const s = Math.max(0, Math.floor((end - Date.parse(from)) / 1000));
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const h = Math.floor(s / 3600);
+  const m = Math.floor(s / 60) % 60;
+  return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
+}
+
+/** One line in a subagent's steps. */
+export interface Step {
+  id: string;
+  tool: string;
+  target?: string;
+  /** When it started, on the task's clock. */
+  time: string;
+  /** `current` is the step a running task is on now. */
+  status: 'done' | 'fail' | 'current';
+}
+
+/** A subagent's tool calls as steps, each timed from when the task started. */
+export function taskSteps(items: ConversationItem[], startedAt: string, running: boolean): Step[] {
+  const results = new Map(
+    items.flatMap((i) => (i.kind === 'tool_result' ? [[i.toolUseId, i] as const] : [])),
+  );
+  const calls = items.filter((i) => i.kind === 'tool_call');
+  const last = calls.at(-1);
+  return calls.map((call) => {
+    const result = results.get(call.toolUseId);
+    const status: Step['status'] = result?.isError
+      ? 'fail'
+      : !result && running && call === last
+        ? 'current'
+        : 'done';
+    return {
+      id: call.id,
+      tool: call.name,
+      ...(call.summary ? { target: call.summary } : {}),
+      time: clock(startedAt, call.at),
+      status,
+    };
+  });
+}

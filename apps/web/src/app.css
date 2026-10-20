@@ -33,6 +33,11 @@
   padding: var(--space-6) var(--space-8);
 }
 
+/* The Background tab's rows run edge to edge, as the design pass draws them. */
+.app-main__scroll.app-bg {
+  padding: 0;
+}
+
 .app-main__dock {
   padding: var(--space-3) var(--space-8) var(--space-4);
   border-top: 1px solid var(--border-subtle);
