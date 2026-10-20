@@ -1,7 +1,16 @@
+import type { Alert } from '@joc/protocol';
 import { Button, EmptyState, InboxRow, SectionHeader, SetupCheck, Switch } from '@joc/ui';
 import { useEffect, useState } from 'react';
+import { alertRow, settle } from './alert-list.ts';
 import { apiFetch } from './auth.ts';
-import { useGitHub, useNotifications, useNow, useSessions } from './hooks.ts';
+import {
+  changeAlerts,
+  useAlerts,
+  useGitHub,
+  useNotifications,
+  useNow,
+  useSessions,
+} from './hooks.ts';
 import {
   groupThreads,
   type InboxThread,
@@ -60,12 +69,106 @@ async function post(path: string, body: unknown): Promise<boolean> {
   return res?.ok === true;
 }
 
-/** /inbox: unread GitHub notifications, grouped by why they want you, review requests first. */
+/**
+ * The Inbox's alerts, held still while read (see `settle`): marking read and clearing show at
+ * once, and come back if the server didn't take them.
+ */
+function useAlertsView() {
+  const alerts = useAlerts();
+  const [view, setView] = useState<{ shown?: Alert[]; fresh: Alert[] }>({ fresh: [] });
+  const [read, setRead] = useState<Set<string>>(() => new Set());
+  const [cleared, setCleared] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    if (alerts) setView((v) => settle(v.shown, alerts));
+  }, [alerts]);
+
+  async function apply(
+    set: typeof setRead,
+    action: 'read' | 'clear',
+    ids: string[],
+  ): Promise<void> {
+    if (!ids.length) return;
+    set((s) => new Set([...s, ...ids]));
+    if (await changeAlerts(action, ids)) return;
+    set((s) => new Set([...s].filter((id) => !ids.includes(id))));
+  }
+
+  const visible = (list: Alert[]) => list.filter((a) => !cleared.has(a.id));
+  return {
+    loaded: view.shown !== undefined,
+    shown: visible(view.shown ?? []),
+    fresh: visible(view.fresh),
+    isRead: (a: Alert) => a.read || read.has(a.id),
+    markRead: (ids: string[]) => apply(setRead, 'read', ids),
+    clear: (ids: string[]) => apply(setCleared, 'clear', ids),
+    showFresh: () => alerts && setView({ shown: alerts, fresh: [] }),
+  };
+}
+
+type AlertsView = ReturnType<typeof useAlertsView>;
+
+/** JOC's own alerts, kept on the server to look back on: each can be read and cleared. */
+function AlertsSection({ view, now }: { view: AlertsView; now: number }) {
+  const { shown, fresh } = view;
+  const all = [...fresh, ...shown];
+  return (
+    <section className="app-inbox-group" aria-label="Alerts">
+      <SectionHeader
+        title="Alerts"
+        count={shown.length || undefined}
+        description="Sessions that needed you or finished, and new review requests. Kept for 30 days."
+      >
+        {fresh.length ? (
+          <Button variant="secondary" size="sm" onClick={view.showFresh}>
+            Show {fresh.length} new
+          </Button>
+        ) : null}
+        <Button
+          variant="ghost"
+          size="sm"
+          icon="x"
+          disabled={!all.length}
+          onClick={() => void view.clear(all.map((a) => a.id))}
+        >
+          Clear all
+        </Button>
+      </SectionHeader>
+      {shown.length ? (
+        <div className="app-list">
+          {shown.map((a) => (
+            <InboxRow
+              key={a.id}
+              title={a.title}
+              {...alertRow(a)}
+              updated={ago(a.at, now)}
+              read={view.isRead(a)}
+              onMarkRead={() => void view.markRead([a.id])}
+              onClear={() => void view.clear([a.id])}
+            />
+          ))}
+        </div>
+      ) : view.loaded && !fresh.length ? (
+        <EmptyState
+          compact
+          title="No alerts"
+          body="When a session needs you or finishes, or a pull request asks for your review, it's kept here."
+        />
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * /inbox: JOC's alerts, then unread GitHub notifications, grouped by why they want you, review
+ * requests first.
+ */
 export function InboxPage() {
   const notifications = useNotifications();
   const github = useGitHub();
   const { sessions, connected } = useSessions();
   const now = useNow();
+  const alerts = useAlertsView();
   const [shown, setShown] = useState<InboxThread[]>([]);
   // Marked here and not yet out of the server's list.
   const [marked, setMarked] = useState<Set<string>>(() => new Set());
@@ -79,6 +182,7 @@ export function InboxPage() {
 
   const isRead = (t: InboxThread) => t.read || marked.has(t.id);
   const left = shown.filter((t) => !isRead(t));
+  const unreadAlerts = [...alerts.fresh, ...alerts.shown].filter((a) => !alerts.isRead(a));
 
   async function markRead(ids: string[], sent: Promise<boolean>) {
     setMarked((set) => new Set([...set, ...ids]));
@@ -91,7 +195,7 @@ export function InboxPage() {
   if (notifications?.state === 'none') {
     body = (
       <EmptyState
-        title="No notifications yet"
+        title="No GitHub notifications yet"
         body="Your plugin reads your GitHub notifications through the GitHub CLI about once a minute. Link a machine with /joc-login, and they show up here."
       />
     );
@@ -123,7 +227,7 @@ export function InboxPage() {
   } else if (reported && !shown.length) {
     body = (
       <EmptyState
-        title="No notifications"
+        title="No GitHub notifications"
         body="Review requests, mentions, failing CI and comments on your pull requests and issues show up here."
       />
     );
@@ -180,23 +284,27 @@ export function InboxPage() {
         <SectionHeader
           size="lg"
           title="Inbox"
-          count={unread?.length}
-          description="GitHub notifications for you, grouped by reason. Read items stay where they are until you leave the page."
+          count={unreadAlerts.length + (unread?.length ?? 0) || undefined}
+          description="JOC's alerts, then your GitHub notifications by reason. Read items stay where they are until you leave the page."
         >
           <Button
             icon="check"
-            disabled={!left.length}
-            onClick={() =>
-              void markRead(
-                left.map((t) => t.id),
-                post('/api/notifications/read-all', {}),
-              )
-            }
+            disabled={!left.length && !unreadAlerts.length}
+            onClick={() => {
+              void alerts.markRead(unreadAlerts.map((a) => a.id));
+              if (left.length) {
+                void markRead(
+                  left.map((t) => t.id),
+                  post('/api/notifications/read-all', {}),
+                );
+              }
+            }}
           >
             Mark all read
           </Button>
         </SectionHeader>
         <AlertsSwitch />
+        <AlertsSection view={alerts} now={now} />
         {body}
       </main>
     </div>
