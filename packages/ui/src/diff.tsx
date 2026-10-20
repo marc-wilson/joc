@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Button, SegmentedControl } from './controls.tsx';
+import { Button, CollapseButton, SegmentedControl } from './controls.tsx';
 import { cx } from './cx.ts';
 import { Icon } from './Icon.tsx';
 
@@ -279,21 +279,16 @@ export function DiffFileHeader({
   onViewedChange,
   onToggle,
 }: DiffFileHeaderProps) {
-  const chevron = <Icon name={collapsed ? 'chevronRight' : 'chevronDown'} size={12} />;
   return (
     <div className="joc-dfh">
       {onToggle ? (
-        <button
-          type="button"
-          className="joc-dfh__toggle"
-          aria-expanded={!collapsed}
-          aria-label={collapsed ? `Expand ${path}` : `Collapse ${path}`}
+        <CollapseButton
+          expanded={!collapsed}
+          label={collapsed ? `Expand ${path}` : `Collapse ${path}`}
           onClick={onToggle}
-        >
-          {chevron}
-        </button>
+        />
       ) : (
-        chevron
+        <Icon name={collapsed ? 'chevronRight' : 'chevronDown'} size={12} />
       )}
       <span className="joc-dfh__path">{path}</span>
       <DiffStat additions={additions} deletions={deletions} />

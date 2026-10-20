@@ -47,6 +47,30 @@ export function Button({
   );
 }
 
+export interface CollapseButtonProps {
+  expanded: boolean;
+  /** What it does, e.g. "Fold message" or "Expand src/app.ts". */
+  label: string;
+  onClick?: () => void;
+}
+
+/** The chevron that folds something open or shut. Its icon swaps; it never rotates. */
+export function CollapseButton({ expanded, label, onClick }: CollapseButtonProps) {
+  return (
+    <button
+      type="button"
+      className="joc-collapse"
+      aria-expanded={expanded}
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+    >
+      <Icon name="chevronRight" className="joc-collapse__closed" />
+      <Icon name="chevronDown" className="joc-collapse__open" />
+    </button>
+  );
+}
+
 export interface TextInputProps {
   label?: string;
   placeholder?: string;
