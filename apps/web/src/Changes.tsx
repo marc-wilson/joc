@@ -12,6 +12,7 @@ import { Fragment, useState } from 'react';
 import type { DiffFile, DiffLine as Line } from './diff.ts';
 import { splitRows } from './diff.ts';
 import type { Changes } from './hooks.ts';
+import { store, stored } from './prefs.ts';
 
 type Mode = 'unified' | 'split';
 
@@ -23,21 +24,6 @@ interface Comment {
 }
 
 const lineKey = (path: string, l: Line) => `${path}:${l.kind}:${l.oldNo ?? ''}:${l.newNo ?? ''}`;
-
-// Per-viewer conveniences; the page works the same when storage is unavailable.
-function stored<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-function store(key: string, value: unknown) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
-}
 
 /** Folders and files in path order, each file under its folders, for the tree panel. */
 function treeItems(files: DiffFile[], viewed: Set<string>, active?: string) {
