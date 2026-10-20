@@ -5,7 +5,13 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { GitHubReport, PullRequest, PullRequestFile } from '@joc/protocol';
+import {
+  type GitHubReport,
+  MAX_PR_CHECKS,
+  type PullRequest,
+  type PullRequestCheck,
+  type PullRequestFile,
+} from '@joc/protocol';
 
 const EVERY_MS = 60_000;
 const stampFile = () => join(homedir(), '.claude', 'joc', 'github-read-at');
@@ -30,10 +36,14 @@ const PR_FIELDS = `
     changedFiles files(first: 100) { nodes { path additions deletions changeType } }
     repository { nameWithOwner }
     author { login }
-    commits(last: 1) { nodes { commit { statusCheckRollup { state contexts {
+    commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: ${MAX_PR_CHECKS}) {
       totalCount
       checkRunCountsByState { state count }
       statusContextCountsByState { state count }
+      nodes {
+        ... on CheckRun { name status conclusion startedAt completedAt }
+        ... on StatusContext { context state }
+      }
     } } } } }
   }`;
 
@@ -47,6 +57,17 @@ interface Count {
   state?: string;
   count?: number;
 }
+/** One check on a commit: a check run (`name`) or a commit status (`context`). */
+export interface GraphCheck {
+  name?: string;
+  status?: string;
+  conclusion?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  context?: string;
+  state?: string;
+}
+
 /** A commit's combined CI result, as GitHub's GraphQL API reports it. */
 export type Rollup = {
   state?: string;
@@ -54,6 +75,7 @@ export type Rollup = {
     totalCount?: number;
     checkRunCountsByState?: Count[];
     statusContextCountsByState?: Count[];
+    nodes?: GraphCheck[];
   };
 } | null;
 
@@ -96,6 +118,41 @@ const CHANGE = new Map<string, PullRequestFile['status']>([
   ['DELETED', 'deleted'],
   ['RENAMED', 'renamed'],
 ]);
+
+/** A check run's conclusion, or a commit status's state, as JOC's CI status. */
+const CHECK = new Map<string, PullRequestCheck['status']>([
+  ['SUCCESS', 'pass'],
+  ['NEUTRAL', 'skipped'],
+  ['SKIPPED', 'skipped'],
+  ['STALE', 'skipped'],
+  ['FAILURE', 'fail'],
+  ['ERROR', 'fail'],
+  ['TIMED_OUT', 'fail'],
+  ['CANCELLED', 'fail'],
+  ['ACTION_REQUIRED', 'fail'],
+  ['STARTUP_FAILURE', 'fail'],
+]);
+
+/** The commit's checks GitHub listed, each checked; one without a name is dropped. */
+export function toChecks(nodes: GraphCheck[] | undefined): PullRequestCheck[] | undefined {
+  if (!Array.isArray(nodes)) return undefined;
+  return nodes.slice(0, MAX_PR_CHECKS).flatMap((c) => {
+    const name = c?.name ?? c?.context;
+    if (typeof name !== 'string' || !name) return [];
+    // A check run is done once it's COMPLETED; a status once it's left PENDING or EXPECTED.
+    const outcome = c.name ? (c.status === 'COMPLETED' ? c.conclusion : undefined) : c.state;
+    const status = (outcome && CHECK.get(outcome)) || 'pending';
+    const ran =
+      c.startedAt && c.completedAt ? Date.parse(c.completedAt) - Date.parse(c.startedAt) : NaN;
+    return [
+      {
+        name: name.slice(0, 200),
+        status,
+        ...(Number.isFinite(ran) && ran >= 0 ? { seconds: Math.round(ran / 1000) } : {}),
+      },
+    ];
+  });
+}
 
 const count = (n: unknown) => (typeof n === 'number' && n >= 0 ? Math.floor(n) : 0);
 
@@ -153,6 +210,7 @@ export function toPullRequest(node: GraphNode): PullRequest | undefined {
     review: node.reviewDecision ? REVIEW.get(node.reviewDecision) : undefined,
     ci,
     ciDetail: total ? `${passed}/${total}` : undefined,
+    checks: rollup ? toChecks(rollup.contexts?.nodes) : undefined,
     base: node.baseRefName || undefined,
     files: toFiles(node.files?.nodes),
     changedFiles: typeof node.changedFiles === 'number' ? count(node.changedFiles) : undefined,

@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { type GraphNode, githubDue, type Rollup, toPullRequest } from './github.ts';
+import { type GraphNode, githubDue, type Rollup, toChecks, toPullRequest } from './github.ts';
 
 const node = (rollup: Rollup, extra: Partial<GraphNode> = {}): GraphNode => ({
   number: 238,
@@ -95,4 +95,32 @@ test('GitHub is read at most once a minute per machine', () => {
   assert.equal(githubDue(1_000_000, file), true);
   assert.equal(githubDue(1_030_000, file), false);
   assert.equal(githubDue(1_061_000, file), true);
+});
+
+test("a pull request lists its last commit's checks, each with its outcome", () => {
+  const checks = toChecks([
+    {
+      name: 'build',
+      status: 'COMPLETED',
+      conclusion: 'SUCCESS',
+      startedAt: '2026-10-18T10:00:00Z',
+      completedAt: '2026-10-18T10:02:10Z',
+    },
+    { name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' },
+    { name: 'e2e', status: 'IN_PROGRESS', conclusion: null, startedAt: '2026-10-18T10:00:00Z' },
+    { name: 'preview', status: 'COMPLETED', conclusion: 'SKIPPED' },
+    { context: 'ci/lint', state: 'SUCCESS' },
+    { context: 'ci/deploy', state: 'PENDING' },
+    {},
+  ]);
+  assert.deepEqual(checks, [
+    { name: 'build', status: 'pass', seconds: 130 },
+    { name: 'test', status: 'fail' },
+    { name: 'e2e', status: 'pending' },
+    { name: 'preview', status: 'skipped' },
+    { name: 'ci/lint', status: 'pass' },
+    { name: 'ci/deploy', status: 'pending' },
+  ]);
+  assert.equal(toChecks(undefined), undefined);
+  assert.equal(toPullRequest(node(null))?.checks, undefined);
 });
