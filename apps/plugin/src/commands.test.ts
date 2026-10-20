@@ -60,7 +60,7 @@ test('commands carry their source, plugin, hint and skill flag', () => {
       skill: true,
     },
     {
-      name: 'review',
+      name: 'pr-tools:review',
       description: 'Leave review comments',
       argumentHint: '<pr>',
       source: 'plugin',
