@@ -108,6 +108,18 @@ export const PullRequestFile = z.object({
 });
 export type PullRequestFile = z.infer<typeof PullRequestFile>;
 
+/** The most checks a pull request lists, from its last commit. */
+export const MAX_PR_CHECKS = 50;
+
+/** One CI check on a pull request's last commit: a check run or a commit status. */
+export const PullRequestCheck = z.object({
+  name: z.string().max(200),
+  status: CIStatus,
+  /** How long it ran, once it finished. */
+  seconds: z.number().int().nonnegative().optional(),
+});
+export type PullRequestCheck = z.infer<typeof PullRequestCheck>;
+
 /** An open pull request, as the plugin reads it through the `gh` CLI. */
 export const PullRequest = z.object({
   number: z.number().int().positive(),
@@ -126,6 +138,8 @@ export const PullRequest = z.object({
   ci: CIStatus,
   /** Finished checks over all checks, e.g. `9/14`. */
   ciDetail: z.string().max(20).optional(),
+  /** Its last commit's first MAX_PR_CHECKS checks. Plugins before 0.8.1 leave them out. */
+  checks: z.array(PullRequestCheck).max(MAX_PR_CHECKS).optional(),
   /** The branch it merges into. Plugins before 0.6.0 leave it out, and the files too. */
   base: z.string().max(300).optional(),
   /** Its first MAX_PR_FILES changed files, in GitHub's order. */
