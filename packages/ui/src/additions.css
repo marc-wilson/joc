@@ -319,6 +319,11 @@ h4.joc-taskd__label { margin: 0; }
 .joc-cmdlist__foot { display: flex; align-items: center; gap: var(--space-4); height: var(--row-dense); padding: 0 var(--space-3); border-top: 1px solid var(--border-subtle); font-size: 12px; line-height: 16px; color: var(--text-tertiary); white-space: nowrap; }
 .joc-cmdlist__foot .joc-kbd { margin-right: var(--space-1); }
 .joc-cmdlist__count { margin-left: auto; font-variant-numeric: tabular-nums; }
+/* Fitted to JOC: a long argument hint (`[<project hint, e.g. "Acme DS">]`) cut off with an
+   ellipsis instead of widening its row, so the list never scrolls sideways. */
+.joc-cmdlist__scroll { overflow-x: hidden; }
+.joc-cmdlist__item { min-width: 0; }
+.joc-cmdlist__name { flex: 0 1 auto; max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- Composer: argument hint after a command is picked ---------- */
 .joc-composer__input { flex: 1; min-width: 0; height: 22px; padding: 0; border: 0; background: none; outline: none; font-family: var(--font-sans); font-size: 14px; line-height: 22px; color: var(--text-primary); }
