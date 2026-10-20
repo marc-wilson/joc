@@ -79,6 +79,7 @@ import {
   getLiveSession,
   listHistory,
   listSessions,
+  listStaleSessions,
   onSessionUpdate,
 } from './sessions.ts';
 import {
@@ -87,7 +88,7 @@ import {
   saveReviewSettings,
   saveSessionSettings,
 } from './settings.ts';
-import { isBehind, LATEST_HEADER, PLUGIN_HEADER } from './version.ts';
+import { INSTALLED_HEADER, isBehind, LATEST_HEADER, PLUGIN_HEADER } from './version.ts';
 
 export interface AppOptions {
   /** GitHub sign-in. Without it the server is open and everything belongs to `local`: for local
@@ -106,7 +107,8 @@ export interface AppOptions {
 /** How a request proved who it is: a browser session, a machine's token, or open local dev. */
 type Via = 'session' | 'device' | 'open';
 
-export type Env = { Variables: { owner: Owner; via: Via } };
+/** `device` is the public id of the machine whose token the request came with. */
+export type Env = { Variables: { owner: Owner; via: Via; device?: string } };
 
 const LOCAL = ownerFrom('local');
 
@@ -127,18 +129,23 @@ export function createApp({
   // Generous: a session's backlog can carry a few dozen screenshots at once.
   const uploads = new RateLimit(600, 10 * 60_000);
 
-  /** The version the requesting plugin named; undefined for a browser, or a plugin too old to. */
-  const pluginOf = (c: Context) => {
-    const sent = PluginVersion.safeParse(c.req.header(PLUGIN_HEADER));
+  /** A version the request names in `header`; undefined for a browser, or a plugin too old to. */
+  const versionIn = (c: Context, header: string) => {
+    const sent = PluginVersion.safeParse(c.req.header(header));
     return sent.success ? sent.data : undefined;
   };
+  /** The version the requesting plugin runs. */
+  const pluginOf = (c: Context) => versionIn(c, PLUGIN_HEADER);
 
-  async function identify(c: Context): Promise<{ owner: Owner; via: Via } | undefined> {
+  async function identify(
+    c: Context,
+  ): Promise<{ owner: Owner; via: Via; device?: string } | undefined> {
     if (!github) return { owner: LOCAL, via: 'open' };
     const token = bearerToken(c);
     if (token) {
-      const owner = await resolveDeviceToken(token, pluginOf(c));
-      return owner && { owner, via: 'device' };
+      const sent = { plugin: pluginOf(c), installed: versionIn(c, INSTALLED_HEADER) };
+      const resolved = await resolveDeviceToken(token, sent);
+      return resolved && { owner: resolved.owner, via: 'device', device: resolved.device };
     }
     const secret = sessionSecret(c);
     if (secret) {
@@ -213,6 +220,7 @@ export function createApp({
     }
     c.set('owner', who.owner);
     c.set('via', who.via);
+    if (who.device) c.set('device', who.device);
     return next();
   });
 
@@ -268,7 +276,9 @@ export function createApp({
 
   app.get('/api/devices', async (c) => {
     if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
-    return c.json(await listDevices(c.get('owner'), pluginVersion));
+    const owner = c.get('owner');
+    const stale = await listStaleSessions(owner, pluginVersion);
+    return c.json(await listDevices(owner, pluginVersion, stale));
   });
 
   app.delete('/api/devices/:id', async (c) => {
@@ -297,7 +307,12 @@ export function createApp({
   app.post('/api/reports', async (c) => {
     const parsed = SessionReport.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
-    const session = await applyReport(c.get('owner'), parsed.data);
+    // Which copy of the plugin the session runs, from the request: every plugin that names its
+    // version does so in the header, so even a session that hasn't reloaded in a while tells.
+    const session = await applyReport(c.get('owner'), parsed.data, {
+      plugin: pluginOf(c),
+      device: c.get('device'),
+    });
     // 202 for a stale report: accepted, but a newer one already won.
     return session ? c.json(session) : c.body(null, 202);
   });
