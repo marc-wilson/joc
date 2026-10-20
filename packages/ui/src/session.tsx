@@ -22,8 +22,13 @@ export interface SessionRowProps {
   needsLabel?: string;
   /** Kept in the Pinned group at the top of the list. */
   pinned?: boolean;
+  /**
+   * Its machine stopped reporting, e.g. "Quiet 6m": shown in place of the time, and the state dot
+   * keeps its shape but stops its live motion.
+   */
+  quiet?: string;
   onSelect?: () => void;
-  /** Shows a pin button, always while pinned and on hover or focus otherwise. */
+  /** Shows a pin button in the time's place on hover or focus. */
   onPinChange?: (pinned: boolean) => void;
 }
 
@@ -37,12 +42,18 @@ export function SessionRow({
   selected,
   needsLabel,
   pinned,
+  quiet,
   onSelect,
   onPinChange,
 }: SessionRowProps) {
   return (
     <div
-      className={cx('joc-srow', `joc-srow--${state}`, selected && 'is-selected')}
+      className={cx(
+        'joc-srow',
+        `joc-srow--${state}`,
+        selected && 'is-selected',
+        quiet && 'is-quiet',
+      )}
       role="option"
       aria-selected={!!selected}
       tabIndex={0}
@@ -56,7 +67,11 @@ export function SessionRow({
     >
       <span className="joc-srow__rail" aria-hidden="true" />
       <span className="joc-srow__glyph">
-        <StateDot state={state} />
+        <StateDot
+          state={state}
+          quiet={!!quiet}
+          label={quiet ? `${STATE_LABEL[state]}, ${quiet.toLowerCase()}` : undefined}
+        />
       </span>
       <span className="joc-srow__main">
         <span className="joc-srow__line1">
@@ -64,23 +79,14 @@ export function SessionRow({
           {state === 'needs' ? (
             <StateBadge state="needs" label={needsLabel || 'Needs you'} />
           ) : null}
-          <span className="joc-srow__time">{time}</span>
-          {onPinChange ? (
-            <button
-              type="button"
-              className={cx('joc-srow__pin', pinned && 'is-pinned')}
-              aria-pressed={!!pinned}
-              aria-label={pinned ? `Unpin ${title}` : `Pin ${title}`}
-              title={pinned ? 'Unpin' : 'Pin to the top'}
-              onClick={(e) => {
-                e.stopPropagation();
-                onPinChange(!pinned);
-              }}
-              onKeyDown={(e) => e.stopPropagation()}
-            >
-              <Icon name="pin" size={12} />
-            </button>
-          ) : null}
+          {quiet ? (
+            <span className="joc-srow__time joc-quiet">
+              <Icon name="clock" size={12} />
+              {quiet}
+            </span>
+          ) : (
+            <span className="joc-srow__time">{time}</span>
+          )}
         </span>
         <span className="joc-srow__line2">
           <span className="joc-srow__where" title={branch}>
@@ -99,8 +105,29 @@ export function SessionRow({
           {activity}
         </span>
       </span>
+      {onPinChange ? (
+        <button
+          type="button"
+          className="joc-pin"
+          aria-pressed={!!pinned}
+          aria-label={pinned ? `Unpin ${title}` : `Pin ${title}`}
+          title={pinned ? 'Unpin' : 'Pin to the top'}
+          onClick={(e) => {
+            e.stopPropagation();
+            onPinChange(!pinned);
+          }}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <Icon name="pin" size={14} filled={pinned} />
+        </button>
+      ) : null}
     </div>
   );
+}
+
+/** The pin glyph that marks the Pinned group, in its header and in the folded rail. */
+function PinGlyph() {
+  return <Icon name="pin" size={12} filled className="joc-pin-glyph" />;
 }
 
 export interface RepoGroupHeaderProps {
@@ -108,10 +135,29 @@ export interface RepoGroupHeaderProps {
   count: number;
   needs?: number;
   collapsed?: boolean;
+  /** Heads the Pinned group: a pin glyph, and it doesn't fold. */
+  pinned?: boolean;
   onToggle?: () => void;
 }
 
-export function RepoGroupHeader({ repo, count, needs, collapsed, onToggle }: RepoGroupHeaderProps) {
+export function RepoGroupHeader({
+  repo,
+  count,
+  needs,
+  collapsed,
+  pinned,
+  onToggle,
+}: RepoGroupHeaderProps) {
+  if (pinned) {
+    return (
+      <h3 className="joc-rgh joc-rgh--pinned">
+        <PinGlyph />
+        <span className="joc-rgh__name">{repo}</span>
+        <span className="joc-rgh__count">{count}</span>
+        {needs ? <StateBadge state="needs" label={String(needs)} /> : null}
+      </h3>
+    );
+  }
   return (
     <button className="joc-rgh" aria-expanded={!collapsed} type="button" onClick={onToggle}>
       <Icon name={collapsed ? 'chevronRight' : 'chevronDown'} size={12} />
@@ -229,6 +275,8 @@ function shortRepo(repo: string): string {
 
 export interface SessionRailGroup {
   repo: string;
+  /** The Pinned group: marked with the pin glyph, first, above the repos. */
+  pinned?: boolean;
   sessions: SessionRowProps[];
 }
 
@@ -253,7 +301,7 @@ export function SessionRail({ groups, peek, onExpand, onSelect }: SessionRailPro
         onClick={onExpand}
         title="Expand session list  ["
       >
-        <Icon name="chevronRight" size={14} />
+        <Icon name="sidebar" size={16} />
       </button>
       {needs ? (
         <span className="joc-rail__needs" title={`${needs} sessions need you`}>
@@ -265,9 +313,15 @@ export function SessionRail({ groups, peek, onExpand, onSelect }: SessionRailPro
         {groups.map((g) => (
           // biome-ignore lint/a11y/useSemanticElements: a fieldset would bring form semantics to a nav list
           <div key={g.repo} className="joc-rail__group" role="group" aria-label={g.repo}>
-            <span className="joc-rail__repo" title={g.repo} aria-hidden="true">
-              {shortRepo(g.repo)}
-            </span>
+            {g.pinned ? (
+              <span className="joc-rail__pin" title={g.repo} aria-hidden="true">
+                <PinGlyph />
+              </span>
+            ) : (
+              <span className="joc-rail__repo" title={g.repo} aria-hidden="true">
+                {shortRepo(g.repo)}
+              </span>
+            )}
             {g.sessions.map((s) => (
               <button
                 key={s.id ?? s.title}
@@ -282,7 +336,7 @@ export function SessionRail({ groups, peek, onExpand, onSelect }: SessionRailPro
                 title={s.title}
                 onClick={() => onSelect?.(s)}
               >
-                <StateDot state={s.state} label={describe(s)} />
+                <StateDot state={s.state} quiet={!!s.quiet} label={describe(s)} />
               </button>
             ))}
           </div>
@@ -291,7 +345,7 @@ export function SessionRail({ groups, peek, onExpand, onSelect }: SessionRailPro
       <div className="joc-rail__peek" aria-hidden={peek ? undefined : 'true'}>
         {groups.map((g) => (
           <Fragment key={g.repo}>
-            <RepoGroupHeader repo={g.repo} count={g.sessions.length} />
+            <RepoGroupHeader repo={g.repo} count={g.sessions.length} pinned={g.pinned} />
             {g.sessions.map((s) => (
               <SessionRow key={s.id ?? s.title} {...s} />
             ))}
@@ -304,16 +358,30 @@ export function SessionRail({ groups, peek, onExpand, onSelect }: SessionRailPro
 
 export interface SessionListNoteProps {
   children: ReactNode;
-  /** Small buttons or links after the text. */
-  actions?: ReactNode;
 }
 
-/** A quiet line in the session list: a section label, or what the list leaves out and why. */
-export function SessionListNote({ children, actions }: SessionListNoteProps) {
+/** A quiet line inside the session list: a section label, or that nothing matches. */
+export function SessionListNote({ children }: SessionListNoteProps) {
   return (
     <div className="joc-slnote">
       <span className="joc-slnote__text">{children}</span>
-      {actions ? <span className="joc-slnote__actions">{actions}</span> : null}
+    </div>
+  );
+}
+
+export interface SessionListFooterProps {
+  /** What the list leaves out and why. */
+  children: ReactNode;
+  /** `TextLink`s after the text, e.g. History and Change. */
+  links?: ReactNode;
+}
+
+/** The note under the session list, below its scroll: how long sessions stay, and where to look. */
+export function SessionListFooter({ children, links }: SessionListFooterProps) {
+  return (
+    <div className="joc-slist__foot">
+      <span className="joc-slist__foot-text">{children}</span>
+      {links ? <span className="joc-slist__foot-links">{links}</span> : null}
     </div>
   );
 }

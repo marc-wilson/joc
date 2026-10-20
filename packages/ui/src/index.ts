@@ -94,7 +94,7 @@ export {
   type SetupStatus,
 } from './history.tsx';
 export { Icon, type IconName, type IconProps } from './Icon.tsx';
-export { Branch, Code, Emph, Tag } from './inline.tsx';
+export { Branch, Code, Emph, Tag, TextLink, type TextLinkProps } from './inline.tsx';
 export { LogoMark, type LogoMarkProps } from './Logo.tsx';
 export {
   EmptyState,
@@ -139,6 +139,8 @@ export {
   type SessionHeaderProps,
   SessionLink,
   type SessionLinkProps,
+  SessionListFooter,
+  type SessionListFooterProps,
   SessionListNote,
   type SessionListNoteProps,
   SessionRail,

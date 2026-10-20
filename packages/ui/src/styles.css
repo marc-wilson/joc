@@ -4,7 +4,5 @@
 @import "./styles/components.css";
 @import "./banner.css";
 @import "./notif.css";
-@import "./pin.css";
-@import "./session-list.css";
 @import "./task-details.css";
 @import "./additions.css";

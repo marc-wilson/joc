@@ -22,3 +22,26 @@ export function Emph({ children }: { children?: ReactNode }) {
 export function Tag({ children }: { children?: ReactNode }) {
   return <span className="joc-tag">{children}</span>;
 }
+
+export interface TextLinkProps {
+  /** Goes there; without it, it's a button that runs `onClick`. */
+  href?: string;
+  onClick?: () => void;
+  children?: ReactNode;
+}
+
+/** A quiet accent link in running text or a footer: "History", "Change", "Copy". */
+export function TextLink({ href, onClick, children }: TextLinkProps) {
+  if (href) {
+    return (
+      <a className="joc-link" href={href} onClick={onClick}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <button type="button" className="joc-link" onClick={onClick}>
+      {children}
+    </button>
+  );
+}
