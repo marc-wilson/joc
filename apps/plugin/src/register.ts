@@ -90,6 +90,8 @@ const LIST_TIMEOUT_MS = 5000;
 const COMMANDS_HTTP_TIMEOUT_MS = 10_000;
 /** Skill folders looked for in one go, past which the rest list as plain commands. */
 const MAX_SKILL_CHECKS = 200;
+/** How many folders up from the session's a project's `.claude/skills` is looked for. */
+const SKILL_FOLDER_DEPTH = 8;
 /** Describe events kept; a session lists a few hundred commands, each a few times. */
 const MAX_DESCRIBED = 5000;
 
@@ -630,11 +632,17 @@ let commandsSent: string | undefined;
 
 /**
  * Which of the project's and the user's commands are skills: those with a `SKILL.md` under
- * `.claude/skills`, as `project\nname` / `user\nname` keys (see commands.ts).
+ * `.claude/skills`, as `project\nname` / `user\nname` keys (see commands.ts). A project's skills
+ * folder may be in a folder above the session's, as Claude Code reads them up the tree.
  */
 async function skillKeys($: EngineInterface, listed: ListedCommand[]): Promise<Set<string>> {
   const cwd = await $.session.cwd();
   const config = (await $.env.get('CLAUDE_CONFIG_DIR')) || (await homePath($, '.claude'));
+  const folders: string[] = [];
+  for (let dir = cwd.replace(/\/+$/, ''); dir && folders.length < SKILL_FOLDER_DEPTH; ) {
+    folders.push(dir);
+    dir = dir.slice(0, dir.lastIndexOf('/'));
+  }
   const names = listed
     .filter((c) => c.source === 'user' && /^[\w.-]+$/.test(c.name))
     .map((c) => c.name)
@@ -642,16 +650,17 @@ async function skillKeys($: EngineInterface, listed: ListedCommand[]): Promise<S
   const keys = new Set<string>();
   const has = (path: string) => $.fs.exists(path).catch(() => false);
   await Promise.all(
-    names.flatMap((name) => [
-      has(`${cwd}/.claude/skills/${name}/SKILL.md`).then((yes) => {
-        if (yes) keys.add(`project\n${name}`);
-      }),
-      config
-        ? has(`${config}/skills/${name}/SKILL.md`).then((yes) => {
-            if (yes) keys.add(`user\n${name}`);
-          })
-        : Promise.resolve(),
-    ]),
+    names.map(async (name) => {
+      const project = described.has(describedKey('project', name));
+      if (project) {
+        const found = await Promise.all(
+          folders.map((dir) => has(`${dir}/.claude/skills/${name}/SKILL.md`)),
+        );
+        if (found.some(Boolean)) keys.add(`project\n${name}`);
+      } else if (config && (await has(`${config}/skills/${name}/SKILL.md`))) {
+        keys.add(`user\n${name}`);
+      }
+    }),
   );
   return keys;
 }
