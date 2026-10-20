@@ -47,6 +47,8 @@ interface SessionDoc {
   waiting?: Waiting;
   /** The last wait that ended, and who answered it. */
   answered?: Session['answered'];
+  /** What Claude Code last said runs in the background, and when. */
+  background?: Session['background'];
 }
 
 const sessions = () => getDb().collection<SessionDoc>('sessions');
@@ -146,7 +148,7 @@ export interface ReportSender {
 /** Applies a report, or returns undefined if a newer one already landed. */
 export async function applyReport(
   owner: Owner,
-  { sessionId, at, title, ...fields }: SessionReport,
+  { sessionId, at, title, background, ...fields }: SessionReport,
   sender: ReportSender = {},
 ): Promise<Session | undefined> {
   const now = new Date();
@@ -184,6 +186,10 @@ export async function applyReport(
             createdAt: { $ifNull: ['$createdAt', now] },
             // A session keeps the title from its first prompt.
             ...(title ? { title: { $ifNull: ['$title', { $literal: title }] } } : {}),
+            // Claude Code's list as of this report; a report without one keeps the stored list.
+            ...(background
+              ? { background: { $literal: { at: new Date(at).toISOString(), tasks: background } } }
+              : {}),
             // A session that ended waits on nothing.
             ...(fields.state === 'offline' ? { waiting: '$$REMOVE' } : {}),
           },

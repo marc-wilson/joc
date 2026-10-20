@@ -161,6 +161,26 @@ test('sessions are listed only for their owner, even with the same session id', 
   );
 });
 
+test("a session's background list is its owner's, and stays until a report brings a new one", async () => {
+  const shell = { id: 'b7k2m9', type: 'shell', command: 'pnpm dev' };
+  await call(
+    'alice',
+    '/api/reports',
+    report('bg-id', { state: 'background', background: [shell] }),
+  );
+  await call('bob', '/api/reports', report('bg-id', { state: 'idle', background: [] }));
+  // A later report without a list (a tool call, a sync) keeps the one stored.
+  await call('alice', '/api/reports', report('bg-id', { activity: 'pnpm test' }));
+  const alice = (await read(await call('alice', '/api/sessions'), Sessions)).find(
+    (s) => s.id === 'bg-id',
+  );
+  const bob = (await read(await call('bob', '/api/sessions'), Sessions)).find(
+    (s) => s.id === 'bg-id',
+  );
+  assert.deepEqual(alice?.background?.tasks, [shell]);
+  assert.deepEqual(bob?.background?.tasks, []);
+});
+
 test('conversations stay with their owner', async () => {
   const item = { id: 'm1', at: new Date().toISOString(), kind: 'user', text: 'Alice only' };
   await call('alice', '/api/messages', { sessionId: 'shared-id', items: [item] });
