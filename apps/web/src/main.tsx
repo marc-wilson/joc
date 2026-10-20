@@ -7,6 +7,7 @@ import { GitHubPage } from './GitHub.tsx';
 import { HistoryPage } from './History.tsx';
 import { InboxPage } from './Inbox.tsx';
 import { LinkPage } from './Link.tsx';
+import { PrefsGate } from './PrefsGate.tsx';
 import { PullRequestPage } from './PullRequest.tsx';
 import { SettingsPage } from './Settings.tsx';
 import { AuthGate } from './SignIn.tsx';
@@ -27,7 +28,9 @@ const Page = pages.get(location.pathname) ?? App;
 createRoot(root).render(
   <StrictMode>
     <AuthGate>
-      <Page />
+      <PrefsGate>
+        <Page />
+      </PrefsGate>
     </AuthGate>
   </StrictMode>,
 );

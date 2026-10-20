@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Session } from '@joc/protocol';
-import { toggled } from './prefs.ts';
 import { groupSessions } from './sessions.ts';
+import { toggled } from './toggled.ts';
 
 const session = (id: string, repo: string): Session => ({
   id,

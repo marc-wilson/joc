@@ -3,6 +3,7 @@ import { Banner, Button, Code, CopyCommand } from '@joc/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { apiFetch } from './auth.ts';
+import { updatePrefs, usePrefs } from './prefs.ts';
 import { StaleSessions, useReload } from './StaleSessions.tsx';
 import {
   behindTitle,
@@ -19,7 +20,6 @@ import {
 
 /** How often an open tab asks; also on coming back to the tab. */
 const CHECK_MS = 5 * 60_000;
-const DISMISSED_KEY = 'joc.plugin-banner.dismissed';
 const RELOAD_DISMISSED_KEY = 'joc.reload-banner.dismissed';
 /** After reloads are sent: long enough for each session's next sync (every 30s) to report. */
 const AFTER_RELOAD_MS = 40_000;
@@ -117,7 +117,8 @@ function dismissUnder(key: string, value: string) {
 /** App-wide notices under the nav bar: a plugin to update, or a newer dashboard to reload into. */
 export function Updates() {
   const { plugin, behind, stale, updated, checkSoon } = useVersions();
-  const [dismissed, setDismissed] = useState(() => dismissedUnder(DISMISSED_KEY));
+  // The plugin version whose banner the person dismissed, if any.
+  const dismissed = usePrefs().dismissedPluginBanner;
   const [staleHidden, setStaleHidden] = useState(() => dismissedUnder(RELOAD_DISMISSED_KEY));
   const [reloadHidden, setReloadHidden] = useState(false);
   const reload = useReload(checkSoon);
@@ -141,10 +142,7 @@ export function Updates() {
         <Banner
           title={behindTitle(behind, plugin)}
           icon="terminal"
-          onDismiss={() => {
-            dismissUnder(DISMISSED_KEY, plugin);
-            setDismissed(plugin);
-          }}
+          onDismiss={() => updatePrefs({ dismissedPluginBanner: plugin })}
         >
           <span>
             Some features won't work there until it's updated. In a terminal on that machine, run:

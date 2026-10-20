@@ -1,3 +1,4 @@
+import type { DiffMode } from '@joc/protocol';
 import {
   DiffFileHeader,
   DiffLine,
@@ -12,9 +13,8 @@ import { Fragment, useState } from 'react';
 import type { DiffFile, DiffLine as Line } from './diff.ts';
 import { splitRows } from './diff.ts';
 import type { Changes } from './hooks.ts';
-import { store, stored, usePref } from './prefs.ts';
-
-type Mode = 'unified' | 'split';
+import { updatePrefs, updateSessionPrefs, usePrefs, useSessionPrefs } from './prefs.ts';
+import { toggled } from './toggled.ts';
 
 interface Comment {
   id: string;
@@ -70,13 +70,12 @@ interface Props {
 
 /** A PR-style review of the session's changes; comments go back to the session as a prompt. */
 export function ChangesView({ sessionId, changes, onSend }: Props) {
-  const [mode, setMode] = useState<Mode>(() => stored('joc:diff-mode', 'unified'));
-  const [viewed, setViewed] = useState(
-    () => new Set(stored<string[]>(`joc:viewed:${sessionId}`, [])),
-  );
+  const mode = usePrefs().diffMode;
+  const kept = useSessionPrefs(sessionId);
+  const viewed = new Set(kept.viewedFiles);
   // A file folds when marked viewed; its chevron folds or opens it either way.
-  const [folded, setFolded] = usePref<Record<string, boolean>>(`joc:folded:${sessionId}`, {});
-  const isFolded = (path: string) => folded[path] ?? viewed.has(path);
+  const isFolded = (path: string) =>
+    kept.foldedFiles.includes(path) || (viewed.has(path) && !kept.openedFiles.includes(path));
   const [comments, setComments] = useState<Comment[]>([]);
   const [composing, setComposing] = useState<{ path: string; line: Line }>();
   const [active, setActive] = useState<string>();
@@ -98,18 +97,25 @@ export function ChangesView({ sessionId, changes, onSend }: Props) {
   const additions = files.reduce((n, f) => n + f.additions, 0);
   const deletions = files.reduce((n, f) => n + f.deletions, 0);
 
-  function changeMode(next: Mode) {
-    setMode(next);
-    store('joc:diff-mode', next);
+  function changeMode(next: DiffMode) {
+    updatePrefs({ diffMode: next });
   }
+  // Marking a file viewed (or not) drops its own fold, so it follows the mark.
   function toggleViewed(path: string, on: boolean) {
-    const next = new Set(viewed);
-    if (on) next.add(path);
-    else next.delete(path);
-    setViewed(next);
-    store(`joc:viewed:${sessionId}`, [...next]);
-    const { [path]: _, ...rest } = folded;
-    setFolded(rest);
+    updateSessionPrefs({
+      id: sessionId,
+      viewedFiles: toggled(kept.viewedFiles, path, on),
+      foldedFiles: toggled(kept.foldedFiles, path, false),
+      openedFiles: toggled(kept.openedFiles, path, false),
+    });
+  }
+  function toggleFolded(path: string) {
+    const fold = !isFolded(path);
+    updateSessionPrefs({
+      id: sessionId,
+      foldedFiles: toggled(kept.foldedFiles, path, fold),
+      openedFiles: toggled(kept.openedFiles, path, !fold && viewed.has(path)),
+    });
   }
   function addComment(path: string, line: Line, text: string) {
     setComments((list) => [...list, { id: crypto.randomUUID(), path, line, text }]);
@@ -172,7 +178,7 @@ export function ChangesView({ sessionId, changes, onSend }: Props) {
                 viewed={viewed.has(file.path)}
                 onViewedChange={(on) => toggleViewed(file.path, on)}
                 collapsed={isFolded(file.path)}
-                onToggle={() => setFolded({ ...folded, [file.path]: !isFolded(file.path) })}
+                onToggle={() => toggleFolded(file.path)}
               />
               {isFolded(file.path) ? null : (
                 <div className="joc-diff">

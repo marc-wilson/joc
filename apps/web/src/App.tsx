@@ -37,11 +37,12 @@ import { Nav } from './Nav.tsx';
 import { NewSessionDialog } from './NewSession.tsx';
 import { delivered, type PendingPrompt } from './pending.ts';
 import { plain } from './plain.ts';
-import { toggled, usePref } from './prefs.ts';
+import { updatePrefs, usePrefs } from './prefs.ts';
 import { SessionSettingsDialog } from './SessionSettings.tsx';
 import { isQuiet, keepNote, matchesFilter } from './session-list.ts';
 import { groupSessions, PINNED_GROUP } from './sessions.ts';
 import { age } from './time.ts';
+import { toggled } from './toggled.ts';
 
 const UNTITLED = 'New session';
 
@@ -120,13 +121,10 @@ export default function App() {
   const [tab, setTab] = useState('conversation');
   // The Changes tab needs the width, so the session list folds into a rail of state dots.
   const [listOpen, setListOpen] = useState(false);
-  // You can also fold it on any tab; that choice is remembered in this browser.
-  const [listFolded, setListFolded] = usePref('joc:list-folded', false);
+  // You can also fold it on any tab; that choice, the groups you folded and the sessions you
+  // pinned to the top (in the order you pinned them) are remembered.
+  const { listFolded, foldedGroups: folded, pinned } = usePrefs();
   const railed = listFolded || (tab === 'changes' && !listOpen);
-  // Session list groups you folded, remembered in this browser.
-  const [folded, setFolded] = usePref<string[]>('joc:folded-groups', []);
-  // Sessions you pinned to the top of the list, in the order you pinned them.
-  const [pinned, setPinned] = usePref<string[]>('joc:pinned', []);
   const groups = groupSessions(shown, pinned);
   const [pending, setPending] = useState<PendingPrompt[]>([]);
   // A sent prompt shows until the session's own transcript has it.
@@ -172,7 +170,7 @@ export default function App() {
                 })),
               }))}
               onExpand={() => {
-                setListFolded(false);
+                updatePrefs({ listFolded: false });
                 setListOpen(true);
               }}
               onSelect={(s) => setSelectedId(s.id)}
@@ -194,7 +192,7 @@ export default function App() {
                 icon="chevronLeft"
                 aria-label="Collapse session list"
                 title="Collapse session list"
-                onClick={() => setListFolded(true)}
+                onClick={() => updatePrefs({ listFolded: true })}
               />
             </div>
             <div className="app-side__list" role="listbox" aria-label="Sessions">
@@ -205,7 +203,9 @@ export default function App() {
                     count={g.sessions.length}
                     needs={g.sessions.filter((s) => s.state === 'needs').length}
                     collapsed={folded.includes(g.id)}
-                    onToggle={() => setFolded(toggled(folded, g.id, !folded.includes(g.id)))}
+                    onToggle={() =>
+                      updatePrefs({ foldedGroups: toggled(folded, g.id, !folded.includes(g.id)) })
+                    }
                   />
                   {folded.includes(g.id) ? null : (
                     <>
@@ -221,7 +221,7 @@ export default function App() {
                           selected={s.id === selected?.id}
                           pinned={g.id === PINNED_GROUP}
                           onSelect={() => setSelectedId(s.id)}
-                          onPinChange={(on) => setPinned(toggled(pinned, s.id, on))}
+                          onPinChange={(on) => updatePrefs({ pinned: toggled(pinned, s.id, on) })}
                         />
                       ))}
                       {filtering || g.id === PINNED_GROUP ? null : (
