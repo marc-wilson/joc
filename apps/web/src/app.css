@@ -209,13 +209,6 @@
   overflow: hidden;
 }
 
-/* Long commands clip instead of scrolling: the copy button copies the whole thing. The design
-   system's .joc-cmd__text scrolls (and shows a scrollbar); move this there when it next syncs. */
-.joc-cmd__text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .app-actions {
   display: flex;
   gap: var(--space-2);
