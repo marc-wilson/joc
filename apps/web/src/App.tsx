@@ -25,6 +25,7 @@ import { useChanges, useConversation, useNow, useSessions } from './hooks.ts';
 import { Nav } from './Nav.tsx';
 import { delivered, type PendingPrompt } from './pending.ts';
 import { plain } from './plain.ts';
+import { toggled, usePref } from './prefs.ts';
 import { age } from './time.ts';
 
 // Repos in first-seen order, so groups never reorder as sessions update.
@@ -67,6 +68,8 @@ export default function App() {
   // The Changes tab needs the width, so the session list folds into a rail of state dots.
   const [listOpen, setListOpen] = useState(false);
   const railed = tab === 'changes' && !listOpen;
+  // Session list groups you folded, remembered in this browser.
+  const [folded, setFolded] = usePref<string[]>('joc:folded-groups', []);
   const [pending, setPending] = useState<PendingPrompt[]>([]);
   // A sent prompt shows until the session's own transcript has it.
   const waiting = pending.filter((p) => p.sessionId === selected?.id && !delivered(items, p));
@@ -126,21 +129,29 @@ export default function App() {
                     repo={repo}
                     count={list.length}
                     needs={list.filter((s) => s.state === 'needs').length}
+                    collapsed={folded.includes(`repo:${repo}`)}
+                    onToggle={() =>
+                      setFolded(toggled(folded, `repo:${repo}`, !folded.includes(`repo:${repo}`)))
+                    }
                   />
-                  {list.map((s) => (
-                    <SessionRow
-                      key={s.id}
-                      state={s.state}
-                      title={s.title ?? UNTITLED}
-                      branch={s.branch}
-                      contextLeft={s.contextLeft}
-                      activity={s.activity && plain(s.activity)}
-                      time={age(s.updatedAt, now)}
-                      selected={s.id === selected?.id}
-                      onSelect={() => setSelectedId(s.id)}
-                    />
-                  ))}
-                  <NewSessionButton repo={repo} />
+                  {folded.includes(`repo:${repo}`) ? null : (
+                    <>
+                      {list.map((s) => (
+                        <SessionRow
+                          key={s.id}
+                          state={s.state}
+                          title={s.title ?? UNTITLED}
+                          branch={s.branch}
+                          contextLeft={s.contextLeft}
+                          activity={s.activity && plain(s.activity)}
+                          time={age(s.updatedAt, now)}
+                          selected={s.id === selected?.id}
+                          onSelect={() => setSelectedId(s.id)}
+                        />
+                      ))}
+                      <NewSessionButton repo={repo} />
+                    </>
+                  )}
                 </Fragment>
               ))}
             </div>
