@@ -89,6 +89,8 @@ export interface TextInputProps {
   autoFocus?: boolean;
   /** The text as typed, on every change. */
   onChange?: (value: string) => void;
+  /** The text as it stands when the field loses focus, e.g. to save it. */
+  onBlur?: (value: string) => void;
 }
 
 export function TextInput({
@@ -107,6 +109,7 @@ export function TextInput({
   autoComplete,
   autoFocus,
   onChange,
+  onBlur,
 }: TextInputProps) {
   const inputId = id || `in-${(label || 'x').replace(/\W+/g, '-').toLowerCase()}`;
   return (
@@ -129,6 +132,7 @@ export function TextInput({
           placeholder={placeholder}
           defaultValue={value}
           onChange={onChange && ((e) => onChange(e.currentTarget.value))}
+          onBlur={onBlur && ((e) => onBlur(e.currentTarget.value))}
           disabled={disabled}
           aria-invalid={!!error}
           aria-describedby={`${inputId}-hint`}
@@ -156,7 +160,11 @@ export interface TextAreaProps {
   id?: string;
   /** Visible lines before it scrolls. */
   rows?: number;
+  /** The most it takes; its foot then counts what's typed against it. */
+  maxLength?: number;
   onChange?: (value: string) => void;
+  /** The text as it stands when the field loses focus, e.g. to save it. */
+  onBlur?: (value: string) => void;
 }
 
 /** A field for text that can run to several lines, such as a prompt. Same frame as TextInput. */
@@ -169,10 +177,44 @@ export function TextArea({
   mono,
   disabled,
   id,
-  rows = 4,
+  rows = 6,
+  maxLength,
   onChange,
+  onBlur,
 }: TextAreaProps) {
   const inputId = id || `ta-${label.replace(/\W+/g, '-').toLowerCase()}`;
+  const [length, setLength] = useState(value?.length ?? 0);
+  if (maxLength != null) {
+    return (
+      <div className={cx('joc-field', error && 'is-error', disabled && 'is-disabled')}>
+        <label className="joc-field__label" htmlFor={inputId}>
+          {label}
+        </label>
+        <textarea
+          id={inputId}
+          className={cx('joc-textarea', mono && 'is-mono')}
+          rows={rows}
+          maxLength={maxLength}
+          placeholder={placeholder}
+          defaultValue={value}
+          onChange={(e) => {
+            setLength(e.currentTarget.value.length);
+            onChange?.(e.currentTarget.value);
+          }}
+          onBlur={onBlur && ((e) => onBlur(e.currentTarget.value))}
+          disabled={disabled}
+          aria-invalid={!!error}
+          aria-describedby={`${inputId}-hint`}
+        />
+        <div id={`${inputId}-hint`} className="joc-textarea__foot">
+          <span>{error || hint}</span>
+          <span>
+            {length} / {maxLength}
+          </span>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={cx('joc-field', error && 'is-error', disabled && 'is-disabled')}>
       <label className="joc-field__label" htmlFor={inputId}>
@@ -185,6 +227,7 @@ export function TextArea({
         placeholder={placeholder}
         defaultValue={value}
         onChange={onChange && ((e) => onChange(e.currentTarget.value))}
+        onBlur={onBlur && ((e) => onBlur(e.currentTarget.value))}
         disabled={disabled}
         aria-invalid={!!error}
         aria-describedby={`${inputId}-hint`}
@@ -276,26 +319,6 @@ export function SegmentedControl({ options, value, onChange, label }: SegmentedC
           </button>
         );
       })}
-    </div>
-  );
-}
-
-export interface ChoiceFieldProps {
-  label: string;
-  /** One line under the choices, e.g. what the setting does. */
-  hint?: string;
-  options: { id: string; label: string }[];
-  value?: string;
-  onChange?: (id: string) => void;
-}
-
-/** A labelled segmented control, for a setting with a few fixed choices. */
-export function ChoiceField({ label, hint, options, value, onChange }: ChoiceFieldProps) {
-  return (
-    <div className="joc-field joc-choice">
-      <span className="joc-field__label">{label}</span>
-      <SegmentedControl label={label} options={options} value={value} onChange={onChange} />
-      {hint ? <span className="joc-field__hint">{hint}</span> : null}
     </div>
   );
 }

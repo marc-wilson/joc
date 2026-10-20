@@ -28,8 +28,6 @@ export {
 export {
   Button,
   type ButtonProps,
-  ChoiceField,
-  type ChoiceFieldProps,
   CollapseButton,
   type CollapseButtonProps,
   SegmentedControl,
@@ -149,6 +147,16 @@ export {
   SessionRow,
   type SessionRowProps,
 } from './session.tsx';
+export {
+  type SaveStatus,
+  SettingRow,
+  type SettingRowProps,
+  SettingsCard,
+  SettingsLayout,
+  type SettingsLayoutProps,
+  SettingsSection,
+  type SettingsSectionProps,
+} from './settings.tsx';
 export {
   STATE_LABEL,
   StateBadge,

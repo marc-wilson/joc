@@ -1,14 +1,6 @@
-/* SessionListNote and ChoiceField, for the session list and its settings. Not in the JOC design
+/* SessionListNote, for the session list. Not in the JOC design
    system yet: move them into styles/components.css when the design system has them, and delete
    this file. Tokens only. */
-
-.joc-choice .joc-seg {
-  align-self: flex-start;
-}
-
-.joc-choice + .joc-choice {
-  margin-top: var(--space-4);
-}
 
 .joc-slnote {
   display: flex;
