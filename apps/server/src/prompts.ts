@@ -49,3 +49,24 @@ export async function claimPrompts(
   }
   return claimed;
 }
+
+const imageIds = (docs: Pick<PromptDoc, 'images'>[]) =>
+  docs.flatMap((p) => (p.images ?? []).map((i) => i.id));
+
+/** Deletes a deleted session's prompts; the ids of the images they carried. */
+export async function forgetPrompts(owner: Owner, sessionId: string): Promise<string[]> {
+  const sent = await prompts()
+    .find({ owner, sessionId }, { projection: { images: 1 } })
+    .toArray();
+  await prompts().deleteMany({ owner, sessionId });
+  return imageIds(sent);
+}
+
+/** Which of `ids` a prompt of the owner's still carries. */
+export async function imagesSent(owner: Owner, ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const found = await prompts()
+    .find({ owner, 'images.id': { $in: ids } }, { projection: { images: 1 } })
+    .toArray();
+  return new Set(imageIds(found).filter((id) => ids.includes(id)));
+}

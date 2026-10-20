@@ -89,3 +89,9 @@ export async function findImages(owner: Owner, ids: string[]): Promise<ImageRef[
   const found = ids.flatMap((id) => byId.get(id) ?? []);
   return found.length === ids.length ? found : undefined;
 }
+
+/** Deletes these of the owner's images. */
+export async function deleteImages(owner: Owner, ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  await images().deleteMany({ _id: { $in: ids.map((id) => imageKey(owner, id)) }, owner });
+}

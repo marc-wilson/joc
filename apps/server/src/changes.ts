@@ -67,3 +67,8 @@ export async function getChanges(
     updatedAt: doc.updatedAt.toISOString(),
   };
 }
+
+/** Deletes a deleted session's diff. */
+export async function forgetChanges(owner: Owner, sessionId: string): Promise<void> {
+  await changes().deleteOne({ _id: sessionKey(owner, sessionId), owner });
+}

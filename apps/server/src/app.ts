@@ -9,6 +9,11 @@ import {
   answerFits,
   ChangesReport,
   type ClaimedAnswer,
+  type ClaimedDeletes,
+  DeleteClaim,
+  type DeleteRefused,
+  DeleteRequest,
+  DeleteResult,
   DeviceApproveRequest,
   DeviceStartRequest,
   DeviceTokenRequest,
@@ -51,6 +56,15 @@ import {
   takeOAuthCookies,
 } from './auth.ts';
 import { getChanges, onChanges, saveChanges } from './changes.ts';
+import {
+  claimDeletes,
+  finishDelete,
+  isDeleted,
+  listDeletes,
+  onDeleted,
+  onDeletes,
+  requestDeletes,
+} from './deletes.ts';
 import type { GitHubAuth } from './github.ts';
 import { getGitHub, onGitHub, saveGitHub } from './github-data.ts';
 import {
@@ -262,6 +276,10 @@ export function createApp({
 
   // Approving and managing machines is for a signed-in person, never a machine's own token.
   const person = (c: Context<Env>) => c.get('via') !== 'device';
+  /** Taken from a machine's plugin only, never a browser. */
+  const machine = (c: Context<Env>) => c.get('via') !== 'session';
+  /** A report for a session the owner deleted: taken, so the plugin moves on, and dropped. */
+  const ignored = (c: Context<Env>) => c.json({ ignored: true }, 200);
 
   // Shares the approval limit, so codes can't be guessed through it either.
   app.get('/api/devices/pending', async (c) => {
@@ -319,6 +337,7 @@ export function createApp({
   app.post('/api/reports', async (c) => {
     const parsed = SessionReport.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    if (await isDeleted(c.get('owner'), parsed.data.sessionId)) return ignored(c);
     // Which copy of the plugin the session runs, from the request: every plugin that names its
     // version does so in the header, so even a session that hasn't reloaded in a while tells.
     const session = await applyReport(c.get('owner'), parsed.data, {
@@ -435,6 +454,7 @@ export function createApp({
   app.post('/api/messages', async (c) => {
     const parsed = MessagesReport.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    if (await isDeleted(c.get('owner'), parsed.data.sessionId)) return ignored(c);
     return c.json({ added: await addMessages(c.get('owner'), parsed.data) });
   });
 
@@ -450,6 +470,7 @@ export function createApp({
   app.post('/api/changes', async (c) => {
     const parsed = ChangesReport.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    if (await isDeleted(c.get('owner'), parsed.data.sessionId)) return ignored(c);
     // 202 for a stale report: accepted, but a newer diff already won.
     return (await saveChanges(c.get('owner'), parsed.data))
       ? c.json({ ok: true })
@@ -487,6 +508,7 @@ export function createApp({
     if (c.get('via') === 'session') return c.json({ error: 'Forbidden' }, 403);
     const parsed = Waiting.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    if (await isDeleted(c.get('owner'), c.req.param('id'))) return ignored(c);
     return (await setWaiting(c.get('owner'), c.req.param('id'), parsed.data))
       ? c.body(null, 204)
       : c.json({ error: 'No such session' }, 404);
@@ -601,6 +623,44 @@ export function createApp({
       : c.json({ error: 'No such launch' }, 404);
   });
 
+  // ── Deleting ended sessions, on their machine and in JOC ───────────────────
+
+  // The owner's deletes of the last day, for the dashboard to show how each stands.
+  app.get('/api/deletes', async (c) => {
+    if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
+    return c.json(await listDeletes(c.get('owner')));
+  });
+
+  // From the dashboard: delete these ended sessions. Only a person deletes, never a machine.
+  app.post('/api/deletes', async (c) => {
+    if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
+    const parsed = DeleteRequest.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    const outcome = await requestDeletes(c.get('owner'), parsed.data.sessionIds);
+    if (outcome.ok) return c.json(outcome.deletions, 202);
+    const [first] = outcome.refused;
+    const error = outcome.refused.length === 1 && first ? first.reason : "Some can't be deleted";
+    return c.json({ error, sessions: outcome.refused } satisfies DeleteRefused, 400);
+  });
+
+  // From a machine's plugin: the deletes waiting for that machine. A browser can't take them.
+  app.post('/api/deletes/claim', async (c) => {
+    if (!machine(c)) return c.json({ error: 'Forbidden' }, 403);
+    const parsed = DeleteClaim.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    const deletes = await claimDeletes(c.get('owner'), parsed.data.machine, c.get('device'));
+    return c.json({ deletes } satisfies ClaimedDeletes);
+  });
+
+  app.post('/api/deletes/:id/result', async (c) => {
+    if (!machine(c)) return c.json({ error: 'Forbidden' }, 403);
+    const parsed = DeleteResult.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    return (await finishDelete(c.get('owner'), c.req.param('id'), parsed.data))
+      ? c.body(null, 204)
+      : c.json({ error: 'No such delete' }, 404);
+  });
+
   // ── Images: pasted in the dashboard, or in a session's conversation ─────────
 
   // The raw bytes, with their type as the Content-Type. Named by the hash of the bytes.
@@ -660,6 +720,8 @@ export function createApp({
           onNotifications(owner, () => publish({ type: 'notifications' })),
           onAlerts(owner, () => publish({ type: 'alerts' })),
           onLaunches(owner, () => publish({ type: 'launches' })),
+          onDeletes(owner, () => publish({ type: 'deletes' })),
+          onDeleted(owner, (sessionId) => publish({ type: 'deleted', sessionId })),
           onPrefs(owner, (prefs) => publish({ type: 'prefs', prefs })),
         ];
         const unsubscribeAll = () => {
