@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { PullRequest, Session } from '@joc/protocol';
-import { prFor, resumeCommand, sessionFor, sessionForThread } from './links.ts';
+import { prFor, sessionFor, sessionForThread } from './links.ts';
 import { duration } from './time.ts';
 
 const pr: PullRequest = {
@@ -34,14 +34,6 @@ test('a PR links to the latest session on its repo and branch', () => {
   assert.equal(sessionFor(pr, [other]), undefined);
   assert.equal(prFor(newer, [pr])?.number, 238);
   assert.equal(prFor(other, [pr]), undefined);
-});
-
-test('the resume command runs in the session folder, quoted', () => {
-  assert.equal(resumeCommand({ id: 'abc' }), 'claude --resume abc');
-  assert.equal(
-    resumeCommand({ id: 'abc', cwd: "/work/it's here" }),
-    "cd '/work/it'\\''s here' && claude --resume abc",
-  );
 });
 
 test('durations read naturally', () => {

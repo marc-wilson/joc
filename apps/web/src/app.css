@@ -115,6 +115,37 @@
   max-width: var(--thread-max, 1120px);
 }
 
+/* History rows have a column for each part, so the page takes the window's width. */
+.app-page--wide {
+  max-width: none;
+}
+
+/* On a phone the History header's bulk actions go under its title, across the width. */
+@media (max-width: 599px) {
+  .app-page--wide {
+    padding-inline: var(--space-4);
+  }
+
+  .app-page--wide .joc-sechead {
+    flex-wrap: wrap;
+  }
+
+  .app-page--wide .joc-sechead__text {
+    flex-basis: 100%;
+  }
+
+  .app-page--wide .joc-sechead__actions,
+  .app-history__bulk {
+    flex: 1;
+  }
+
+  .app-history__picked {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+  }
+}
+
 .app-link-form {
   display: flex;
   align-items: flex-end;
@@ -702,12 +733,9 @@
   background: var(--bg-sunken);
 }
 
-/* History rows with a checkbox before and actions after. */
-.joc-hist--tools {
-  position: relative;
-  grid-template-columns:
-    var(--control-sm) minmax(260px, 1.2fr) minmax(0, 1fr) minmax(300px, 380px)
-    var(--control-sm);
+/* History: a gap after each repo's list, as after an app-list. */
+.app-page .joc-histlist {
+  margin-bottom: var(--space-6);
 }
 
 .joc-hist__status {
