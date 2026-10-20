@@ -39,6 +39,8 @@ const firstLine = (text: string) =>
     .map((l) => l.trim())
     .find(Boolean);
 
+const STOPPED = /Successfully stopped task: ([\w-]+)/;
+
 /**
  * The session's background work, in the order it started. A subagent that blocks the turn ends
  * with its tool result; a background shell or async subagent ends with a `task_update`.
@@ -50,7 +52,21 @@ export function backgroundTasks(
   const results = new Map<string, Result>();
   const updates = new Map<string, Update>();
   for (const i of items) {
-    if (i.kind === 'tool_result') results.set(i.toolUseId, i);
+    if (i.kind === 'tool_result') {
+      results.set(i.toolUseId, i);
+      // Claude Code sends no notification for a task stopped with TaskStop; its result says so.
+      const stopped = STOPPED.exec(i.text)?.[1];
+      if (stopped && !updates.has(stopped)) {
+        updates.set(stopped, {
+          id: i.id,
+          at: i.at,
+          kind: 'task_update',
+          taskId: stopped,
+          status: 'killed',
+          summary: 'Stopped',
+        });
+      }
+    }
     if (i.kind === 'task_update') {
       // The first word on a task is the one that ended it.
       if (i.toolUseId && !updates.has(i.toolUseId)) updates.set(i.toolUseId, i);
