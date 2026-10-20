@@ -578,7 +578,10 @@ export const MAX_SESSION_COMMANDS = 500;
 
 /** One slash command the session can run, as its typeahead lists it. */
 export const SlashCommand = z.object({
-  /** Without the slash. A plugin's carries no `plugin:` prefix; `plugin` names it. */
+  /**
+   * Without the slash, as the session runs it: a plugin's file commands and skills as
+   * `plugin:command`, the ones it registers in code by their bare name.
+   */
   name: z.string().min(1).max(200),
   description: z.string().max(500),
   /** Drawn dim after the name, e.g. `<pr>` or `[instructions]`. */
