@@ -18,6 +18,7 @@ import {
   type ReadsClaim,
   type ServerVersion,
   SessionReport,
+  SessionSettings,
   type StreamEvent,
 } from '@joc/protocol';
 import { type Context, Hono } from 'hono';
@@ -67,6 +68,7 @@ import { claimPrompts, queuePrompt } from './prompts.ts';
 import { RateLimit } from './rate-limit.ts';
 import { newSecret, secretsEqual } from './secrets.ts';
 import { applyReport, listHistory, listSessions, onSessionUpdate } from './sessions.ts';
+import { getSessionSettings, saveSessionSettings } from './settings.ts';
 import { isBehind, LATEST_HEADER, PLUGIN_HEADER } from './version.ts';
 
 export interface AppOptions {
@@ -285,6 +287,20 @@ export function createApp({
   app.get('/api/sessions', async (c) => c.json(await listSessions(c.get('owner'))));
 
   app.get('/api/history', async (c) => c.json(await listHistory(c.get('owner'))));
+
+  // How long quiet and ended sessions stay on the live list: the person's choice, not a machine's.
+  app.get('/api/settings/sessions', async (c) => {
+    if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
+    return c.json(await getSessionSettings(c.get('owner')));
+  });
+
+  app.put('/api/settings/sessions', async (c) => {
+    if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
+    const parsed = SessionSettings.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    await saveSessionSettings(c.get('owner'), parsed.data);
+    return c.json(parsed.data);
+  });
 
   // ── GitHub, as the person's plugin reads it through `gh` ────────────────────
 

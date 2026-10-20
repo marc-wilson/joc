@@ -1,8 +1,15 @@
 import { EventEmitter } from 'node:events';
 import { getDb } from '@joc/db';
-import type { HistorySession, Session, SessionReport } from '@joc/protocol';
+import {
+  DROP_AFTER_MS,
+  type DropAfter,
+  type HistorySession,
+  type Session,
+  type SessionReport,
+} from '@joc/protocol';
 import { countMessages } from './messages.ts';
 import { type Owner, sessionKey } from './owner.ts';
+import { getSessionSettings } from './settings.ts';
 
 interface SessionDoc {
   /** `owner/sessionId` (see owner.ts). */
@@ -48,11 +55,9 @@ function toSession({
   };
 }
 
-/** A live session syncs every 30s, so an hour of silence means it's gone. */
-const LIVE_MS = 60 * 60_000;
+/** The live list's limit, the most recently active, so `never` can't grow it without end. */
+const LISTED = 200;
 
-// Live fan-out within this process, one channel per owner. A second server instance would miss
-// these events, so the deployment runs one replica until this moves to Mongo change streams.
 const updates = new EventEmitter().setMaxListeners(0);
 
 export function onSessionUpdate(owner: Owner, listener: (session: Session) => void): () => void {
@@ -60,17 +65,31 @@ export function onSessionUpdate(owner: Owner, listener: (session: Session) => vo
   return () => updates.off(`session:${owner}`, listener);
 }
 
+/** Sessions active within `after`, or every one for `never`. */
+function activeWithin(after: DropAfter, now: number): { updatedAt?: { $gt: Date } } {
+  return after === 'never' ? {} : { updatedAt: { $gt: new Date(now - DROP_AFTER_MS[after]) } };
+}
+
 /**
- * The owner's live sessions, in first-seen order so the dashboard never reorders them. Sessions
- * silent for an hour drop out here, which the dashboard reads only when it (re)connects: a row
- * never vanishes while someone is looking. They stay in the history.
+ * The owner's live sessions, in first-seen order so the dashboard never reorders them. An open
+ * session syncs every 30s and always shows. One that went quiet or ended drops out after the
+ * owner's settings say, which the dashboard reads only when it (re)connects or the settings
+ * change: a row never vanishes on its own while someone is looking. They stay in the history.
  */
 export async function listSessions(owner: Owner, now = Date.now()): Promise<Session[]> {
+  const { quiet, ended } = await getSessionSettings(owner);
   const docs = await sessions()
-    .find({ owner, updatedAt: { $gt: new Date(now - LIVE_MS) } })
-    .sort({ createdAt: 1 })
+    .find({
+      owner,
+      $or: [
+        { state: { $ne: 'offline' }, ...activeWithin(quiet, now) },
+        { state: 'offline', ...activeWithin(ended, now) },
+      ],
+    })
+    .sort({ updatedAt: -1 })
+    .limit(LISTED)
     .toArray();
-  return docs.map(toSession);
+  return docs.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).map(toSession);
 }
 
 /** Every session the owner has had, most recently active first, with message counts. */
