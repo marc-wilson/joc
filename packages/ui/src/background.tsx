@@ -26,6 +26,8 @@ export interface TaskRowProps {
   open?: boolean;
   /** Shown under the row while it's open, e.g. a `TaskDetails`. */
   details?: ReactNode;
+  /** Extra classes on the row, e.g. `joc-fade-in` for a row that just moved here. */
+  className?: string;
   children?: ReactNode;
 }
 
@@ -45,9 +47,15 @@ export function TaskRow({
   onToggle,
   open = false,
   details,
+  className: extra,
   children,
 }: TaskRowProps) {
-  const className = cx('joc-task', `joc-task--${result ? 'done' : state}`, onToggle && 'is-toggle');
+  const className = cx(
+    'joc-task',
+    `joc-task--${result ? 'done' : state}`,
+    onToggle && 'is-toggle',
+    extra,
+  );
   const content = (
     <>
       <span className="joc-task__lead">
@@ -80,7 +88,7 @@ export function TaskRow({
       <button type="button" className={className} aria-expanded={open} onClick={onToggle}>
         {content}
       </button>
-      {open && details ? <div className="joc-task__details">{details}</div> : null}
+      {open && details ? <div className={cx('joc-task__details', extra)}>{details}</div> : null}
     </>
   );
 }

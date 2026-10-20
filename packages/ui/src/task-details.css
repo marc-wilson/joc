@@ -1,6 +1,12 @@
 /* Opening a background task's details under its row. Not in the JOC design system yet: move it
    into styles/components.css when the design system has it, and delete this file. Tokens only. */
 
+/* A running time ticks every second: a fixed width keeps the title from shifting as it does. */
+.joc-task__elapsed {
+  min-width: 7ch;
+  text-align: right;
+}
+
 button.joc-task.is-toggle {
   width: 100%;
   border: 0;
