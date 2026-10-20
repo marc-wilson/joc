@@ -12,7 +12,7 @@ import {
 } from './hooks.ts';
 import { Updates } from './Updates.tsx';
 
-export type Page = 'sessions' | 'inbox' | 'github' | 'history' | 'machines';
+export type Page = 'sessions' | 'inbox' | 'github' | 'history' | 'machines' | 'settings';
 
 interface Props {
   page: Page;
@@ -78,6 +78,7 @@ export function Nav({ page, connected, viewing }: Props) {
           { id: 'inbox', label: 'Inbox', href: '/inbox', count: unread || undefined },
           { id: 'history', label: 'History', href: '/history' },
           { id: 'machines', label: 'Machines', href: '/link' },
+          { id: 'settings', label: 'Settings', href: '/settings' },
         ]}
         value={page}
         machine={connected === undefined ? undefined : connected ? 'Connected' : 'Reconnecting'}

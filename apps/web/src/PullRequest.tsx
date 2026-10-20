@@ -1,11 +1,4 @@
-import {
-  type PullRequest,
-  type Review,
-  type ReviewMethod,
-  type ReviewSettings,
-  reviewPrompt,
-  type Session,
-} from '@joc/protocol';
+import { type Launch, type PullRequest, type Session, STANDARD_REVIEW } from '@joc/protocol';
 import {
   Button,
   Code,
@@ -13,19 +6,22 @@ import {
   FileTree,
   PRRow,
   SectionHeader,
-  SegmentedControl,
   SessionLink,
-  SessionRow,
   TaskRow,
-  TextInput,
 } from '@joc/ui';
-import { useState } from 'react';
-import { apiFetch } from './auth.ts';
-import { useGitHub, useNow, useReviewSettings, useReviews, useSessions } from './hooks.ts';
+import { useEffect, useState } from 'react';
+import {
+  startLaunch,
+  useGitHub,
+  useLaunches,
+  useNow,
+  useReviewSettings,
+  useSessions,
+} from './hooks.ts';
+import { launched, launchFrom, launchStatus } from './launches.ts';
 import { sessionFor } from './links.ts';
 import { Nav } from './Nav.tsx';
-import { plain } from './plain.ts';
-import { findPR, prFromSearch, reviewSessions, reviewStatus } from './reviews.ts';
+import { findPR, prFromSearch } from './reviews.ts';
 import { age, ago } from './time.ts';
 
 const UNTITLED = 'New session';
@@ -33,178 +29,113 @@ const UNTITLED = 'New session';
 const sessionHref = (id: string) => `/?session=${encodeURIComponent(id)}`;
 const openOnGitHub = (pr: PullRequest) => window.open(pr.url, '_blank', 'noopener,noreferrer');
 
-type Where = 'new' | 'session';
-
-interface FormProps {
+interface ReviewProps {
   pr: PullRequest;
   sessions: Session[];
-  settings: ReviewSettings;
-  now: number;
+  launches: Launch[];
 }
 
-/** How to review, and where: Claude's standard review or the person's own, in a session. */
-function ReviewForm({ pr, sessions, settings, now }: FormProps) {
-  const [method, setMethod] = useState<ReviewMethod>(settings.method);
-  const [command, setCommand] = useState(settings.command ?? '');
-  const [where, setWhere] = useState<Where>('new');
-  const [chosen, setChosen] = useState<string>();
+/**
+ * One button: a new session, started beside one on the PR's repo (on its branch if one is),
+ * runs the person's review instructions, or Claude's review. Once it reports, it opens.
+ */
+function Review({ pr, sessions, launches }: ReviewProps) {
+  const settings = useReviewSettings();
+  const from = launchFrom(
+    sessions.filter((s) => s.repo === pr.repo),
+    pr.branch,
+  );
+  const [launchId, setLaunchId] = useState<string>();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string>();
+  const launch = launches.find((l) => l.id === launchId);
+  const started = launched(launch, sessions);
 
-  const open = reviewSessions(pr, sessions);
-  // The choice holds while its session is open; otherwise the first one on the repo.
-  const session = open.find((s) => s.id === chosen) ?? open[0];
-  const own = command.trim();
-  const ready = !!session && (method === 'standard' || !!own);
-  const prompt = reviewPrompt(pr, method, own);
+  // The person clicked Review and waited here: take them to the session once it reports.
+  useEffect(() => {
+    if (started) location.assign(sessionHref(started.id));
+  }, [started]);
 
-  async function start() {
-    if (!session || !ready) return;
+  async function review() {
+    if (!from) return;
     setSending(true);
     setError(undefined);
-    try {
-      // Remembered as the default, whichever way the review goes.
-      void apiFetch('/api/settings/review', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ method, command: own || undefined }),
-      }).catch(() => {});
-      const res = await apiFetch('/api/reviews', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          repo: pr.repo,
-          number: pr.number,
-          url: pr.url,
-          method,
-          command: own || undefined,
-          target:
-            where === 'new'
-              ? { kind: 'new', from: session.id }
-              : { kind: 'session', sessionId: session.id },
-        }),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: unknown };
-        setError(typeof body.error === 'string' ? body.error : "JOC couldn't start the review.");
-      }
-    } catch {
-      setError("JOC couldn't reach the server. Try again.");
-    } finally {
-      setSending(false);
-    }
+    const result = await startLaunch({
+      from: from.id,
+      review: { repo: pr.repo, number: pr.number, url: pr.url },
+    });
+    setSending(false);
+    if ('error' in result) setError(result.error);
+    else setLaunchId(result.id);
   }
 
+  if (!from) {
+    return (
+      <EmptyState
+        compact
+        title={`No open session on ${pr.repo}`}
+        body="A review runs in a new Claude Code session, started from one that's running on the repo. Open one there, and the Review button shows here."
+      />
+    );
+  }
+
+  const own = settings?.instructions;
+  const failed = launch?.status === 'failed';
+  // Where it stands shows in the list below; only a failure shows here too.
+  const note = error ?? (launch && failed ? launchStatus(launch, started) : undefined);
   return (
     <div className="app-review">
-      <div className="app-review__field">
-        <span className="joc-field__label">Review with</span>
-        <SegmentedControl
-          label="Review with"
-          value={method}
-          onChange={(id) => setMethod(id as ReviewMethod)}
-          options={[
-            { id: 'standard', label: "Claude's review" },
-            { id: 'own', label: 'Your own' },
-          ]}
-        />
-      </div>
-      {method === 'own' ? (
-        <TextInput
-          label="Your skill or command"
-          placeholder="/prep-pr"
-          value={command}
-          mono
-          onChange={setCommand}
-          hint="{pr} is the PR number and {url} its address. With neither, the address goes after it."
-        />
-      ) : null}
-
-      <div className="app-review__field">
-        <span className="joc-field__label">Run it in</span>
-        <SegmentedControl
-          label="Run it in"
-          value={where}
-          onChange={(id) => setWhere(id as Where)}
-          options={[
-            { id: 'new', label: 'A new session' },
-            { id: 'session', label: 'An open session' },
-          ]}
-        />
-      </div>
-
-      {open.length ? (
-        <div className="app-review__field">
-          <span className="joc-field__label">
-            {where === 'new' ? 'Started in the folder of' : 'Session'}
-          </span>
-          <div className="app-list app-review__sessions" role="listbox" aria-label="Sessions">
-            {open.map((s) => (
-              <SessionRow
-                key={s.id}
-                id={s.id}
-                state={s.state}
-                title={s.title ?? UNTITLED}
-                branch={s.branch}
-                contextLeft={s.contextLeft}
-                activity={s.activity && plain(s.activity)}
-                time={age(s.updatedAt, now)}
-                selected={s.id === session?.id}
-                onSelect={() => setChosen(s.id)}
-              />
-            ))}
-          </div>
-        </div>
-      ) : (
-        <EmptyState
-          compact
-          title={`No open session on ${pr.repo}`}
-          body="A review runs in Claude Code, in a checkout of the repo. Start a session there, and it shows up here."
-        />
-      )}
-
       <div className="app-review__send">
         <span className="app-review__prompt">
-          <span className="joc-field__label">Sends</span>
-          {method === 'own' && !own ? (
-            <span className="app-review__empty">Your command, once you type it</span>
+          {own ? (
+            'Runs your review instructions'
           ) : (
-            <Code>{prompt}</Code>
-          )}
+            <>
+              Runs <Code>{`${STANDARD_REVIEW} ${pr.number}`}</Code>
+            </>
+          )}{' '}
+          in a new session, in the folder of "{from.title ?? UNTITLED}".
+          <Button variant="ghost" size="sm" onClick={() => location.assign('/settings')}>
+            Change
+          </Button>
         </span>
-        <Button variant="primary" disabled={!ready} loading={sending} onClick={() => void start()}>
-          {where === 'new' ? 'Start review' : 'Send review'}
+        <Button
+          variant="primary"
+          loading={sending || (!!launch && !failed && !started)}
+          onClick={() => void review()}
+        >
+          {failed ? 'Try again' : 'Review'}
         </Button>
       </div>
-      {error ? <p className="app-review__error">{error}</p> : null}
+      {note ? <p className="app-review__error">{note}</p> : null}
     </div>
   );
 }
 
 function ReviewList({
-  reviews,
+  launches,
   sessions,
   now,
 }: {
-  reviews: Review[];
+  launches: Launch[];
   sessions: Session[];
   now: number;
 }) {
   return (
     <div className="app-tasks">
-      {reviews.map((review) => {
-        const session = sessions.find((s) => s.id === review.sessionId);
+      {launches.map((launch) => {
+        const session = launched(launch, sessions);
         return (
           <TaskRow
-            key={review.id}
+            key={launch.id}
             kind="subagent"
-            kindLabel={review.kind === 'new' ? 'New session' : 'Open session'}
-            title={session?.title ?? `Review #${review.number}`}
-            command={review.prompt}
-            tail={reviewStatus(review, session)}
-            elapsed={age(review.createdAt, now)}
+            kindLabel="New session"
+            title={session?.title ?? `Review #${launch.review?.number ?? ''}`}
+            command={launch.prompt}
+            tail={launchStatus(launch, session)}
+            elapsed={age(launch.createdAt, now)}
             state={session?.state ?? 'idle'}
-            result={review.status === 'failed' ? 'fail' : undefined}
+            result={launch.status === 'failed' ? 'fail' : undefined}
           >
             {session ? (
               <SessionLink
@@ -220,13 +151,12 @@ function ReviewList({
   );
 }
 
-/** /pr?repo=&number=: one of the person's pull requests, and reviewing it in a session. */
+/** /pr?repo=&number=: one of the person's pull requests, and reviewing it in a new session. */
 export function PullRequestPage() {
   const [target] = useState(() => prFromSearch(location.search));
   const github = useGitHub();
   const { sessions, connected } = useSessions();
-  const settings = useReviewSettings();
-  const reviews = useReviews(target);
+  const launches = useLaunches(target);
   const now = useNow();
   const pr =
     github?.state === 'reported' && target
@@ -275,12 +205,12 @@ export function PullRequestPage() {
         </div>
 
         <SectionHeader title="Review" />
-        {settings ? <ReviewForm pr={pr} sessions={sessions} settings={settings} now={now} /> : null}
+        <Review pr={pr} sessions={sessions} launches={launches} />
 
-        {reviews.length ? (
+        {launches.length ? (
           <>
-            <SectionHeader title="Reviews from JOC" count={reviews.length} />
-            <ReviewList reviews={reviews} sessions={sessions} now={now} />
+            <SectionHeader title="Reviews from JOC" count={launches.length} />
+            <ReviewList launches={launches} sessions={sessions} now={now} />
           </>
         ) : null}
 

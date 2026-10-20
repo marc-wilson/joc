@@ -1,5 +1,4 @@
-import type { PullRequest, Review, Session } from '@joc/protocol';
-import { sameWork } from './links.ts';
+import type { PullRequest } from '@joc/protocol';
 
 /** The PR's page in JOC. */
 export const prHref = (pr: Pick<PullRequest, 'repo' | 'number'>) =>
@@ -19,23 +18,4 @@ export function findPR(
   pr: { repo: string; number: number },
 ): PullRequest | undefined {
   return lists.flat().find((p) => p.repo === pr.repo && p.number === pr.number);
-}
-
-/**
- * The live sessions a review can run in or start from: open ones on the PR's repo, which have a
- * checkout of it. Ones on the PR's own branch come first, then the rest in first-seen order.
- */
-export function reviewSessions(pr: PullRequest, sessions: Session[]): Session[] {
-  const open = sessions.filter((s) => s.repo === pr.repo && s.state !== 'offline');
-  return [...open.filter((s) => sameWork(pr, s)), ...open.filter((s) => !sameWork(pr, s))];
-}
-
-/** One line on where a review stands, beside its session. */
-export function reviewStatus(review: Review, session: Session | undefined): string {
-  if (review.status === 'failed') return review.detail ?? "Couldn't start the session.";
-  if (review.status === 'starting') return 'Waiting for the session on this repo to start it';
-  if (!session) {
-    return review.kind === 'new' ? 'Started. Waiting for it to report' : 'Sent to the session';
-  }
-  return review.kind === 'new' ? 'Running in a new session' : 'Sent to the session';
 }
