@@ -111,6 +111,35 @@ export function answerFits(waiting: Waiting, answer: Answer): boolean {
   return given.length === asked.length && asked.every((q) => given.includes(q));
 }
 
+/** The most background tasks a report carries. */
+export const MAX_RUNNING_TASKS = 50;
+
+/**
+ * One piece of background work Claude Code says is in flight in a session: a shell, a subagent,
+ * a teammate, a monitor, a workflow, or a scheduled wakeup (`cron`). From the `background_tasks`
+ * and `session_crons` of its Stop hook. Only `id` and `type` are always there.
+ */
+export const RunningTask = z.object({
+  /** Claude Code's id: a shell's task id, an agent's id, a cron's id. */
+  id: z.string().min(1).max(200),
+  /** Claude Code's label for the kind: `shell`, `subagent`, `monitor`, `workflow`, `cron`, ... */
+  type: z.string().min(1).max(50),
+  status: z.string().max(50).optional(),
+  description: z.string().max(1000).optional(),
+  /** A shell's command line. */
+  command: z.string().max(1000).optional(),
+  /** A subagent's type, e.g. `Explore`. */
+  agentType: z.string().max(100).optional(),
+  /** A monitor's MCP server and tool. */
+  server: z.string().max(200).optional(),
+  tool: z.string().max(200).optional(),
+  /** A workflow's name. */
+  name: z.string().max(200).optional(),
+  /** A cron's schedule, e.g. `0 9 * * 1-5`. */
+  schedule: z.string().max(100).optional(),
+});
+export type RunningTask = z.infer<typeof RunningTask>;
+
 /** A live Claude Code session, as the server knows it. */
 export const Session = z.object({
   id: z.string(),
@@ -137,6 +166,13 @@ export const Session = z.object({
   waiting: Waiting.optional(),
   /** The last wait that ended, and who answered it. */
   answered: z.object({ id: z.string(), by: AnsweredBy }).optional(),
+  /**
+   * What Claude Code last said is running in the background, and when it said so. The truth for
+   * what runs; unset until a plugin that sends it reports a Stop.
+   */
+  background: z
+    .object({ at: z.iso.datetime(), tasks: z.array(RunningTask).max(MAX_RUNNING_TASKS) })
+    .optional(),
   startedAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -199,6 +235,11 @@ export const SessionReport = z.object({
   machine: z.string().max(200).optional(),
   model: z.string().max(100).optional(),
   cwd: z.string().max(1000).optional(),
+  /**
+   * Everything Claude Code says is running in the background, as of `at`: sent on a Stop (empty
+   * when nothing is) and as empty when the session ends. Left out, the stored list stays.
+   */
+  background: z.array(RunningTask).max(MAX_RUNNING_TASKS).optional(),
 });
 export type SessionReport = z.infer<typeof SessionReport>;
 
