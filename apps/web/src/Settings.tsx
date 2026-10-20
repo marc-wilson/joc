@@ -1,59 +1,140 @@
-import { STANDARD_REVIEW } from '@joc/protocol';
-import { Button, SectionHeader, TextArea } from '@joc/ui';
+import { DropAfter, type SessionSettings, STANDARD_REVIEW } from '@joc/protocol';
+import {
+  Button,
+  type SaveStatus,
+  SegmentedControl,
+  SettingRow,
+  SettingsCard,
+  SettingsLayout,
+  SettingsSection,
+  TextArea,
+  TextInput,
+} from '@joc/ui';
 import { useState } from 'react';
 import { apiFetch } from './auth.ts';
-import { useReviewSettings, useSessions } from './hooks.ts';
+import { useReviewSettings, useSessionSettings, useSessions } from './hooks.ts';
 import { Nav } from './Nav.tsx';
 import { NotificationSettingsForm, resetNotificationSettings } from './NotificationSettings.tsx';
+import { DROP_AFTER_OPTIONS } from './session-list.ts';
 
-type Saved = 'saving' | 'saved' | 'failed' | undefined;
+const SECTIONS = [
+  { id: 'sessions', label: 'Session list' },
+  { id: 'review', label: 'Review instructions' },
+  { id: 'notifications', label: 'Notifications' },
+];
 
-/** The review instructions field, once the stored ones are loaded. */
-function ReviewInstructions({ value }: { value: string }) {
-  const [draft, setDraft] = useState(value);
-  const [saved, setSaved] = useState<Saved>();
+/** The longest review instructions the server takes. */
+const MAX_INSTRUCTIONS = 20_000;
 
-  async function save() {
-    setSaved('saving');
-    try {
-      const res = await apiFetch('/api/settings/review', {
+type Track = (saving: Promise<boolean>) => void;
+
+/** How long quiet and ended sessions stay on the live list. They stay in History either way. */
+function SessionList({ track }: { track: Track }) {
+  const { settings, save } = useSessionSettings();
+  if (!settings) return null;
+  const pick = (key: keyof SessionSettings) => (id: string) => {
+    const parsed = DropAfter.safeParse(id);
+    if (parsed.success) track(save({ ...settings, [key]: parsed.data }));
+  };
+  return (
+    <>
+      <SettingRow
+        label="Quiet sessions"
+        hint="Their machine stopped reporting without ending them, such as a laptop asleep overnight."
+      >
+        <SegmentedControl
+          label="Quiet sessions stay for"
+          options={DROP_AFTER_OPTIONS}
+          value={settings.quiet}
+          onChange={pick('quiet')}
+        />
+      </SettingRow>
+      <SettingRow label="Ended sessions" hint="You exited Claude Code.">
+        <SegmentedControl
+          label="Ended sessions stay for"
+          options={DROP_AFTER_OPTIONS}
+          value={settings.ended}
+          onChange={pick('ended')}
+        />
+      </SettingRow>
+      <SettingRow label="Pinned sessions" hint="Stay until you unpin them." />
+    </>
+  );
+}
+
+type Mode = 'command' | 'prompt';
+
+/** A slash command, or a prompt of the person's own; empty runs Claude's review. */
+function ReviewInstructions({ value, track }: { value: string; track: Track }) {
+  const [mode, setMode] = useState<Mode>(value && !value.startsWith('/') ? 'prompt' : 'command');
+  // Each kind keeps its own text, so trying the other doesn't lose it.
+  const [drafts, setDrafts] = useState<Record<Mode, string>>({
+    command: value.startsWith('/') ? value : '',
+    prompt: value && !value.startsWith('/') ? value : '',
+  });
+  const [saved, setSaved] = useState(value);
+
+  function save(text: string) {
+    const instructions = text.trim();
+    if (instructions === saved) return;
+    setSaved(instructions);
+    track(
+      apiFetch('/api/settings/review', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ instructions: draft.trim() || undefined }),
-      });
-      setSaved(res.ok ? 'saved' : 'failed');
-    } catch {
-      setSaved('failed');
-    }
+        body: JSON.stringify({ instructions: instructions || undefined }),
+      })
+        .then((res) => res.ok)
+        .catch(() => false),
+    );
   }
 
+  const edit = (text: string) => setDrafts((d) => ({ ...d, [mode]: text }));
   return (
-    <div className="app-settings-page__form">
-      <TextArea
-        label="Review instructions"
-        placeholder={`Empty runs Claude's review: ${STANDARD_REVIEW} and the PR number`}
-        value={value}
-        rows={6}
-        onChange={(text) => {
-          setDraft(text);
-          setSaved(undefined);
-        }}
-        hint="A command such as /prep-pr, or a prompt of your own. {pr} is the PR number and {url} its address; with neither, the address goes after it."
-      />
-      <div className="app-settings-page__actions">
-        <span>
-          {saved === 'saved' ? 'Saved.' : saved === 'failed' ? "Couldn't save. Try again." : ''}
-        </span>
-        <Button
-          variant="primary"
-          size="sm"
-          loading={saved === 'saving'}
-          onClick={() => void save()}
-        >
-          Save
-        </Button>
-      </div>
-    </div>
+    <>
+      <SettingRow label="Send">
+        <SegmentedControl
+          label="Review instructions type"
+          options={[
+            { id: 'command', label: 'Command' },
+            { id: 'prompt', label: 'Prompt' },
+          ]}
+          value={mode}
+          onChange={(id) => {
+            const next: Mode = id === 'prompt' ? 'prompt' : 'command';
+            setMode(next);
+            save(drafts[next]);
+          }}
+        />
+      </SettingRow>
+      <SettingsCard>
+        {mode === 'command' ? (
+          <TextInput
+            key="command"
+            id="review-command"
+            label="Command"
+            mono
+            placeholder={STANDARD_REVIEW}
+            value={drafts.command}
+            onChange={edit}
+            onBlur={save}
+            hint={`A slash command from the session's plugins, such as /prep-pr. {pr} is the PR number and {url} its address; with neither, the address goes after it. Empty runs Claude's review, ${STANDARD_REVIEW}.`}
+          />
+        ) : (
+          <TextArea
+            key="prompt"
+            id="review-prompt"
+            label="Prompt"
+            placeholder="The instructions Claude should follow for a review"
+            value={drafts.prompt}
+            maxLength={MAX_INSTRUCTIONS}
+            onChange={edit}
+            onBlur={save}
+            hint="{pr} is the PR number and {url} its address; with neither, the address goes on a line after it."
+          />
+        )}
+      </SettingsCard>
+    </>
   );
 }
 
@@ -61,27 +142,49 @@ function ReviewInstructions({ value }: { value: string }) {
 export function SettingsPage() {
   const { connected } = useSessions();
   const review = useReviewSettings();
+  const [current, setCurrent] = useState(() => location.hash.slice(1) || 'sessions');
+  const [status, setStatus] = useState<SaveStatus>();
+  const track: Track = (saving) => {
+    setStatus('saving');
+    void saving.then((ok) => setStatus(ok ? 'saved' : 'failed'));
+  };
   return (
     <div className="joc-app app">
       <Nav page="settings" connected={connected} />
-      <main className="joc-app__main app-page app-settings-page">
-        <SectionHeader size="lg" title="Settings" />
-        <SectionHeader
-          title="Pull request reviews"
-          description="What the Review button on a pull request runs, in a new session."
-        />
-        {review ? <ReviewInstructions value={review.instructions ?? ''} /> : null}
-        <SectionHeader
-          title="Notifications"
-          description="Choose where each kind shows up. Everything is kept in history for 30 days."
+      <main className="joc-app__main app-settings-page">
+        <SettingsLayout
+          sections={SECTIONS}
+          current={current}
+          onNavigate={setCurrent}
+          status={status}
         >
-          <Button variant="ghost" size="sm" onClick={resetNotificationSettings}>
-            Reset to defaults
-          </Button>
-        </SectionHeader>
-        <div className="app-settings-page__form">
-          <NotificationSettingsForm />
-        </div>
+          <SettingsSection
+            id="sessions"
+            title="Session list"
+            description="How long sessions stay in the list. They stay in History either way."
+          >
+            <SessionList track={track} />
+          </SettingsSection>
+          <SettingsSection
+            id="review"
+            title="Review instructions"
+            description="What the Review button on a pull request sends to Claude, in a new session on the PR's repo."
+          >
+            {review ? <ReviewInstructions value={review.instructions ?? ''} track={track} /> : null}
+          </SettingsSection>
+          <SettingsSection
+            id="notifications"
+            title="Notifications"
+            description="Choose where each kind shows up. Everything is kept in history for 30 days."
+            actions={
+              <Button variant="ghost" size="sm" onClick={resetNotificationSettings}>
+                Reset to defaults
+              </Button>
+            }
+          >
+            <NotificationSettingsForm />
+          </SettingsSection>
+        </SettingsLayout>
       </main>
     </div>
   );

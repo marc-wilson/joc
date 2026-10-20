@@ -38,7 +38,6 @@ import { NewSessionDialog } from './NewSession.tsx';
 import { delivered, type PendingPrompt } from './pending.ts';
 import { plain } from './plain.ts';
 import { updatePrefs, usePrefs } from './prefs.ts';
-import { SessionSettingsDialog } from './SessionSettings.tsx';
 import { isQuiet, keepNote, matchesFilter } from './session-list.ts';
 import { groupSessions, PINNED_GROUP } from './sessions.ts';
 import { age } from './time.ts';
@@ -86,7 +85,7 @@ async function uploadImage(file: File): Promise<ImageRef | undefined> {
 }
 
 export default function App() {
-  const { sessions, connected, reload } = useSessions();
+  const { sessions, connected } = useSessions();
   const now = useNow();
   // A link like /?session=<id> (from a PR on the GitHub page) opens that session.
   const [selectedId, setSelectedId] = useState(
@@ -110,7 +109,6 @@ export default function App() {
     (opened?.id === selectedId ? opened : undefined) ??
     sessions[0];
   const keep = useSessionSettings();
-  const [settingsOpen, setSettingsOpen] = useState(false);
   // The repo a new session is being started on.
   const [newIn, setNewIn] = useState<string>();
   useReadWhileViewing(useAlerts(), selected?.id);
@@ -267,7 +265,11 @@ export default function App() {
                       <Button variant="ghost" size="sm" onClick={() => location.assign('/history')}>
                         History
                       </Button>
-                      <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => location.assign('/settings#sessions')}
+                      >
                         Change
                       </Button>
                     </>
@@ -356,18 +358,6 @@ export default function App() {
           )}
         </main>
       </div>
-      {settingsOpen && keep.settings ? (
-        <SessionSettingsDialog
-          settings={keep.settings}
-          onSave={async (next) => {
-            const ok = await keep.save(next);
-            // The person asked for a different list, so it's read afresh.
-            if (ok) reload();
-            return ok;
-          }}
-          onClose={() => setSettingsOpen(false)}
-        />
-      ) : null}
       {newIn ? (
         <NewSessionDialog
           repo={newIn}
