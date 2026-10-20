@@ -7,6 +7,7 @@ import {
   type Session,
   type SessionReport,
 } from '@joc/protocol';
+import { alertOnSession } from './alerts.ts';
 import { countMessages } from './messages.ts';
 import { type Owner, sessionKey } from './owner.ts';
 import { getSessionSettings } from './settings.ts';
@@ -30,6 +31,8 @@ interface SessionDoc {
   updatedAt: Date;
   /** `at` of the last report with a state applied. */
   reportedAt: number;
+  /** The state before the last report, so the report's alert (alerts.ts) knows what changed. */
+  previousState?: Session['state'];
 }
 
 const sessions = () => getDb().collection<SessionDoc>('sessions');
@@ -40,6 +43,7 @@ function toSession({
   sessionId,
   createdAt,
   reportedAt: _r,
+  previousState: _p,
   updatedAt,
   name,
   title,
@@ -126,6 +130,8 @@ export async function applyReport(
             ...set,
             owner: { $literal: owner },
             sessionId: { $literal: sessionId },
+            // Read before this stage sets the new state.
+            previousState: '$state',
             // A report without a state (a sync) keeps the stored one, `idle` for a new session.
             // It doesn't move `reportedAt` either, so a state report that fired before it but
             // lands after it still applies.
@@ -151,6 +157,7 @@ export async function applyReport(
   if (!doc) throw new Error(`Session ${sessionId} was not saved`);
   const session = toSession(doc);
   updates.emit(`session:${owner}`, session);
+  if (fields.state) await alertOnSession(owner, doc.previousState, { ...session, sessionId });
   return session;
 }
 

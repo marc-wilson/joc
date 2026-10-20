@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { closeClient, getDb } from '@joc/db';
 import {
+  Alert,
   ClaimedPrompt,
   ConversationItem,
   Device,
@@ -107,6 +108,11 @@ test('every API route needs an owner', async () => {
     ['POST', '/api/notifications/reads/claim'],
     ['GET', '/api/settings/sessions'],
     ['PUT', '/api/settings/sessions'],
+    ['GET', '/api/alerts'],
+    ['POST', '/api/alerts/read'],
+    ['POST', '/api/alerts/read-all'],
+    ['POST', '/api/alerts/clear'],
+    ['POST', '/api/alerts/clear-all'],
   ] as const) {
     const res = await app.request(path, { method });
     assert.equal(res.status, 401, `${method} ${path}`);
@@ -586,4 +592,85 @@ test('only a machine takes the mark-read queue, and bad ids are refused', async 
   assert.equal(res.status, 403);
   assert.equal((await call('alice', '/api/notifications/read', { ids: ['../x'] })).status, 400);
   assert.equal((await call('alice', '/api/notifications/read', { ids: [] })).status, 400);
+});
+
+const Alerts = z.array(Alert);
+const alertsOf = async (who: Who) => read(await call(who, '/api/alerts'), Alerts);
+const kinds = async (who: Who, sessionId: string) =>
+  (await alertsOf(who)).filter((a) => a.sessionId === sessionId).map((a) => [a.kind, a.read]);
+
+test("a session's alerts are raised, read and cleared only for its owner", async () => {
+  // Bob's own from earlier tests go first, so what's left is what this test raises.
+  await call('bob', '/api/alerts/clear-all', {});
+  const heard = await listen('alice', async () => {
+    await call('bob', '/api/reports', report('alerts-id'));
+    await call('bob', '/api/reports', report('alerts-id', { state: 'needs', activity: 'Bob q' }));
+  });
+  assert.doesNotMatch(heard, /event: alerts/);
+
+  await call('alice', '/api/reports', report('alerts-id', { title: 'Alice asks' }));
+  await call('alice', '/api/reports', report('alerts-id', { state: 'needs' }));
+  // A sync (no state) changes nothing.
+  await call('alice', '/api/reports', report('alerts-id', { state: undefined }));
+  assert.deepEqual(await kinds('alice', 'alerts-id'), [['needs', false]]);
+  assert.deepEqual(await kinds('bob', 'alerts-id'), [['needs', false]]);
+  const [alices] = await alertsOf('alice');
+  assert.ok(alices);
+  assert.equal(alices.title, 'Alice asks');
+
+  // Bob can't read or clear Alice's alert by its id, nor through his own "all".
+  assert.equal((await call('bob', '/api/alerts/read', { ids: [alices.id] })).status, 204);
+  assert.equal((await call('bob', '/api/alerts/clear', { ids: [alices.id] })).status, 204);
+  await call('bob', '/api/alerts/read-all', {});
+  assert.deepEqual(await kinds('alice', 'alerts-id'), [['needs', false]]);
+  assert.deepEqual(await kinds('bob', 'alerts-id'), [['needs', true]]);
+  await call('bob', '/api/alerts/clear-all', {});
+  assert.deepEqual(await alertsOf('bob'), []);
+
+  // Answered: Alice's session leaves `needs`, so its alert reads; the turn's end is news.
+  await call('alice', '/api/reports', report('alerts-id'));
+  await call('alice', '/api/reports', report('alerts-id', { state: 'idle', activity: 'Done' }));
+  assert.deepEqual(await kinds('alice', 'alerts-id'), [
+    ['finished', false],
+    ['needs', true],
+  ]);
+  const [finished] = await alertsOf('alice');
+  assert.equal((await call('alice', '/api/alerts/read', { ids: [finished?.id] })).status, 204);
+  assert.equal((await call('alice', '/api/alerts/clear', { ids: [alices.id] })).status, 204);
+  assert.deepEqual(await kinds('alice', 'alerts-id'), [['finished', true]]);
+  assert.deepEqual(await alertsOf('bob'), []);
+});
+
+test('review requests raise alerts only for their owner, and only once', async () => {
+  const report = (reviewRequested: unknown[], status = 'ok') => ({
+    at: ++clock,
+    status,
+    reviewRequested,
+    mine: [],
+  });
+  await call('alice', '/api/alerts/clear-all', {});
+  await call('bob', '/api/github', report([]));
+  await call('bob', '/api/github', report([pr('Bob review')]));
+  // What a read after a failed one finds is where she starts, not news; after it, a new request is.
+  await call('alice', '/api/github', report([], 'error'));
+  await call('alice', '/api/github', report([pr('Already there')]));
+  await call('alice', '/api/github', report([{ ...pr('Review me'), number: 8 }]));
+  await call('alice', '/api/github', report([{ ...pr('Review me'), number: 8 }]));
+  // After gh failed, what comes back isn't news either.
+  await call('alice', '/api/github', report([], 'signed-out'));
+  await call('alice', '/api/github', report([{ ...pr('Back again'), number: 9 }]));
+  assert.deepEqual(
+    (await alertsOf('alice')).map((a) => [a.kind, a.title, a.number]),
+    [['review', 'Review me', 8]],
+  );
+  assert.deepEqual(
+    (await alertsOf('bob')).map((a) => a.title),
+    ['Bob review'],
+  );
+});
+
+test('alert ids are checked', async () => {
+  assert.equal((await call('alice', '/api/alerts/read', { ids: ['../x'] })).status, 400);
+  assert.equal((await call('alice', '/api/alerts/clear', { ids: [] })).status, 400);
+  assert.equal((await call('alice', '/api/alerts/clear', {})).status, 400);
 });
