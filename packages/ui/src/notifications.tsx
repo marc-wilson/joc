@@ -1,0 +1,491 @@
+import type { SessionState } from '@joc/protocol';
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+  type UIEvent,
+  useEffect,
+  useRef,
+} from 'react';
+import { CIMark, type CIMarkProps } from './ci.tsx';
+import { Button, type TabItem, Tabs } from './controls.tsx';
+import { cx } from './cx.ts';
+import { Icon, type IconName } from './Icon.tsx';
+import { StateDot } from './state.tsx';
+
+// The notification center's pieces: the panel the bell opens, its groups and rows, the pill that
+// holds new arrivals back while you read, the toast stack, and the settings matrix. Styles are
+// in notif.css (prefix `jn-`).
+
+const ROW = 'article.jn-row';
+
+/** Clicks the focused row's control marked `data-row`, as the panel's keys do. */
+function press(row: Element | null, which: 'action' | 'read' | 'clear') {
+  row?.querySelector<HTMLElement>(`[data-row="${which}"]:not(:disabled)`)?.click();
+}
+
+export interface NotificationPanelProps {
+  id?: string;
+  /** "7 unread", "Nothing unread". */
+  summary: string;
+  tabs: TabItem[];
+  tab: string;
+  onTabChange: (id: string) => void;
+  /** Disabled when nothing is unread. */
+  onMarkAllRead?: () => void;
+  /** Disabled when nothing read is left to clear. */
+  onClearRead?: () => void;
+  onSettings: () => void;
+  historyHref: string;
+  /** Escape, or a press outside the panel and its bell. Focus goes back to the bell. */
+  onClose: () => void;
+  /** The bell: a press on it isn't outside, and it takes focus back. */
+  anchor: RefObject<HTMLElement | null>;
+  /** Pinned to the top of the list: new arrivals waiting (ArrivalsPill). */
+  arrivals?: ReactNode;
+  onPointerEnter?: () => void;
+  onPointerLeave?: () => void;
+  onScroll?: (e: UIEvent<HTMLDivElement>) => void;
+  bodyRef?: RefObject<HTMLDivElement | null>;
+  children: ReactNode;
+}
+
+/**
+ * The notifications popover, under the nav bar's bell: never a page of its own. It fades in,
+ * takes focus, and closes on Escape or a press outside it. Keys: ↑ ↓ move between rows, Enter
+ * runs a row's action, e marks it read, Backspace clears it.
+ */
+export function NotificationPanel({
+  id,
+  summary,
+  tabs,
+  tab,
+  onTabChange,
+  onMarkAllRead,
+  onClearRead,
+  onSettings,
+  historyHref,
+  onClose,
+  anchor,
+  arrivals,
+  onPointerEnter,
+  onPointerLeave,
+  onScroll,
+  bodyRef,
+  children,
+}: NotificationPanelProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+
+  useEffect(() => {
+    ref.current?.focus();
+    const bell = anchor.current;
+    const outside = (e: PointerEvent) => {
+      const at = e.target as Node;
+      if (ref.current?.contains(at) || anchor.current?.contains(at)) return;
+      // A dialog opened from the panel (its settings) isn't outside it.
+      if (at instanceof Element && at.closest('dialog')) return;
+      close.current();
+    };
+    document.addEventListener('pointerdown', outside);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      // Back to the bell, unless the press went somewhere that took focus.
+      const now = document.activeElement;
+      if (!now || now === document.body || ref.current?.contains(now)) bell?.focus();
+    };
+  }, [anchor]);
+
+  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    const target = e.target as HTMLElement;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+      return;
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const rows = [...(ref.current?.querySelectorAll<HTMLElement>(ROW) ?? [])];
+      if (!rows.length) return;
+      e.preventDefault();
+      const at = rows.findIndex((r) => r.contains(target));
+      const next =
+        at < 0
+          ? e.key === 'ArrowDown'
+            ? 0
+            : rows.length - 1
+          : Math.min(rows.length - 1, Math.max(0, at + (e.key === 'ArrowDown' ? 1 : -1)));
+      rows[next]?.focus();
+      return;
+    }
+    // The rest act on the focused row itself, not a button inside it.
+    if (!target.matches(ROW)) return;
+    if (e.key === 'Enter') press(target, 'action');
+    else if (e.key === 'e') press(target, 'read');
+    else if (e.key === 'Backspace') press(target, 'clear');
+    else return;
+    e.preventDefault();
+  }
+
+  return (
+    <div
+      ref={ref}
+      id={id}
+      className="jn-panel is-anchored joc-fade-in"
+      role="dialog"
+      aria-label="Notifications"
+      tabIndex={-1}
+      onKeyDown={onKeyDown}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+    >
+      <div className="jn-panel__head">
+        <h2 className="jn-panel__title">Notifications</h2>
+        <span className="jn-panel__sub">{summary}</span>
+        <span className="jn-spacer" />
+        <Button
+          variant="ghost"
+          size="sm"
+          icon="check"
+          disabled={!onMarkAllRead}
+          onClick={onMarkAllRead}
+        >
+          Mark all read
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon="settings"
+          aria-label="Notification settings"
+          title="Notification settings"
+          onClick={onSettings}
+        />
+      </div>
+      <div className="jn-panel__tabs">
+        <Tabs items={tabs} value={tab} onChange={onTabChange} />
+      </div>
+      <div className="jn-panel__body" ref={bodyRef} onScroll={onScroll}>
+        {arrivals}
+        {children}
+      </div>
+      <div className="jn-panel__foot">
+        <Button variant="ghost" size="sm" disabled={!onClearRead} onClick={onClearRead}>
+          Clear all read
+        </Button>
+        <a className="jn-link" href={historyHref}>
+          View history
+          <Icon name="chevronRight" size={12} />
+        </a>
+      </div>
+    </div>
+  );
+}
+
+export interface NotificationGroupProps {
+  label: string;
+  count?: number;
+  /** Quieter words at the end of the header, e.g. "Stays until answered". */
+  hint?: string;
+  children: ReactNode;
+}
+
+/** A sticky group header and its rows. */
+export function NotificationGroup({ label, count, hint, children }: NotificationGroupProps) {
+  return (
+    <section aria-label={label}>
+      <div className="jn-group__head">
+        {label}
+        {count != null ? <span className="jn-group__count">{count}</span> : null}
+        {hint ? <span className="jn-group__hint">{hint}</span> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** What leads a row: a session state, a CI outcome, or an icon. */
+export type NotificationLead =
+  | { state: SessionState }
+  | { ci: NonNullable<CIMarkProps['status']> }
+  | { icon: IconName };
+
+function Lead({ lead }: { lead: NotificationLead }) {
+  if ('state' in lead) return <StateDot state={lead.state} />;
+  if ('ci' in lead) return <CIMark status={lead.ci} />;
+  return <Icon name={lead.icon} size={14} />;
+}
+
+export interface NotificationAction {
+  label: string;
+  /** Secondary for the action the row is for, ghost for just opening it. */
+  variant?: 'secondary' | 'ghost';
+  /** A link, opened in a new tab when `external`. */
+  href?: string;
+  external?: boolean;
+  onClick?: () => void;
+  disabled?: boolean;
+}
+
+export interface NotificationRowProps {
+  lead: NotificationLead;
+  title: string;
+  /** Where it's from, in mono: `atlas-web#12`, `atlas-web`. */
+  source: string;
+  text?: ReactNode;
+  time: string;
+  /** Unread rows are heavier and brighter; read rows quieter. Never a dot. */
+  unread: boolean;
+  /**
+   * A session waiting on you: the needs rail and tint, a taller row with `answers` under it, and
+   * no clear. It leaves when the session stops waiting.
+   */
+  needs?: boolean;
+  /** The needs row's lower line, before its action. */
+  answers?: ReactNode;
+  action?: NotificationAction;
+  onMarkRead?: () => void;
+  onClear?: () => void;
+  /** Cleared or resolved: a blank slot keeps its space until the pointer leaves the panel. */
+  gone?: boolean;
+  /** Its accessible name, e.g. "Fix auth redirect needs you, 2 minutes ago". */
+  label?: string;
+}
+
+function ActionControl({ action, link }: { action: NotificationAction; link?: boolean }) {
+  if (action.href) {
+    return (
+      <a
+        className={
+          link ? 'jn-link' : cx('joc-btn', `joc-btn--${action.variant ?? 'ghost'}`, 'joc-btn--sm')
+        }
+        href={action.href}
+        data-row="action"
+        onClick={action.onClick}
+        {...(action.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+      >
+        {link ? action.label : <span className="joc-btn__content">{action.label}</span>}
+      </a>
+    );
+  }
+  return (
+    <Button
+      variant={action.variant ?? 'ghost'}
+      size="sm"
+      data-row="action"
+      disabled={action.disabled}
+      onClick={action.onClick}
+    >
+      {action.label}
+    </Button>
+  );
+}
+
+/** One notification: lead glyph, title, source and detail, time, and one inline action. */
+export function NotificationRow({
+  lead,
+  title,
+  source,
+  text,
+  time,
+  unread,
+  needs,
+  answers,
+  action,
+  onMarkRead,
+  onClear,
+  gone,
+  label,
+}: NotificationRowProps) {
+  const className = cx('jn-row', needs && 'jn-row--needs', unread && 'is-unread');
+  if (gone) return <div className={cx(className, 'is-gone')} aria-hidden="true" />;
+  return (
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: rows take focus for the panel's keys
+    <article className={className} aria-label={label ?? title} tabIndex={0}>
+      <span className="jn-row__lead" aria-hidden="true">
+        <Lead lead={lead} />
+      </span>
+      <div className="jn-row__main">
+        <div className="jn-row__title">
+          {unread && !needs ? <span className="joc-sr">Unread: </span> : null}
+          {title}
+        </div>
+        <div className="jn-row__detail">
+          <span className="jn-src">{source}</span>
+          {text ? <span className="jn-row__text">{text}</span> : null}
+        </div>
+      </div>
+      <div className="jn-row__side">
+        <span className="jn-time">{time}</span>
+        {action && !needs ? (
+          <span className="jn-row__act">
+            <ActionControl action={action} />
+          </span>
+        ) : null}
+      </div>
+      {needs ? (
+        <div className="jn-answers">
+          {answers}
+          <span className="jn-spacer" />
+          {action ? <ActionControl action={action} link /> : null}
+        </div>
+      ) : onMarkRead || onClear ? (
+        <div className="jn-row__hover">
+          {onMarkRead && unread ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="check"
+              aria-label={`Mark read: ${title}`}
+              title="Mark read (e)"
+              data-row="read"
+              onClick={onMarkRead}
+            />
+          ) : null}
+          {onClear ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="x"
+              aria-label={`Clear: ${title}`}
+              title="Clear (Backspace)"
+              data-row="clear"
+              onClick={onClear}
+            />
+          ) : null}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+export interface ArrivalsPillProps {
+  /** New notifications held back. */
+  count: number;
+  /** How many of them are a session needing you. */
+  needs?: number;
+  onShow: () => void;
+}
+
+/**
+ * "2 new · Show": new notifications wait behind it while you read, rather than landing above
+ * the row under your pointer. With a session needing you among them, it says so.
+ */
+export function ArrivalsPill({ count, needs = 0, onShow }: ArrivalsPillProps) {
+  if (!count) return null;
+  return (
+    <div className="jn-newpill">
+      <button type="button" className="jn-bar" onClick={onShow}>
+        {needs ? (
+          <>
+            <StateDot state="needs" />
+            {needs} {needs === 1 ? 'needs' : 'need'} you
+          </>
+        ) : (
+          `${count} new`
+        )}
+        <span className="jn-bar__go">Show</span>
+      </button>
+    </div>
+  );
+}
+
+export interface ToastStackProps {
+  /** Toasts waiting behind the ones shown. */
+  more?: number;
+  onOpenMore?: () => void;
+  /** The toasts, newest first. */
+  children: ReactNode;
+}
+
+/**
+ * The toasts in the bottom-right corner, newest on top. Existing toasts never move; past three,
+ * a bar on top counts the rest.
+ */
+export function ToastStack({ more = 0, onOpenMore, children }: ToastStackProps) {
+  return (
+    <section className="jn-toasts is-fixed" aria-label="Notifications">
+      {more ? (
+        <div className="jn-toasts__more joc-fade-in">
+          <span>{more} more waiting</span>
+          <button type="button" className="jn-link" onClick={onOpenMore}>
+            Open notifications
+          </button>
+        </div>
+      ) : null}
+      {children}
+    </section>
+  );
+}
+
+export type NotificationChannel = 'panel' | 'toast' | 'desktop';
+
+export interface NotificationMatrixKind {
+  id: string;
+  label: string;
+  /** Quieter line under the label, when it isn't history only or locked. */
+  note?: string;
+  channels: Record<NotificationChannel, boolean>;
+  /** Always in the panel: its Panel box is checked and can't change. */
+  locked?: boolean;
+}
+
+export interface NotificationMatrixProps {
+  groups: { label: string; kinds: NotificationMatrixKind[] }[];
+  onChange: (kind: string, channel: NotificationChannel, on: boolean) => void;
+}
+
+const CHANNELS: { id: NotificationChannel; label: string; aria: string }[] = [
+  { id: 'panel', label: 'Panel', aria: 'in panel' },
+  { id: 'toast', label: 'Toast', aria: 'as toast' },
+  { id: 'desktop', label: 'Desktop', aria: 'on desktop' },
+];
+
+/** Where each kind shows up: Panel, Toast, Desktop. All off keeps it in the history only. */
+export function NotificationMatrix({ groups, onChange }: NotificationMatrixProps) {
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a grid of checkboxes, laid out by notif.css
+    <div className="jn-matrix" role="group" aria-label="Where each kind shows up">
+      <div className="jn-mx__row jn-mx__head">
+        <span>Kind</span>
+        {CHANNELS.map((c) => (
+          <span key={c.id}>{c.label}</span>
+        ))}
+      </div>
+      {groups.map((g) => (
+        <div key={g.label} role="presentation">
+          <div className="jn-mx__group">{g.label}</div>
+          {g.kinds.map((k) => {
+            const off = !k.channels.panel && !k.channels.toast && !k.channels.desktop;
+            const note = k.locked
+              ? 'Always in the panel until answered'
+              : off
+                ? 'History only'
+                : k.note;
+            return (
+              <div key={k.id} className="jn-mx__row">
+                <span className="jn-mx__kind">
+                  <span>{k.label}</span>
+                  {note ? <span className="jn-matrix__note">{note}</span> : null}
+                </span>
+                {CHANNELS.map((c) => (
+                  <span key={c.id}>
+                    <input
+                      type="checkbox"
+                      className="jn-check"
+                      checked={k.channels[c.id] || (c.id === 'panel' && !!k.locked)}
+                      disabled={c.id === 'panel' && k.locked}
+                      aria-label={`${k.label} ${c.aria}`}
+                      onChange={(e) => onChange(k.id, c.id, e.target.checked)}
+                    />
+                  </span>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}

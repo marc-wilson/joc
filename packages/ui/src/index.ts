@@ -14,6 +14,7 @@ export {
   TaskSection,
   type TaskSectionProps,
 } from './background.tsx';
+export { NotificationBell, type NotificationBellProps } from './bell.tsx';
 export { ContextMeter, type ContextMeterProps } from './ContextMeter.tsx';
 export { CIBadge, type CIBadgeProps, CIMark, type CIMarkProps } from './ci.tsx';
 export {
@@ -107,10 +108,29 @@ export {
   type Theme,
   ThemePair,
   type ThemePairProps,
+  TOAST_MS,
   Toast,
   type ToastProps,
 } from './layout.tsx';
 export { formatBytes, imageTypeName } from './media.ts';
+export {
+  ArrivalsPill,
+  type ArrivalsPillProps,
+  type NotificationAction,
+  type NotificationChannel,
+  NotificationGroup,
+  type NotificationGroupProps,
+  type NotificationLead,
+  NotificationMatrix,
+  type NotificationMatrixKind,
+  type NotificationMatrixProps,
+  NotificationPanel,
+  type NotificationPanelProps,
+  NotificationRow,
+  type NotificationRowProps,
+  ToastStack,
+  type ToastStackProps,
+} from './notifications.tsx';
 export {
   NewSessionButton,
   type NewSessionButtonProps,

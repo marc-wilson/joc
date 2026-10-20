@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Avatar } from './Avatar.tsx';
+import { NotificationBell, type NotificationBellProps } from './bell.tsx';
 import { CIMark } from './ci.tsx';
 import { CopyCommand } from './code.tsx';
 import { Button } from './controls.tsx';
@@ -22,9 +23,18 @@ export interface NavBarProps {
   machine?: string;
   machineOffline?: boolean;
   user?: string;
+  /** The notifications bell, first in the right-hand cluster. */
+  notifications?: NotificationBellProps;
 }
 
-export function NavBar({ items, value, machine, machineOffline, user }: NavBarProps) {
+export function NavBar({
+  items,
+  value,
+  machine,
+  machineOffline,
+  user,
+  notifications,
+}: NavBarProps) {
   return (
     <header className="joc-nav">
       <a className="joc-nav__brand" href="/">
@@ -49,6 +59,7 @@ export function NavBar({ items, value, machine, machineOffline, user }: NavBarPr
         })}
       </nav>
       <div className="joc-nav__right">
+        {notifications ? <NotificationBell {...notifications} /> : null}
         {machine ? (
           <span className={cx('joc-nav__machine', machineOffline && 'is-offline')}>
             <span className="joc-nav__link-dot" aria-hidden="true" />
@@ -114,16 +125,41 @@ export function EmptyState({
   );
 }
 
+/** How long a toast that doesn't persist stays, while the pointer and focus are elsewhere. */
+export const TOAST_MS = 5_000;
+
 export interface ToastProps {
   title: string;
-  body?: string;
+  /** A sentence, or a node so a command can be mono. */
+  body?: ReactNode;
   tone?: 'neutral' | 'success' | 'error' | 'needs';
   action?: string;
   onAction?: () => void;
   onDismiss?: () => void;
+  /**
+   * Stays until acted on or dismissed. Defaults to true for `needs`; otherwise the toast calls
+   * `onDismiss` after TOAST_MS, paused while the pointer or focus is on it.
+   */
+  persist?: boolean;
 }
 
-export function Toast({ title, body, tone = 'neutral', action, onAction, onDismiss }: ToastProps) {
+export function Toast({
+  title,
+  body,
+  tone = 'neutral',
+  action,
+  onAction,
+  onDismiss,
+  persist = tone === 'needs',
+}: ToastProps) {
+  const [held, setHeld] = useState(false);
+  const dismiss = useRef(onDismiss);
+  dismiss.current = onDismiss;
+  useEffect(() => {
+    if (persist || held) return;
+    const id = setTimeout(() => dismiss.current?.(), TOAST_MS);
+    return () => clearTimeout(id);
+  }, [persist, held]);
   const lead =
     tone === 'needs' ? (
       <StateDot state="needs" />
@@ -140,6 +176,12 @@ export function Toast({ title, body, tone = 'neutral', action, onAction, onDismi
     <Root
       className={cx('joc-toast', `joc-toast--${tone}`, 'joc-fade-in')}
       role={urgent ? 'alert' : undefined}
+      onPointerEnter={() => setHeld(true)}
+      onPointerLeave={() => setHeld(false)}
+      onFocus={() => setHeld(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setHeld(false);
+      }}
     >
       <span className="joc-toast__lead">{lead}</span>
       <div className="joc-toast__text">
