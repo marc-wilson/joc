@@ -1,5 +1,11 @@
 export { Avatar, type AvatarProps } from './Avatar.tsx';
-export { Banner, type BannerProps } from './Banner.tsx';
+export {
+  Banner,
+  type BannerProps,
+  type BannerSession,
+  BannerSessions,
+  type BannerSessionsProps,
+} from './Banner.tsx';
 export {
   AgentTeam,
   type AgentTeamMember,
