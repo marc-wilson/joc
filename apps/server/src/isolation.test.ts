@@ -449,6 +449,65 @@ test("a machine's plugin version is shown only to its owner, and an old plugin s
   );
 });
 
+test("a machine's installed plugin and its sessions' old copies are shown only to their owner", async () => {
+  const send = (who: Who, sessionId: string, headers: Record<string, string>, extra = {}) =>
+    app.request('/api/reports', {
+      method: 'POST',
+      headers: { ...auth(who), 'content-type': 'application/json', ...headers },
+      body: JSON.stringify(report(sessionId, extra)),
+    });
+  const machines = async (who: Who) =>
+    read(
+      await app.request('/api/devices', { headers: { cookie: cookies.get(who) ?? '' } }),
+      z.array(Device),
+    );
+  const current = { 'x-joc-plugin': '1.0.0', 'x-joc-plugin-installed': '1.0.0' };
+
+  // Alice updated: one session loaded the new copy, another still runs the old one.
+  assert.equal((await send('alice', 'plugin-new', current)).status, 200);
+  assert.equal((await send('alice', 'plugin-old', { 'x-joc-plugin': '0.9.0' })).status, 200);
+  // Bob's session has the same id and runs an old copy too, with nothing installed said.
+  assert.equal((await send('bob', 'plugin-old', { 'x-joc-plugin': '0.8.0' })).status, 200);
+
+  const [alice] = await machines('alice');
+  assert.equal(alice?.installed, '1.0.0');
+  // The old session's request was the latest, but what's installed decides.
+  assert.equal(alice?.plugin, '0.9.0');
+  assert.equal(alice?.outdated, false);
+  assert.deepEqual(
+    alice?.stale.map((s) => [s.id, s.plugin]),
+    [['plugin-old', '0.9.0']],
+  );
+  const [bob] = await machines('bob');
+  assert.equal(bob?.installed, undefined);
+  // Bob's plugin can't say what's installed: judged by its latest request, as before.
+  assert.equal(bob?.outdated, true);
+  assert.deepEqual(
+    bob?.stale.map((s) => [s.id, s.plugin]),
+    [['plugin-old', '0.8.0']],
+  );
+
+  // Each owner's sessions show the copy they run, and only to them.
+  const plugins = async (who: Who) =>
+    (await read(await call(who, '/api/sessions'), Sessions))
+      .filter((s) => s.id.startsWith('plugin-'))
+      .map((s) => [s.id, s.plugin]);
+  assert.deepEqual(await plugins('alice'), [
+    ['plugin-new', '1.0.0'],
+    ['plugin-old', '0.9.0'],
+  ]);
+  assert.deepEqual(await plugins('bob'), [['plugin-old', '0.8.0']]);
+
+  // An ended session no longer counts; an installed version that falls behind does.
+  await send('alice', 'plugin-old', { 'x-joc-plugin': '0.9.0' }, { state: 'offline' });
+  await send('alice', 'plugin-new', { 'x-joc-plugin': '1.0.0', 'x-joc-plugin-installed': '0.9.5' });
+  const [after] = await machines('alice');
+  assert.deepEqual(after?.stale, []);
+  assert.equal(after?.installed, '0.9.5');
+  assert.equal(after?.outdated, true);
+  assert.equal((await machines('bob'))[0]?.stale.length, 1);
+});
+
 /** A tiny made-up PNG: the signature, then bytes of its own. */
 const png = (fill: string) =>
   new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...Buffer.from(fill)]);

@@ -7,6 +7,7 @@ import type {
   DeviceToken,
   PendingDevice,
   PluginVersion,
+  StaleSession,
   User,
 } from '@joc/protocol';
 import { type Owner, ownerFrom } from './owner.ts';
@@ -52,6 +53,9 @@ interface DeviceDoc {
    * versions were sent), unset when it hasn't been seen since.
    */
   plugin?: string | null;
+  /** The plugin version installed on the machine, as its plugin last read it; unset until one
+   * new enough to say does. */
+  installed?: string;
 }
 
 interface LinkDoc {
@@ -252,33 +256,65 @@ export async function createDeviceToken(owner: Owner, name: string): Promise<str
   return token;
 }
 
-/** When each machine was last written down, and with which plugin version. */
-const seen = new Map<string, { at: number; plugin: string | null }>();
+/** When each machine was last written down, and with which plugin versions. */
+const seen = new Map<string, { at: number; plugin: string | null; installed?: string }>();
+
+/** What a plugin's request said about its versions; `undefined` where it said nothing. */
+export interface SentVersions {
+  /** The version the requesting session runs. */
+  plugin?: PluginVersion;
+  /** The version installed on the machine. */
+  installed?: PluginVersion;
+}
+
+/** A machine's token, resolved: whose it is, and the machine's public id. */
+export interface ResolvedDevice {
+  owner: Owner;
+  device: string;
+}
 
 /**
- * The owner of a machine's token, noting that the machine was seen and the plugin version it
- * sent (`undefined`: it sent none).
+ * The owner of a machine's token, noting that the machine was seen and the plugin versions it
+ * sent. An installed version, once sent, stays until another replaces it: requests from a plugin
+ * too old to read it don't clear it.
  */
 export async function resolveDeviceToken(
   token: string,
-  pluginVersion?: PluginVersion,
-): Promise<Owner | undefined> {
+  sent: SentVersions = {},
+): Promise<ResolvedDevice | undefined> {
   const _id = hashSecret(token);
   const doc = await devices().findOne({ _id });
   if (!doc) return undefined;
-  // At most once a minute per machine, or at once when its plugin changed.
+  // At most once a minute per machine, or at once when a version changed.
   const now = Date.now();
-  const plugin = pluginVersion ?? null;
+  const plugin = sent.plugin ?? null;
   const last = seen.get(_id);
-  if (!last || now - last.at > 60_000 || last.plugin !== plugin) {
-    seen.set(_id, { at: now, plugin });
-    await devices().updateOne({ _id }, { $set: { lastSeenAt: new Date(now), plugin } });
+  const installed = sent.installed ?? last?.installed;
+  if (!last || now - last.at > 60_000 || last.plugin !== plugin || last.installed !== installed) {
+    seen.set(_id, { at: now, plugin, installed });
+    await devices().updateOne(
+      { _id },
+      {
+        $set: {
+          lastSeenAt: new Date(now),
+          plugin,
+          ...(sent.installed ? { installed: sent.installed } : {}),
+        },
+      },
+    );
   }
-  return ownerFrom(doc.userId);
+  return { owner: ownerFrom(doc.userId), device: doc.id };
 }
 
-/** The owner's machines; `latest` is the plugin version they should run. */
-export async function listDevices(owner: Owner, latest: PluginVersion): Promise<Device[]> {
+/**
+ * The owner's machines; `latest` is the plugin version they should run, and `stale` their live
+ * sessions behind it, by machine id.
+ */
+export async function listDevices(
+  owner: Owner,
+  latest: PluginVersion,
+  stale: ReadonlyMap<string, StaleSession[]> = new Map(),
+): Promise<Device[]> {
   const docs = await devices().find({ userId: owner }).sort({ createdAt: 1 }).toArray();
   return docs.map((d) => ({
     id: d.id,
@@ -286,9 +322,21 @@ export async function listDevices(owner: Owner, latest: PluginVersion): Promise<
     createdAt: d.createdAt.toISOString(),
     lastSeenAt: d.lastSeenAt.toISOString(),
     plugin: d.plugin ?? undefined,
-    // A plugin that sent no version predates sending one, so it's behind any version that does.
-    outdated: d.plugin === null || (d.plugin !== undefined && isBehind(d.plugin, latest)),
+    installed: d.installed ?? undefined,
+    outdated: needsUpdate(d, latest),
+    stale: stale.get(d.id) ?? [],
   }));
+}
+
+/**
+ * Whether a machine needs the update command. What's installed decides when the machine says;
+ * an open session that hasn't reloaded doesn't make it behind. A machine whose plugins are too
+ * old to say is judged as before, by the plugin its latest request ran.
+ */
+function needsUpdate(d: DeviceDoc, latest: PluginVersion): boolean {
+  if (d.installed) return isBehind(d.installed, latest);
+  // A plugin that sent no version predates sending one, so it's behind any version that does.
+  return d.plugin === null || (d.plugin !== undefined && isBehind(d.plugin, latest));
 }
 
 /** Revokes one of the owner's machines; another owner's id matches nothing. */

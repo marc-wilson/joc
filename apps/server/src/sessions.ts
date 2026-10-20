@@ -4,13 +4,17 @@ import {
   DROP_AFTER_MS,
   type DropAfter,
   type HistorySession,
+  type PluginVersion,
+  QUIET_AFTER_MS,
   type Session,
   type SessionReport,
+  type StaleSession,
 } from '@joc/protocol';
 import { alertOnSession } from './alerts.ts';
 import { countMessages } from './messages.ts';
 import { type Owner, sessionKey } from './owner.ts';
 import { getSessionSettings } from './settings.ts';
+import { isBehind } from './version.ts';
 
 interface SessionDoc {
   /** `owner/sessionId` (see owner.ts). */
@@ -27,6 +31,10 @@ interface SessionDoc {
   machine?: string;
   model?: string;
   cwd?: string;
+  /** The plugin version the session's latest report ran: the copy the session loaded. */
+  plugin?: string;
+  /** The public id of the machine whose token sent the latest report; unset in open local dev. */
+  device?: string;
   createdAt: Date;
   updatedAt: Date;
   /** `at` of the last report with a state applied. */
@@ -44,6 +52,7 @@ function toSession({
   createdAt,
   reportedAt: _r,
   previousState: _p,
+  device: _d,
   updatedAt,
   name,
   title,
@@ -120,15 +129,25 @@ export async function listHistory(owner: Owner, limit = 200): Promise<HistorySes
   return docs.map((d) => ({ ...toSession(d), messages: counts.get(d.sessionId) ?? 0 }));
 }
 
+/** Who sent a report, from its request rather than its body. */
+export interface ReportSender {
+  /** The plugin version the reporting session runs, when it said. */
+  plugin?: PluginVersion;
+  /** The machine whose token sent it. */
+  device?: string;
+}
+
 /** Applies a report, or returns undefined if a newer one already landed. */
 export async function applyReport(
   owner: Owner,
   { sessionId, at, title, ...fields }: SessionReport,
+  sender: ReportSender = {},
 ): Promise<Session | undefined> {
   const now = new Date();
-  // $literal keeps reported strings like "$ pnpm test" from being read as field paths.
+  // $literal keeps reported strings like "$ pnpm test" from being read as field paths. A report
+  // that names no plugin version keeps the one stored.
   const set = Object.fromEntries(
-    Object.entries(fields)
+    Object.entries({ ...fields, ...sender })
       .filter(([, v]) => v !== undefined)
       .map(([k, v]) => [k, { $literal: v }]),
   );
@@ -177,4 +196,33 @@ export async function applyReport(
 
 function isDuplicateKey(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 11000;
+}
+
+/**
+ * The owner's live sessions that run a plugin older than `latest`, by the machine that reported
+ * them. Only live ones: a session that ended or went quiet can't reload, and doesn't count.
+ */
+export async function listStaleSessions(
+  owner: Owner,
+  latest: PluginVersion,
+  now = Date.now(),
+): Promise<Map<string, StaleSession[]>> {
+  const docs = await sessions()
+    .find({
+      owner,
+      state: { $ne: 'offline' },
+      updatedAt: { $gt: new Date(now - QUIET_AFTER_MS) },
+      device: { $exists: true },
+      plugin: { $exists: true },
+    })
+    .sort({ createdAt: 1 })
+    .toArray();
+  const stale = new Map<string, StaleSession[]>();
+  for (const d of docs) {
+    if (!d.device || !d.plugin || !isBehind(d.plugin, latest)) continue;
+    const title = d.name ?? d.title;
+    const entry = { id: d.sessionId, title, repo: d.repo, state: d.state, plugin: d.plugin };
+    stale.set(d.device, [...(stale.get(d.device) ?? []), entry]);
+  }
+  return stale;
 }

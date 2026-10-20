@@ -9,6 +9,8 @@ import { z } from 'zod';
 
 /** The request header a plugin names its version in. */
 export const PLUGIN_HEADER = 'x-joc-plugin';
+/** The request header a plugin (0.7.1 on) names the version installed on its machine in. */
+export const INSTALLED_HEADER = 'x-joc-plugin-installed';
 /** The response header that tells a plugin which version it's behind. */
 export const LATEST_HEADER = 'x-joc-plugin-latest';
 
