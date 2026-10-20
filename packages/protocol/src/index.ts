@@ -289,7 +289,16 @@ export const ImageRef = z.object({
 });
 export type ImageRef = z.infer<typeof ImageRef>;
 
-const itemBase = { id: z.string().min(1).max(200), at: z.iso.datetime() };
+const itemBase = {
+  id: z.string().min(1).max(200),
+  at: z.iso.datetime(),
+  /**
+   * Set on a step a subagent took, from its own transcript: the `toolUseId` of the call that
+   * started it. Such items are the subagent's, not the session's conversation, and are served by
+   * `GET /api/sessions/:id/tasks/:task/messages` instead.
+   */
+  task: z.string().min(1).max(200).optional(),
+};
 
 /** One entry in a session's conversation, normalized from its transcript by the plugin. */
 export const ConversationItem = z.discriminatedUnion('kind', [
@@ -337,13 +346,18 @@ export const ConversationItem = z.discriminatedUnion('kind', [
     background: z.boolean().optional(),
     /** Set on a subagent call: the subagent's type, e.g. `Explore`. */
     subagent: z.string().max(100).optional(),
+    /** What a subagent was asked: its whole prompt. */
+    prompt: z.string().max(20_000).optional(),
+    /** A background shell's whole command, when it runs past the one line in `summary`. */
+    command: z.string().max(5_000).optional(),
   }),
   z.object({
     ...itemBase,
     kind: z.literal('tool_result'),
     toolUseId: z.string().max(200),
     isError: z.boolean(),
-    text: z.string().max(5_000),
+    /** Up to 5,000 characters; a subagent's final report can run to 50,000. */
+    text: z.string().max(50_000),
     /** Set when the call left a task running in the background; a `task_update` ends it. */
     taskId: z.string().max(200).optional(),
   }),
@@ -356,6 +370,10 @@ export const ConversationItem = z.discriminatedUnion('kind', [
     status: TaskStatus,
     /** One line on how it ended, as Claude Code put it. */
     summary: z.string().max(500),
+    /** A background subagent's final report. */
+    result: z.string().max(50_000).optional(),
+    /** The end of what a background shell printed. */
+    output: z.string().max(20_000).optional(),
   }),
 ]);
 export type ConversationItem = z.infer<typeof ConversationItem>;
