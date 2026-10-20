@@ -14,6 +14,7 @@
 // `/joc-update`, which updates it.
 import type { MessagesReport } from '@joc/protocol';
 import type { EngineInterface, HttpResponse, ProcessRunResult, Register } from 'claude-code';
+import { backgroundId, launchArgv, sessionIdFor } from './launch.ts';
 import {
   age,
   applyOutcomes,
@@ -596,9 +597,9 @@ export const register: Register = (on) => {
 
     /**
      * Starts the new sessions the dashboard asked this one to start, such as a PR review: each
-     * a background session (`claude --bg`) in this session's folder, under the id and name the
-     * server chose, so the dashboard links to it before it reports. It lives on its own, past
-     * this session; `claude attach` opens it. How it went goes back to the server.
+     * a background session (`claude --bg`, see launch.ts) in this session's folder. It lives on
+     * its own, past this session; `claude attach` opens it. How it went, and the new session's
+     * id so the dashboard can open it, go back to the server.
      */
     async function takeLaunches() {
       const { url, headers } = await connection($);
@@ -622,27 +623,34 @@ export const register: Register = (on) => {
       const launches = field(JSON.parse(res.text), 'launches');
       if (!Array.isArray(launches)) return;
       const cwd = await $.session.cwd();
+      const env = { url: (await $.env.get('JOC_URL')) || undefined };
       for (const launch of launches) {
         const id = text(field(launch, 'id'));
-        const newId = text(field(launch, 'sessionId'));
-        const prompt = text(field(launch, 'prompt'));
-        if (!id || !newId || !prompt) continue;
-        const name = text(field(launch, 'name')) ?? 'JOC';
-        const argv = ['claude', '--bg', '--session-id', newId, '--name', name, '--', prompt];
-        let outcome: { ok: boolean; detail?: string };
+        if (!id) continue;
+        const argv = launchArgv(
+          { name: text(field(launch, 'name')), prompt: text(field(launch, 'prompt')) },
+          env,
+        );
+        let outcome: { ok: boolean; sessionId?: string; detail?: string };
         try {
           const run = await $.process.run(argv, { cwd, timeoutMs: LAUNCH_TIMEOUT_MS });
-          outcome =
-            run.exitCode === 0
-              ? { ok: true }
-              : {
-                  ok: false,
-                  detail: (
-                    lastLine(run.stderr) ||
-                    lastLine(run.stdout) ||
-                    `claude exited with code ${run.exitCode}`
-                  ).slice(0, 500),
-                };
+          const short = run.exitCode === 0 ? backgroundId(run.stdout) : undefined;
+          if (short) {
+            const agents = await $.process
+              .run(['claude', 'agents', '--json'], { cwd, timeoutMs: CHECK_TIMEOUT_MS * 2 })
+              .catch(() => undefined);
+            const sessionId = agents && sessionIdFor(agents.stdout, short);
+            outcome = { ok: true, ...(sessionId ? { sessionId } : {}) };
+          } else {
+            outcome = {
+              ok: false,
+              detail: (
+                lastLine(run.stderr) ||
+                lastLine(run.stdout) ||
+                `claude exited with code ${run.exitCode}`
+              ).slice(0, 500),
+            };
+          }
         } catch (error) {
           outcome = {
             ok: false,
