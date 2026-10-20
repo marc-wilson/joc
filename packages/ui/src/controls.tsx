@@ -120,6 +120,60 @@ export function TextInput({
   );
 }
 
+export interface TextAreaProps {
+  label: string;
+  placeholder?: string;
+  /** The starting text; the field keeps what's typed after that. */
+  value?: string;
+  hint?: string;
+  error?: string;
+  mono?: boolean;
+  disabled?: boolean;
+  id?: string;
+  /** Visible lines before it scrolls. */
+  rows?: number;
+  onChange?: (value: string) => void;
+}
+
+/** A field for text that can run to several lines, such as a prompt. Same frame as TextInput. */
+export function TextArea({
+  label,
+  placeholder,
+  value,
+  hint,
+  error,
+  mono,
+  disabled,
+  id,
+  rows = 4,
+  onChange,
+}: TextAreaProps) {
+  const inputId = id || `ta-${label.replace(/\W+/g, '-').toLowerCase()}`;
+  return (
+    <div className={cx('joc-field', error && 'is-error', disabled && 'is-disabled')}>
+      <label className="joc-field__label" htmlFor={inputId}>
+        {label}
+      </label>
+      <textarea
+        id={inputId}
+        className={cx('joc-textarea', mono && 'is-mono')}
+        rows={rows}
+        placeholder={placeholder}
+        defaultValue={value}
+        onChange={onChange && ((e) => onChange(e.currentTarget.value))}
+        disabled={disabled}
+        aria-invalid={!!error}
+        aria-describedby={`${inputId}-hint`}
+      />
+      {error || hint ? (
+        <div id={`${inputId}-hint`} className="joc-field__hint">
+          {error || hint}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export interface SwitchProps {
   label: string;
   /** One line on what it turns on. */
