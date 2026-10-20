@@ -1,6 +1,6 @@
-import { EventEmitter } from 'node:events';
 import { getDb } from '@joc/db';
 import type { ChangesReport } from '@joc/protocol';
+import { publish } from './bus.ts';
 import { type Owner, sessionKey } from './owner.ts';
 
 interface ChangesDoc {
@@ -23,15 +23,6 @@ export interface SessionChanges {
 
 const changes = () => getDb().collection<ChangesDoc>('changes');
 
-// Same in-process fan-out as session updates (see sessions.ts). Only the session id goes out:
-// a diff can be megabytes, so each dashboard fetches it when it's showing that session.
-const updates = new EventEmitter().setMaxListeners(0);
-
-export function onChanges(owner: Owner, listener: (sessionId: string) => void): () => void {
-  updates.on(`changes:${owner}`, listener);
-  return () => updates.off(`changes:${owner}`, listener);
-}
-
 /** Keeps the session's latest diff; an older report than the one stored is dropped. */
 export async function saveChanges(
   owner: Owner,
@@ -50,7 +41,9 @@ export async function saveChanges(
     }
     throw error;
   }
-  updates.emit(`changes:${owner}`, sessionId);
+  // Only the session id goes out: a diff can be megabytes, so each dashboard fetches it when
+  // it's showing that session.
+  publish(owner, { type: 'changes', sessionId });
   return true;
 }
 

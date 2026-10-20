@@ -1,4 +1,3 @@
-import { EventEmitter } from 'node:events';
 import { getDb } from '@joc/db';
 import {
   type AnsweredBy,
@@ -13,6 +12,7 @@ import {
   type Waiting,
 } from '@joc/protocol';
 import { alertOnSession } from './alerts.ts';
+import { publish } from './bus.ts';
 import { countMessages } from './messages.ts';
 import { type Owner, sessionKey } from './owner.ts';
 import { getSessionSettings } from './settings.ts';
@@ -78,13 +78,6 @@ function toSession({
 
 /** The live list's limit, the most recently active, so `never` can't grow it without end. */
 const LISTED = 200;
-
-const updates = new EventEmitter().setMaxListeners(0);
-
-export function onSessionUpdate(owner: Owner, listener: (session: Session) => void): () => void {
-  updates.on(`session:${owner}`, listener);
-  return () => updates.off(`session:${owner}`, listener);
-}
 
 /** Sessions active within `after`, or every one for `never`. */
 function activeWithin(after: DropAfter, now: number): { updatedAt?: { $gt: Date } } {
@@ -203,7 +196,7 @@ export async function applyReport(
   }
   if (!doc) throw new Error(`Session ${sessionId} was not saved`);
   const session = toSession(doc);
-  updates.emit(`session:${owner}`, session);
+  publish(owner, { type: 'session', session });
   if (fields.state) await alertOnSession(owner, doc.previousState, { ...session, sessionId });
   return session;
 }
@@ -223,7 +216,7 @@ export async function setWaiting(
     { returnDocument: 'after' },
   );
   if (!doc) return false;
-  updates.emit(`session:${owner}`, toSession(doc));
+  publish(owner, { type: 'session', session: toSession(doc) });
   return true;
 }
 
@@ -246,7 +239,7 @@ export async function endWaiting(
     { returnDocument: 'after' },
   );
   if (!doc) return false;
-  updates.emit(`session:${owner}`, toSession(doc));
+  publish(owner, { type: 'session', session: toSession(doc) });
   return true;
 }
 

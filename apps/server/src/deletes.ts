@@ -4,7 +4,6 @@
 // or its transcript and the other files keyed by its id) and says how it went. Only then does
 // the server drop JOC's copy, and keep a tombstone so a late report can't bring it back.
 import { randomUUID } from 'node:crypto';
-import { EventEmitter } from 'node:events';
 import { getDb } from '@joc/db';
 import {
   type ClaimedDelete,
@@ -14,6 +13,7 @@ import {
 } from '@joc/protocol';
 import { forgetAlerts } from './alerts.ts';
 import { forgetAnswers } from './answers.ts';
+import { publish } from './bus.ts';
 import { forgetChanges } from './changes.ts';
 import { forgetCommands } from './commands.ts';
 import { deleteImages } from './images.ts';
@@ -72,21 +72,8 @@ const ensureIndexes = () => {
   return indexed;
 };
 
-// Same per-owner, in-process fan-out as session updates (see sessions.ts).
-const updates = new EventEmitter().setMaxListeners(0);
-const changed = (owner: Owner) => updates.emit(`deletes:${owner}`);
-
-/** A nudge whenever one of the owner's deletes is asked for or changes. */
-export function onDeletes(owner: Owner, listener: () => void): () => void {
-  updates.on(`deletes:${owner}`, listener);
-  return () => updates.off(`deletes:${owner}`, listener);
-}
-
-/** One of the owner's sessions was deleted. */
-export function onDeleted(owner: Owner, listener: (sessionId: string) => void): () => void {
-  updates.on(`deleted:${owner}`, listener);
-  return () => updates.off(`deleted:${owner}`, listener);
-}
+/** A nudge to every dashboard of the owner whenever one of their deletes is asked for or changes. */
+const changed = (owner: Owner) => publish(owner, { type: 'deletes' });
 
 const unclaimed = (machine: string) =>
   `No Claude Code session on ${machine} took it within ${DELETE_WAIT_MS / 60_000} minutes, so nothing was deleted. Start Claude Code on ${machine} and try again.`;
@@ -255,7 +242,7 @@ export async function finishDelete(
   if (!doc) return false;
   if (ok) {
     await forget(owner, doc.sessionId, now);
-    updates.emit(`deleted:${owner}`, doc.sessionId);
+    publish(owner, { type: 'deleted', sessionId: doc.sessionId });
   }
   changed(owner);
   return true;

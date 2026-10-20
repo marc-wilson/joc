@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { closeClient } from '@joc/db';
 import { createApp } from './app.ts';
+import { bus } from './bus.ts';
 import { githubAuth } from './github.ts';
 import { readPluginVersion, webBuild } from './version.ts';
 
@@ -33,6 +34,9 @@ const app = createApp({
       ? githubAuth({ clientId, clientSecret, redirectUri: `${publicUrl}/auth/github/callback` })
       : undefined,
 });
+
+// Hear live updates written through the other server processes (pods), until shutdown.
+void bus.start(shutdown.signal);
 
 if (webDist) {
   app.use('/*', serveStatic({ root: webDist }));

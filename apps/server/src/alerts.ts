@@ -2,9 +2,9 @@
 // server raises them from reports (sessions.ts, github-data.ts); the dashboard lists them, marks
 // them read and clears them. One document per alert, always looked up with its owner.
 import { randomUUID } from 'node:crypto';
-import { EventEmitter } from 'node:events';
 import { getDb } from '@joc/db';
 import { type Alert, type AlertKind, MAX_ALERTS, type PullRequest } from '@joc/protocol';
+import { publish } from './bus.ts';
 import type { Owner } from './owner.ts';
 
 interface AlertDoc {
@@ -36,15 +36,8 @@ const ensureIndexes = () => {
   return indexed;
 };
 
-// Same per-owner, in-process fan-out as session updates (see sessions.ts). Only a nudge goes
-// out; each dashboard fetches the list.
-const updates = new EventEmitter().setMaxListeners(0);
-const changed = (owner: Owner) => updates.emit(`alerts:${owner}`);
-
-export function onAlerts(owner: Owner, listener: () => void): () => void {
-  updates.on(`alerts:${owner}`, listener);
-  return () => updates.off(`alerts:${owner}`, listener);
-}
+// Only a nudge goes out to the owner's dashboards; each fetches the list.
+const changed = (owner: Owner) => publish(owner, { type: 'alerts' });
 
 const toAlert = ({ _id, owner: _o, createdAt, readAt, ...rest }: AlertDoc): Alert => ({
   id: _id,

@@ -24,7 +24,10 @@ const answers = () => getDb().collection<AnswerDoc>('answers');
 const answerKey = (owner: Owner, sessionId: string, waitingId: string) =>
   `${sessionKey(owner, sessionId)}/${waitingId}`;
 
-/** Wakes a held poll as soon as its answer is saved. The server runs one replica. */
+/**
+ * Wakes a held poll in this process as soon as its answer is saved. One held on another server
+ * process finds it at its next look (RECHECK_MS).
+ */
 const arrivals = new EventEmitter().setMaxListeners(0);
 
 /** Saves the answer to a wait; false when it already has one. */

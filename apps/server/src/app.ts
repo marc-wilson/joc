@@ -43,7 +43,7 @@ import {
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
-import { clearAlerts, listAlerts, onAlerts, readAlerts } from './alerts.ts';
+import { clearAlerts, listAlerts, readAlerts } from './alerts.ts';
 import { dropAnswer, saveAnswer, waitForAnswer } from './answers.ts';
 import {
   bearerToken,
@@ -56,19 +56,12 @@ import {
   setSessionCookie,
   takeOAuthCookies,
 } from './auth.ts';
-import { getChanges, onChanges, saveChanges } from './changes.ts';
-import { getCommands, onCommands, saveCommands } from './commands.ts';
-import {
-  claimDeletes,
-  finishDelete,
-  isDeleted,
-  listDeletes,
-  onDeleted,
-  onDeletes,
-  requestDeletes,
-} from './deletes.ts';
+import { type Bus, bus as processBus } from './bus.ts';
+import { getChanges, saveChanges } from './changes.ts';
+import { getCommands, saveCommands } from './commands.ts';
+import { claimDeletes, finishDelete, isDeleted, listDeletes, requestDeletes } from './deletes.ts';
 import type { GitHubAuth } from './github.ts';
-import { getGitHub, onGitHub, saveGitHub } from './github-data.ts';
+import { getGitHub, saveGitHub } from './github-data.ts';
 import {
   approveLink,
   createWebSession,
@@ -84,18 +77,17 @@ import {
   startLink,
 } from './identity.ts';
 import { findImages, getImage, saveImage } from './images.ts';
-import { claimLaunches, createLaunch, finishLaunch, listLaunches, onLaunches } from './launches.ts';
-import { addMessages, listMessages, onMessages } from './messages.ts';
+import { claimLaunches, createLaunch, finishLaunch, listLaunches } from './launches.ts';
+import { addMessages, listMessages } from './messages.ts';
 import {
   claimReads,
   getNotifications,
   markAllRead,
   markRead,
-  onNotifications,
   saveNotifications,
 } from './notifications.ts';
 import { type Owner, ownerFrom } from './owner.ts';
-import { getPrefs, onPrefs, patchPrefs } from './prefs.ts';
+import { getPrefs, patchPrefs } from './prefs.ts';
 import { listProblems, saveProblems } from './problems.ts';
 import { claimPrompts, queuePrompt } from './prompts.ts';
 import { RateLimit } from './rate-limit.ts';
@@ -107,7 +99,6 @@ import {
   listHistory,
   listSessions,
   listStaleSessions,
-  onSessionUpdate,
   setWaiting,
 } from './sessions.ts';
 import {
@@ -130,6 +121,8 @@ export interface AppOptions {
   pluginVersion: PluginVersion;
   /** Names the dashboard build this server serves, so an open tab can tell it was replaced. */
   build?: string;
+  /** Where its live streams hear updates: this process's bus, unless a test stands in another. */
+  bus?: Bus;
 }
 
 /** How a request proved who it is: a browser session, a machine's token, or open local dev. */
@@ -147,6 +140,7 @@ export function createApp({
   pluginVersion,
   build,
   shutdown = new AbortController().signal,
+  bus = processBus,
 }: AppOptions): Hono<Env> {
   const app = new Hono<Env>();
 
@@ -730,22 +724,16 @@ export function createApp({
           if (ready) void send(event);
           else pending.push(event);
         };
-        const unsubscribers = [
-          onSessionUpdate(owner, (session) => publish({ type: 'session', session })),
-          onMessages(owner, (sessionId, items) => publish({ type: 'messages', sessionId, items })),
-          onChanges(owner, (sessionId) => publish({ type: 'changes', sessionId })),
-          onCommands(owner, (sessionId) => publish({ type: 'commands', sessionId })),
-          onGitHub(owner, () => publish({ type: 'github' })),
-          onNotifications(owner, () => publish({ type: 'notifications' })),
-          onAlerts(owner, () => publish({ type: 'alerts' })),
-          onLaunches(owner, () => publish({ type: 'launches' })),
-          onDeletes(owner, () => publish({ type: 'deletes' })),
-          onDeleted(owner, (sessionId) => publish({ type: 'deleted', sessionId })),
-          onPrefs(owner, (prefs) => publish({ type: 'prefs', prefs })),
-        ];
-        const unsubscribeAll = () => {
-          for (const unsubscribe of unsubscribers) unsubscribe();
-        };
+        // Some updates may have been lost on the way from another server process: the browser
+        // reloads everything from a new snapshot.
+        const resend = () =>
+          listSessions(owner)
+            .then((sessions) => publish({ type: 'snapshot', sessions }))
+            .catch((error: unknown) => console.error('Resending a snapshot failed:', error));
+        const unsubscribeAll = bus.subscribe(owner, (message) => {
+          if (message.type === 'missed') void resend();
+          else publish(message);
+        });
         stream.onAbort(unsubscribeAll);
 
         try {
