@@ -40,6 +40,7 @@ import {
   type Parsed,
   parseLines,
   readNewLines,
+  readSubagents,
   type TranscriptImage,
 } from './transcript.ts';
 import { manifestVersion, PLUGIN_HEADER, versionHeader } from './version.ts';
@@ -214,6 +215,7 @@ async function main() {
     if (!response?.ok) return; // Keep the old position so the next hook resends.
   }
   conversation.commit();
+  if (!ending) await sendSubagentSteps(input);
 
   if (event === 'Stop' || event === 'SessionStart' || syncing) {
     await sendChanges(input);
@@ -231,6 +233,30 @@ async function main() {
       const line = `${JSON.stringify({ notify: alerts })}\n`;
       await new Promise((resolve) => process.stdout.write(line, resolve));
     }
+  }
+}
+
+/** What background subagents did, from their own transcripts, as steps of their tasks. */
+async function sendSubagentSteps(input: HookInput) {
+  if (!input.transcript_path) return;
+  let found: ReturnType<typeof readSubagents>;
+  try {
+    found = readSubagents(input.session_id, input.transcript_path);
+  } catch {
+    return;
+  }
+  for (const { task, lines, commit } of found) {
+    // Pasted images stay out: a subagent's prompts come from Claude, not you.
+    const { items } = parseLines(lines, input.cwd, task);
+    for (let i = 0; i < items.length; i += BATCH) {
+      const batch: MessagesReport = {
+        sessionId: input.session_id,
+        items: items.slice(i, i + BATCH),
+      };
+      const response = await post('/api/messages', batch, 3000);
+      if (!response?.ok) return; // Keep the old positions so the next hook resends.
+    }
+    commit();
   }
 }
 
