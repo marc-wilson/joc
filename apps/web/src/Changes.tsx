@@ -12,7 +12,7 @@ import { Fragment, useState } from 'react';
 import type { DiffFile, DiffLine as Line } from './diff.ts';
 import { splitRows } from './diff.ts';
 import type { Changes } from './hooks.ts';
-import { store, stored } from './prefs.ts';
+import { store, stored, usePref } from './prefs.ts';
 
 type Mode = 'unified' | 'split';
 
@@ -74,6 +74,9 @@ export function ChangesView({ sessionId, changes, onSend }: Props) {
   const [viewed, setViewed] = useState(
     () => new Set(stored<string[]>(`joc:viewed:${sessionId}`, [])),
   );
+  // A file folds when marked viewed; its chevron folds or opens it either way.
+  const [folded, setFolded] = usePref<Record<string, boolean>>(`joc:folded:${sessionId}`, {});
+  const isFolded = (path: string) => folded[path] ?? viewed.has(path);
   const [comments, setComments] = useState<Comment[]>([]);
   const [composing, setComposing] = useState<{ path: string; line: Line }>();
   const [active, setActive] = useState<string>();
@@ -105,6 +108,8 @@ export function ChangesView({ sessionId, changes, onSend }: Props) {
     else next.delete(path);
     setViewed(next);
     store(`joc:viewed:${sessionId}`, [...next]);
+    const { [path]: _, ...rest } = folded;
+    setFolded(rest);
   }
   function addComment(path: string, line: Line, text: string) {
     setComments((list) => [...list, { id: crypto.randomUUID(), path, line, text }]);
@@ -166,8 +171,10 @@ export function ChangesView({ sessionId, changes, onSend }: Props) {
                 onModeChange={changeMode}
                 viewed={viewed.has(file.path)}
                 onViewedChange={(on) => toggleViewed(file.path, on)}
+                collapsed={isFolded(file.path)}
+                onToggle={() => setFolded({ ...folded, [file.path]: !isFolded(file.path) })}
               />
-              {viewed.has(file.path) ? null : (
+              {isFolded(file.path) ? null : (
                 <div className="joc-diff">
                   {file.binary ? <DiffLine kind="hunk">Binary file not shown</DiffLine> : null}
                   {file.hunks.map((hunk) => (
