@@ -90,9 +90,20 @@ export function eventFields(input: HookInput): EventFields | undefined {
       return { state: 'working', activity: describeTool(input) };
     case 'PostToolUse':
       return { state: 'working' };
-    case 'PermissionRequest':
+    case 'PermissionRequest': {
+      // A question asks for an answer, not permission: the session says what it asks.
+      if (input.tool_name === 'AskUserQuestion') {
+        const questions = input.tool_input?.questions;
+        const first = Array.isArray(questions) ? (questions[0] as { question?: unknown }) : {};
+        const asked = typeof first?.question === 'string' ? first.question : undefined;
+        return { state: 'needs', activity: firstLine(asked) ?? 'Claude is asking' };
+      }
       return { state: 'needs', activity: `Permission: ${describeTool(input)}` };
+    }
     case 'Notification':
+      // A permission prompt's notice follows its PermissionRequest, which said more: what the
+      // call does, or what the question asks. It keeps that.
+      if (input.notification_type === 'permission_prompt') return { state: 'needs' };
       return { state: 'needs', activity: firstLine(input.message) ?? 'Waiting for you' };
     case 'Stop': {
       const running = input.background_tasks?.length ?? 0;
