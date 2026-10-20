@@ -1,13 +1,18 @@
-import type { ConversationItem, SessionState } from '@joc/protocol';
+import type { ConversationItem, RunningTask, Session, SessionState } from '@joc/protocol';
 import { plain } from './plain.ts';
 
 type Call = Extract<ConversationItem, { kind: 'tool_call' }>;
 type Result = Extract<ConversationItem, { kind: 'tool_result' }>;
 type Update = Extract<ConversationItem, { kind: 'task_update' }>;
 
-/** A background shell command or subagent, as far as the transcript tells. */
+/**
+ * A background shell command or subagent, as far as the transcript tells; or other work Claude
+ * Code lists as running (a teammate, a monitor, a workflow, a scheduled wakeup).
+ */
 export interface BackgroundTask {
   id: string;
+  /** Claude Code's id for it: a shell's task id or an agent's id. */
+  taskId?: string;
   kind: 'shell' | 'subagent';
   /** The subagent's type, for subagents. */
   label?: string;
@@ -29,7 +34,8 @@ export interface BackgroundTask {
   status: 'running' | 'pass' | 'fail' | 'ended';
   /** One line on how it ended. */
   tail?: string;
-  startedAt: string;
+  /** Unset for work only Claude Code's list knows of: it doesn't say when that started. */
+  startedAt?: string;
   endedAt?: string;
 }
 
@@ -44,11 +50,87 @@ const STOPPED = /Successfully stopped task: ([\w-]+)/;
 /**
  * The session's background work, in the order it started. A subagent that blocks the turn ends
  * with its tool result; a background shell or async subagent ends with a `task_update`.
+ *
+ * `listed` is Claude Code's own list of what runs, and the truth for it: a task the transcript
+ * has no end for runs while the list has it, and has ended once a list newer than its start
+ * leaves it out. Listed work the transcript doesn't show is added, after the rest. Without a list
+ * (an older plugin) the transcript is all there is.
  */
 export function backgroundTasks(
   items: ConversationItem[],
   sessionState: SessionState,
+  listed?: Session['background'],
 ): BackgroundTask[] {
+  const tasks = fromTranscript(items, sessionState);
+  return listed ? withListed(tasks, listed, sessionState) : tasks;
+}
+
+function withListed(
+  tasks: BackgroundTask[],
+  listed: NonNullable<Session['background']>,
+  sessionState: SessionState,
+): BackgroundTask[] {
+  const listedAt = Date.parse(listed.at);
+  const ids = new Set(listed.tasks.map((t) => t.id));
+  const matched = new Set<string>();
+  const merged = tasks.map((t) => {
+    const id = t.taskId && ids.has(t.taskId) ? t.taskId : ids.has(t.id) ? t.id : undefined;
+    if (id) matched.add(id);
+    // The transcript saying how it ended beats any list.
+    if (t.status !== 'running' || id) return t;
+    // Started after the latest list: that list can't know of it yet.
+    if (!t.startedAt || Date.parse(t.startedAt) >= listedAt) return t;
+    return { ...t, status: 'ended' as const, tail: 'Ended' };
+  });
+  const ended = sessionState === 'offline';
+  for (const t of listed.tasks) {
+    if (matched.has(t.id)) continue;
+    merged.push({
+      ...fromList(t),
+      ...(ended ? { status: 'ended', tail: 'The session ended' } : { status: 'running' }),
+    });
+  }
+  return merged;
+}
+
+const AGENT_TYPES = ['subagent', 'teammate', 'agent', 'workflow'];
+
+const TYPE_LABELS: Record<string, string> = {
+  monitor: 'Monitor',
+  workflow: 'Workflow',
+  teammate: 'Teammate',
+  cron: 'Scheduled',
+};
+
+/** Work only Claude Code's list knows of, as a task. */
+function fromList(t: RunningTask): Omit<BackgroundTask, 'status'> {
+  const agent = AGENT_TYPES.includes(t.type);
+  const label =
+    t.type === 'shell'
+      ? undefined
+      : t.type === 'subagent'
+        ? (t.agentType ?? 'Subagent')
+        : (TYPE_LABELS[t.type] ?? `${t.type.charAt(0).toUpperCase()}${t.type.slice(1)}`);
+  const command = t.command ?? t.schedule;
+  const title =
+    (t.description ? firstLine(t.description) : undefined) ??
+    t.name ??
+    (t.server && t.tool ? `${t.server} · ${t.tool}` : undefined) ??
+    (command ? undefined : label) ??
+    (t.type === 'shell' ? 'Background command' : 'Background task');
+  return {
+    id: t.id,
+    taskId: t.id,
+    kind: agent ? 'subagent' : 'shell',
+    ...(label ? { label } : {}),
+    title,
+    ...(command ? { command: firstLine(command) } : {}),
+    ...(command?.includes('\n') ? { fullCommand: command } : {}),
+    ...(agent && t.description ? { prompt: t.description } : {}),
+  };
+}
+
+function fromTranscript(items: ConversationItem[], sessionState: SessionState): BackgroundTask[] {
   const results = new Map<string, Result>();
   const updates = new Map<string, Update>();
   for (const i of items) {
@@ -79,7 +161,11 @@ export function backgroundTasks(
     if (call.kind !== 'tool_call') continue;
     const result = results.get(call.toolUseId);
     if (!call.subagent && !call.background && !result?.taskId) continue;
-    tasks.push({ ...describe(call), ...outcome(call, result, updates, sessionState) });
+    tasks.push({
+      ...describe(call),
+      ...(result?.taskId ? { taskId: result.taskId } : {}),
+      ...outcome(call, result, updates, sessionState),
+    });
   }
   return tasks;
 }
@@ -153,6 +239,16 @@ export function elapsed(from: string, to: string | number): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+/** How many tasks run now. The Background tab, the session row and the header all count so. */
+export function runningCount(tasks: BackgroundTask[]): number {
+  return tasks.filter((t) => t.status === 'running').length;
+}
+
+/** The session row's line for a session whose work runs on in the background. */
+export function runningLine(count: number): string {
+  return `${count} background ${count === 1 ? 'task' : 'tasks'} running`;
+}
+
 /** Finished tasks shown before "Show all". */
 export const FINISHED_SHOWN = 5;
 
@@ -166,7 +262,7 @@ export function arrangeTasks(
   held: readonly string[] = [],
 ): { running: BackgroundTask[]; finished: BackgroundTask[] } {
   const isRunning = (t: BackgroundTask) => t.status === 'running' || held.includes(t.id);
-  const ended = (t: BackgroundTask) => Date.parse(t.endedAt ?? t.startedAt);
+  const ended = (t: BackgroundTask) => Date.parse(t.endedAt ?? t.startedAt ?? '') || 0;
   return {
     running: tasks.filter(isRunning),
     finished: tasks.filter((t) => !isRunning(t)).sort((a, b) => ended(b) - ended(a)),
