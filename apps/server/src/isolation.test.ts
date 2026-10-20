@@ -12,10 +12,10 @@ import {
   GitHubSnapshot,
   HistorySession,
   ImageRef,
+  Launch,
   MachineProblem,
   NotificationsSnapshot,
   ReadsClaim,
-  Review,
   ReviewSettings,
   Session,
   SessionSettings,
@@ -117,8 +117,9 @@ test('every API route needs an owner', async () => {
     ['POST', '/api/alerts/read-all'],
     ['POST', '/api/alerts/clear'],
     ['POST', '/api/alerts/clear-all'],
-    ['GET', '/api/reviews?repo=harbor-labs/atlas-web&number=7'],
-    ['POST', '/api/reviews'],
+    ['GET', '/api/launches'],
+    ['GET', '/api/launches?repo=harbor-labs/atlas-web&number=7'],
+    ['POST', '/api/launches'],
     ['GET', '/api/settings/review'],
     ['PUT', '/api/settings/review'],
     ['POST', '/api/sessions/s/launches/claim'],
@@ -769,127 +770,139 @@ test('alert ids are checked', async () => {
   assert.equal((await call('alice', '/api/alerts/clear', {})).status, 400);
 });
 
-const Reviews = z.array(Review);
-const Launches = z.object({ launches: z.array(ClaimedLaunch) });
+const Launches = z.array(Launch);
+const Claims = z.object({ launches: z.array(ClaimedLaunch) });
 
-const reviewOf = (target: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+const PR = {
   repo: 'harbor-labs/atlas-web',
   number: 7,
   url: 'https://github.com/harbor-labs/atlas-web/pull/7',
-  method: 'standard',
-  target,
-  ...extra,
-});
-const reviewsOf = async (who: Who) =>
-  read(await call(who, '/api/reviews?repo=harbor-labs/atlas-web&number=7'), Reviews);
-const launchesFor = async (who: Who, sessionId: string) =>
-  (await read(await call(who, `/api/sessions/${sessionId}/launches/claim`, {}), Launches)).launches;
+};
+const launchesOf = async (who: Who, query = '') =>
+  read(await call(who, `/api/launches${query}`), Launches);
+const claimsFor = async (who: Who, sessionId: string) =>
+  (await read(await call(who, `/api/sessions/${sessionId}/launches/claim`, {}), Claims)).launches;
 
-test("a review runs only in its owner's own session on the PR's repo", async () => {
+test("a new session starts only from its owner's own live session", async () => {
   await call('alice', '/api/reports', report('alice-rev', { title: 'Reviewer' }));
   await call('alice', '/api/reports', report('alice-other', { repo: 'harbor-labs/tide' }));
 
-  // Bob can't send a review to Alice's session, or start one from it.
-  for (const target of [
-    { kind: 'session', sessionId: 'alice-rev' },
-    { kind: 'new', from: 'alice-rev' },
-  ]) {
-    assert.equal((await call('bob', '/api/reviews', reviewOf(target))).status, 400);
-  }
-  // Nor can Alice review in a session on another repo.
-  const elsewhere = reviewOf({ kind: 'session', sessionId: 'alice-other' });
-  assert.equal((await call('alice', '/api/reviews', elsewhere)).status, 400);
+  // Bob can't start one from Alice's session.
+  assert.equal((await call('bob', '/api/launches', { from: 'alice-rev' })).status, 400);
+  // Nor can Alice review a PR from a session on another repo.
+  const elsewhere = { from: 'alice-other', review: PR };
+  assert.equal((await call('alice', '/api/launches', elsewhere)).status, 400);
 
-  const target = { kind: 'session', sessionId: 'alice-rev' };
-  const sent = await call('alice', '/api/reviews', reviewOf(target));
+  const sent = await call('alice', '/api/launches', { from: 'alice-rev', prompt: 'Fix the tests' });
   assert.equal(sent.status, 201);
-  const review = await read(sent, Review);
+  const launch = await read(sent, Launch);
   assert.deepEqual(
-    [review.sessionId, review.status, review.prompt],
-    ['alice-rev', 'sent', '/code-review 7'],
+    [launch.from, launch.status, launch.prompt, launch.repo],
+    ['alice-rev', 'starting', 'Fix the tests', 'harbor-labs/atlas-web'],
   );
-
-  // It reaches Alice's session as a prompt, and only hers.
-  const bob = await read(await call('bob', '/api/sessions/alice-rev/prompts/claim', {}), Claimed);
-  const alice = await read(
-    await call('alice', '/api/sessions/alice-rev/prompts/claim', {}),
-    Claimed,
-  );
-  assert.deepEqual(bob.prompts, []);
   assert.deepEqual(
-    alice.prompts.map((p) => p.text),
-    ['/code-review 7'],
+    (await launchesOf('alice')).map((l) => l.id),
+    [launch.id],
   );
-
-  assert.deepEqual(
-    (await reviewsOf('alice')).map((r) => r.id),
-    [review.id],
-  );
-  assert.deepEqual(await reviewsOf('bob'), []);
+  assert.deepEqual(await launchesOf('bob'), []);
 });
 
-test("a new review session is started only by its owner's plugin, which alone says how it went", async () => {
-  const own = reviewOf({ kind: 'new', from: 'alice-rev' }, { method: 'own', command: '/prep-pr' });
-  const review = await read(await call('alice', '/api/reviews', own), Review);
-  assert.equal(review.status, 'starting');
-  assert.equal(review.prompt, '/prep-pr https://github.com/harbor-labs/atlas-web/pull/7');
+test("a new session is started only by its owner's plugin, which alone says how it went", async () => {
+  const launch = await read(await call('alice', '/api/launches', { from: 'alice-rev' }), Launch);
 
   // Bob's plugin, polling the same session id, gets nothing; a browser can't take launches.
-  assert.deepEqual(await launchesFor('bob', 'alice-rev'), []);
+  assert.deepEqual(await claimsFor('bob', 'alice-rev'), []);
   const fromBrowser = await app.request('/api/sessions/alice-rev/launches/claim', {
     method: 'POST',
     headers: { cookie: cookies.get('alice') ?? '', host: 'joc.test', origin: 'http://joc.test' },
   });
   assert.equal(fromBrowser.status, 403);
 
+  // The earlier launch from the test above comes first; this one has no prompt.
+  const claimed = await claimsFor('alice', 'alice-rev');
   assert.deepEqual(
-    (await launchesFor('alice', 'alice-rev')).map((l) => [l.id, l.sessionId, l.name, l.prompt]),
-    [[review.id, review.sessionId, 'Review harbor-labs/atlas-web#7', review.prompt]],
+    claimed.map((l) => [l.prompt, l.name]),
+    [
+      ['Fix the tests', undefined],
+      [undefined, undefined],
+    ],
   );
+  assert.equal(claimed[1]?.id, launch.id);
   // Taken once.
-  assert.deepEqual(await launchesFor('alice', 'alice-rev'), []);
+  assert.deepEqual(await claimsFor('alice', 'alice-rev'), []);
 
-  const result = (who: Who, body: unknown) => call(who, `/api/launches/${review.id}/result`, body);
+  const started = '9f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f';
+  const result = (who: Who, body: unknown) => call(who, `/api/launches/${launch.id}/result`, body);
   assert.equal((await result('bob', { ok: false, detail: 'Bob was here' })).status, 404);
-  assert.equal((await result('alice', { ok: true })).status, 204);
-  assert.equal((await reviewsOf('alice')).find((r) => r.id === review.id)?.status, 'started');
+  assert.equal((await result('alice', { ok: true, sessionId: 'not-a-uuid' })).status, 400);
+  assert.equal((await result('alice', { ok: true, sessionId: started })).status, 204);
+  const after = (await launchesOf('alice')).find((l) => l.id === launch.id);
+  assert.deepEqual([after?.status, after?.sessionId], ['started', started]);
 });
 
-test('a new review session nobody started in time never starts, and says so', async () => {
-  const review = await read(
-    await call('alice', '/api/reviews', reviewOf({ kind: 'new', from: 'alice-rev' })),
-    Review,
-  );
-  await getDb()
-    .collection('reviews')
-    .updateOne(
-      { _id: review.id as never },
-      { $set: { createdAt: new Date(Date.now() - 11 * 60_000) } },
-    );
-  assert.deepEqual(await launchesFor('alice', 'alice-rev'), []);
-  assert.equal((await reviewsOf('alice')).find((r) => r.id === review.id)?.status, 'failed');
-});
-
-test('review settings are per owner', async () => {
+test("a review runs the owner's own instructions, in a session on the PR's repo", async () => {
   const put = (who: Who, body: unknown) =>
     app.request('/api/settings/review', {
       method: 'PUT',
       headers: { ...auth(who), 'content-type': 'application/json' },
       body: JSON.stringify(body),
     });
-  assert.equal((await put('alice', { method: 'own', command: '/prep-pr' })).status, 200);
-  assert.equal((await put('alice', { method: 'own', command: ' ' })).status, 400);
-  const alice = await read(await call('alice', '/api/settings/review'), ReviewSettings);
-  const bob = await read(await call('bob', '/api/settings/review'), ReviewSettings);
-  assert.deepEqual(alice, { method: 'own', command: '/prep-pr' });
-  assert.deepEqual(bob, { method: 'standard' });
+  assert.equal((await put('alice', { instructions: '/prep-pr' })).status, 200);
+  assert.equal((await put('alice', { instructions: 'x'.repeat(20_001) })).status, 400);
+  assert.deepEqual(await read(await call('alice', '/api/settings/review'), ReviewSettings), {
+    instructions: '/prep-pr',
+  });
+  assert.deepEqual(await read(await call('bob', '/api/settings/review'), ReviewSettings), {});
+
+  // Bob reviews the same PR from his own session: Claude's review, not Alice's command.
+  await call('bob', '/api/reports', report('bob-rev'));
+  const alices = await read(
+    await call('alice', '/api/launches', { from: 'alice-rev', review: PR }),
+    Launch,
+  );
+  const bobs = await read(
+    await call('bob', '/api/launches', { from: 'bob-rev', review: PR }),
+    Launch,
+  );
+  assert.equal(alices.prompt, `/prep-pr ${PR.url}`);
+  assert.equal(bobs.prompt, '/code-review 7');
+  assert.deepEqual(
+    (await claimsFor('alice', 'alice-rev')).map((l) => l.name),
+    ['Review harbor-labs/atlas-web#7'],
+  );
+
+  // Each sees only their own reviews of the PR.
+  const query = '?repo=harbor-labs/atlas-web&number=7';
+  assert.deepEqual(
+    (await launchesOf('alice', query)).map((l) => l.id),
+    [alices.id],
+  );
+  assert.deepEqual(
+    (await launchesOf('bob', query)).map((l) => l.id),
+    [bobs.id],
+  );
+
+  // Clearing the instructions goes back to Claude's review.
+  assert.equal((await put('alice', { instructions: '  ' })).status, 200);
+  assert.deepEqual(await read(await call('alice', '/api/settings/review'), ReviewSettings), {});
 });
 
-test("a live stream hears only its owner's reviews", async () => {
-  await call('bob', '/api/reports', report('bob-rev'));
+test('a new session nobody started in time never starts, and says so', async () => {
+  const launch = await read(await call('alice', '/api/launches', { from: 'alice-rev' }), Launch);
+  await getDb()
+    .collection('launches')
+    .updateOne(
+      { _id: launch.id as never },
+      { $set: { createdAt: new Date(Date.now() - 11 * 60_000) } },
+    );
+  assert.deepEqual(await claimsFor('alice', 'alice-rev'), []);
+  assert.equal((await launchesOf('alice')).find((l) => l.id === launch.id)?.status, 'failed');
+});
+
+test("a live stream hears only its owner's launches", async () => {
   const heard = await listen('alice', async () => {
-    const res = await call('bob', '/api/reviews', reviewOf({ kind: 'new', from: 'bob-rev' }));
+    const res = await call('bob', '/api/launches', { from: 'bob-rev' });
     assert.equal(res.status, 201);
   });
-  assert.doesNotMatch(heard, /event: reviews/);
+  assert.doesNotMatch(heard, /event: launches/);
 });

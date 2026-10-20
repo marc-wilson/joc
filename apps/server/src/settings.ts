@@ -1,7 +1,7 @@
 // The owner's dashboard settings. One document per owner; an owner who never saved any gets the
 // defaults.
 import { getDb } from '@joc/db';
-import { DEFAULT_SESSION_SETTINGS, type ReviewSettings, SessionSettings } from '@joc/protocol';
+import { DEFAULT_SESSION_SETTINGS, ReviewSettings, SessionSettings } from '@joc/protocol';
 import type { Owner } from './owner.ts';
 
 interface SettingsDoc {
@@ -30,17 +30,23 @@ export async function saveSessionSettings(owner: Owner, value: SessionSettings):
   );
 }
 
-/** Claude's standard review until the person picks their own. */
-const DEFAULT_REVIEW: ReviewSettings = { method: 'standard' };
-
+/** The owner's review instructions; none means Claude's standard review. */
 export async function getReviewSettings(owner: Owner): Promise<ReviewSettings> {
-  return (await settings().findOne({ _id: owner }))?.review ?? DEFAULT_REVIEW;
+  const stored: unknown = (await settings().findOne({ _id: owner }))?.review;
+  // The older shape: `{ method: 'standard' | 'own', command }`. Their own command carries over.
+  const old = stored as { method?: unknown; command?: unknown } | undefined;
+  if (old?.method === 'own' && typeof old.command === 'string') {
+    return { instructions: old.command };
+  }
+  const parsed = ReviewSettings.safeParse(stored);
+  return parsed.success && parsed.data.instructions ? parsed.data : {};
 }
 
 export async function saveReviewSettings(owner: Owner, review: ReviewSettings): Promise<void> {
+  const value = review.instructions ? { instructions: review.instructions } : {};
   await settings().updateOne(
     { _id: owner },
-    { $set: { review, updatedAt: new Date() } },
+    { $set: { review: value, updatedAt: new Date() } },
     { upsert: true },
   );
 }
