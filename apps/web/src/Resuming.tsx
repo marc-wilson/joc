@@ -8,6 +8,7 @@ import {
   failureTitle,
   type ResumePhase,
   resumedLine,
+  resumeLine,
   resumeOf,
   resumePhase,
   resumeStatus,
@@ -112,7 +113,8 @@ export function useResumeView(
       error: {
         title: error ? `Couldn't resume on ${machine}` : r ? failureTitle(r) : '',
         detail: error ?? r?.detail,
-        command: resumeCommand(session.id, session.cwd),
+        command: resumeLine(session.id),
+        copy: resumeCommand(session.id, session.cwd),
       },
       onResume: () => void resume(),
       busy,
