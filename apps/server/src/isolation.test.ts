@@ -7,9 +7,12 @@ import {
   Alert,
   AnswerRefused,
   ClaimedAnswer,
+  ClaimedDeletes,
   ClaimedLaunch,
   ClaimedPrompt,
   ConversationItem,
+  DeleteRefused,
+  Deletion,
   Device,
   GitHubSnapshot,
   HistorySession,
@@ -27,8 +30,10 @@ import {
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { z } from 'zod';
 import { createApp } from './app.ts';
+import { claimDeletes, DELETE_WAIT_MS, listDeletes, requestDeletes } from './deletes.ts';
 import type { GitHubAuth } from './github.ts';
 import { createDeviceToken, createWebSession, signInGitHubUser } from './identity.ts';
+import type { Owner } from './owner.ts';
 
 type Who = 'alice' | 'bob';
 
@@ -36,6 +41,7 @@ let mongo: MongoMemoryServer;
 const tokens = new Map<Who, string>();
 /** Each person's browser session, for the routes only a signed-in person may use. */
 const cookies = new Map<Who, string>();
+const owners = new Map<Who, Owner>();
 
 before(async () => {
   mongo = await MongoMemoryServer.create();
@@ -47,6 +53,7 @@ before(async () => {
     ['bob', 2],
   ] as const) {
     const owner = await signInGitHubUser({ id, login: who });
+    owners.set(who, owner);
     tokens.set(who, await createDeviceToken(owner, `${who}-laptop`));
     cookies.set(who, `joc_session=${await createWebSession(owner)}`);
   }
@@ -134,6 +141,10 @@ test('every API route needs an owner', async () => {
     ['POST', '/api/sessions/s/waiting/w/done'],
     ['POST', '/api/sessions/s/answers'],
     ['POST', '/api/sessions/s/answers/claim'],
+    ['GET', '/api/deletes'],
+    ['POST', '/api/deletes'],
+    ['POST', '/api/deletes/claim'],
+    ['POST', '/api/deletes/d/result'],
   ] as const) {
     const res = await app.request(path, { method });
     assert.equal(res.status, 401, `${method} ${path}`);
@@ -1133,4 +1144,191 @@ test('a JOC answer that comes after Claude Code was answered is dropped, and say
   await call('alice', '/api/reports', report('alice-race', { state: 'offline' }));
   const sessions = await read(await call('alice', '/api/sessions'), Sessions);
   assert.equal(sessions.find((s) => s.id === 'alice-race')?.waiting, undefined);
+});
+
+// ── Deleting sessions ────────────────────────────────────────────────────────
+
+const Deletions = z.array(Deletion);
+const History = z.array(HistorySession);
+
+/** As the person's signed-in browser: GET without a body, POST with one. */
+const asPerson = (who: Who, path: string, body?: unknown) =>
+  app.request(path, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: {
+      cookie: cookies.get(who) ?? '',
+      host: 'joc.test',
+      origin: 'http://joc.test',
+      'content-type': 'application/json',
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+const deletesOf = async (who: Who) => read(await asPerson(who, '/api/deletes'), Deletions);
+const deleteClaims = async (who: Who, machine: string) =>
+  (await read(await call(who, '/api/deletes/claim', { machine }), ClaimedDeletes)).deletes;
+const historyOf = async (who: Who) => read(await asPerson(who, '/api/history'), History);
+
+const GONE = '7d1e2f3a-4b5c-4d6e-8f70-81a2b3c4d5e6';
+
+test('a session is deleted only by its owner, from a browser, and only once it ended', async () => {
+  const alice = { machine: 'alice-laptop', title: 'Alice to delete' };
+  await call('alice', '/api/reports', report(GONE, alice));
+  // Bob has a session with the same id, which must stay as it is.
+  await call('bob', '/api/reports', report(GONE, { machine: 'bob-laptop', title: 'Bob keeps' }));
+  const item = { id: 'u1', at: new Date().toISOString(), kind: 'user', text: 'Hello' };
+  await call('bob', '/api/messages', { sessionId: GONE, items: [item] });
+
+  // Still running: refused, and says why.
+  const running = await asPerson('alice', '/api/deletes', { sessionIds: [GONE] });
+  assert.equal(running.status, 400);
+  assert.equal((await read(running, DeleteRefused)).error, 'Still running. Quit it first.');
+  // A machine never asks for a delete.
+  assert.equal((await call('alice', '/api/deletes', { sessionIds: [GONE] })).status, 403);
+
+  // It ends, with a conversation, a pasted image, a diff and a pin.
+  const image = await read(await upload('alice', png('only in the deleted one')), ImageRef);
+  const shared = await read(await upload('alice', png('also elsewhere')), ImageRef);
+  const withImages = { ...item, images: [image, shared] };
+  await call('alice', '/api/messages', { sessionId: GONE, items: [withImages] });
+  await call('alice', '/api/messages', {
+    sessionId: 'alice-keeps',
+    items: [{ ...item, id: 'k1', images: [shared] }],
+  });
+  const firstDiff = { sessionId: GONE, at: ++clock, base: 'main', diff: '', truncated: false };
+  assert.equal((await call('alice', '/api/changes', firstDiff)).status, 200);
+  await call('alice', '/api/reports', report(GONE, { ...alice, state: 'offline' }));
+  const pin = await app.request('/api/prefs', {
+    method: 'PATCH',
+    headers: {
+      cookie: cookies.get('alice') ?? '',
+      host: 'joc.test',
+      origin: 'http://joc.test',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ pinned: [GONE] }),
+  });
+  assert.equal(pin.status, 200);
+
+  // Bob can't delete Alice's: his own of that id is still running.
+  assert.equal((await asPerson('bob', '/api/deletes', { sessionIds: [GONE] })).status, 400);
+
+  const asked = await asPerson('alice', '/api/deletes', { sessionIds: [GONE] });
+  assert.equal(asked.status, 202);
+  const [deletion] = await read(asked, Deletions);
+  assert.deepEqual(
+    [deletion?.status, deletion?.machine, deletion?.title],
+    ['waiting', 'alice-laptop', 'Alice to delete'],
+  );
+  assert.deepEqual(await deletesOf('bob'), []);
+
+  // Only Alice's plugin on that machine takes it: not Bob's, not a browser, not another machine.
+  assert.deepEqual(await deleteClaims('bob', 'alice-laptop'), []);
+  const browserClaim = await asPerson('alice', '/api/deletes/claim', { machine: 'alice-laptop' });
+  assert.equal(browserClaim.status, 403);
+  assert.deepEqual(await deleteClaims('alice', 'alice-desktop'), []);
+  assert.deepEqual(await deleteClaims('alice', 'alice-laptop'), [
+    { id: deletion?.id, sessionId: GONE },
+  ]);
+  assert.deepEqual(await deleteClaims('alice', 'alice-laptop'), []);
+  assert.equal((await deletesOf('alice'))[0]?.status, 'deleting');
+
+  // Only Alice's plugin says how it went.
+  const result = `/api/deletes/${deletion?.id}/result`;
+  assert.equal((await call('bob', result, { ok: true })).status, 404);
+  assert.equal((await asPerson('alice', result, { ok: true })).status, 403);
+  const removed = [`/Users/alice/.claude/projects/-work/${GONE}.jsonl`];
+  assert.equal((await call('alice', result, { ok: true, removed })).status, 204);
+  assert.equal((await deletesOf('alice'))[0]?.status, 'deleted');
+
+  // Gone from Alice's JOC: the session, its conversation, diff, the image only it showed, its pin.
+  assert.equal(
+    (await historyOf('alice')).some((s) => s.id === GONE),
+    false,
+  );
+  assert.deepEqual(await read(await call('alice', `/api/sessions/${GONE}/messages`), Items), []);
+  assert.equal((await call('alice', `/api/sessions/${GONE}/changes`)).status, 404);
+  assert.equal((await call('alice', `/api/images/${image.id}`)).status, 404);
+  assert.equal((await call('alice', `/api/images/${shared.id}`)).status, 200);
+  const prefs = await read(await asPerson('alice', '/api/prefs'), PrefsSnapshot);
+  assert.equal(prefs.prefs.pinned.includes(GONE), false);
+
+  // Bob's session of the same id is untouched.
+  assert.deepEqual(
+    (await historyOf('bob')).filter((s) => s.id === GONE).map((s) => [s.title, s.messages]),
+    [['Bob keeps', 1]],
+  );
+
+  // A late report from Alice's machine can't bring it back; it's taken and ignored.
+  const late = await call('alice', '/api/reports', report(GONE, alice));
+  assert.equal(late.status, 200);
+  assert.equal(
+    (await call('alice', '/api/messages', { sessionId: GONE, items: [item] })).status,
+    200,
+  );
+  const diff = { sessionId: GONE, at: ++clock, base: 'main', diff: '', truncated: false };
+  assert.equal((await call('alice', '/api/changes', diff)).status, 200);
+  assert.equal(
+    (await historyOf('alice')).some((s) => s.id === GONE),
+    false,
+  );
+  assert.deepEqual(await read(await call('alice', `/api/sessions/${GONE}/messages`), Items), []);
+  // Bob's reports still land.
+  await call('bob', '/api/reports', report(GONE, { machine: 'bob-laptop', state: 'needs' }));
+  assert.equal((await historyOf('bob')).find((s) => s.id === GONE)?.state, 'needs');
+});
+
+test('a delete the machine refused says why, and the session stays', async () => {
+  const id = '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
+  await call('alice', '/api/reports', report(id, { machine: 'alice-laptop', state: 'offline' }));
+  const [deletion] = await read(
+    await asPerson('alice', '/api/deletes', { sessionIds: [id] }),
+    Deletions,
+  );
+  await deleteClaims('alice', 'alice-laptop');
+  const detail = 'It has 2 unpushed commits in its worktree. Push or discard them first.';
+  await call('alice', `/api/deletes/${deletion?.id}/result`, { ok: false, detail });
+  const listed = (await deletesOf('alice')).find((d) => d.id === deletion?.id);
+  assert.deepEqual([listed?.status, listed?.detail], ['failed', detail]);
+  assert.equal(
+    (await historyOf('alice')).some((s) => s.id === id),
+    true,
+  );
+  // Asked again, it waits for the machine again.
+  const again = await read(
+    await asPerson('alice', '/api/deletes', { sessionIds: [id] }),
+    Deletions,
+  );
+  assert.equal(again[0]?.status, 'waiting');
+});
+
+test('only Claude Code sessions with a machine can be deleted', async () => {
+  await call('alice', '/api/reports', report('not-a-uuid', { state: 'offline', machine: 'm' }));
+  const res = await asPerson('alice', '/api/deletes', { sessionIds: ['not-a-uuid', 'nope'] });
+  assert.equal(res.status, 400);
+  const refused = await read(res, DeleteRefused);
+  assert.deepEqual(
+    refused.sessions?.map((s) => s.id),
+    ['not-a-uuid', 'nope'],
+  );
+});
+
+test('a delete no machine takes in time fails, and says so', async () => {
+  const owner = owners.get('alice');
+  assert.ok(owner);
+  const id = '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e';
+  await call('alice', '/api/reports', report(id, { machine: 'alice-mini', state: 'offline' }));
+  const now = Date.now();
+  const outcome = await requestDeletes(owner, [id], now);
+  assert.ok(outcome.ok);
+  const later = (await listDeletes(owner, now + DELETE_WAIT_MS + 1)).find(
+    (d) => d.sessionId === id,
+  );
+  assert.equal(later?.status, 'failed');
+  assert.match(later?.detail ?? '', /Start Claude Code on alice-mini/);
+  // And no plugin takes it any more.
+  assert.deepEqual(
+    await claimDeletes(owner, 'alice-mini', undefined, now + DELETE_WAIT_MS + 1),
+    [],
+  );
 });

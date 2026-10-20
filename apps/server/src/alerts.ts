@@ -166,3 +166,9 @@ export async function clearAlerts(owner: Owner, ids?: string[]): Promise<void> {
   await alerts().deleteMany({ owner, ...(ids ? { _id: { $in: ids } } : {}) });
   changed(owner);
 }
+
+/** Deletes the alerts about a deleted session. */
+export async function forgetAlerts(owner: Owner, sessionId: string): Promise<void> {
+  const res = await alerts().deleteMany({ owner, sessionId });
+  if (res.deletedCount) changed(owner);
+}

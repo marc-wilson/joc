@@ -92,3 +92,26 @@ export async function countMessages(
     .toArray();
   return new Map(rows.map((r) => [r._id, r.n]));
 }
+
+const imageIds = (docs: { images?: { id: string }[] }[]) =>
+  docs.flatMap((d) => (d.images ?? []).map((i) => i.id));
+
+/** Deletes a deleted session's conversation; the ids of the images it showed. */
+export async function forgetMessages(owner: Owner, sessionId: string): Promise<string[]> {
+  const shown = await messages()
+    .find({ owner, sessionId, 'images.0': { $exists: true } }, { projection: { images: 1 } })
+    .toArray();
+  await messages().deleteMany({ owner, sessionId });
+  return imageIds(shown as { images?: { id: string }[] }[]);
+}
+
+/** Which of `ids` an item in any of the owner's conversations still shows. */
+export async function imagesShown(owner: Owner, ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const found = await messages()
+    .find({ owner, 'images.id': { $in: ids } }, { projection: { images: 1 } })
+    .toArray();
+  return new Set(
+    imageIds(found as { images?: { id: string }[] }[]).filter((id) => ids.includes(id)),
+  );
+}

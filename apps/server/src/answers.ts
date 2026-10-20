@@ -98,6 +98,11 @@ export async function dropAnswer(owner: Owner, sessionId: string, waitingId: str
   await answers().deleteOne({ _id: answerKey(owner, sessionId, waitingId), owner });
 }
 
+/** Deletes a deleted session's answers. */
+export async function forgetAnswers(owner: Owner, sessionId: string): Promise<void> {
+  await answers().deleteMany({ owner, sessionId });
+}
+
 function isDuplicateKey(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 11000;
 }

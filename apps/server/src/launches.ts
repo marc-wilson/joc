@@ -154,3 +154,9 @@ export async function finishLaunch(
   changed(owner);
   return true;
 }
+
+/** Deletes the launches a deleted session started, or that started it. */
+export async function forgetLaunches(owner: Owner, sessionId: string): Promise<void> {
+  const res = await launches().deleteMany({ owner, $or: [{ from: sessionId }, { sessionId }] });
+  if (res.deletedCount) changed(owner);
+}

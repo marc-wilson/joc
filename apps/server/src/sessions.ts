@@ -283,6 +283,40 @@ export async function listStaleSessions(
   return stale;
 }
 
+/** What deleting one of the owner's sessions needs to know of it. */
+export interface DeletableSession {
+  sessionId: string;
+  title?: string;
+  machine?: string;
+  device?: string;
+  /** Claude Code ended it (SessionEnd), or it has been quiet long enough to have stopped. */
+  ended: boolean;
+}
+
+/** The owner's sessions among `ids`, with whether each has ended; ids they don't have are left out. */
+export async function deletableSessions(
+  owner: Owner,
+  ids: string[],
+  now = Date.now(),
+): Promise<DeletableSession[]> {
+  if (!ids.length) return [];
+  const docs = await sessions()
+    .find({ _id: { $in: ids.map((id) => sessionKey(owner, id)) }, owner })
+    .toArray();
+  return docs.map((d) => ({
+    sessionId: d.sessionId,
+    title: d.name ?? d.title,
+    machine: d.machine,
+    device: d.device,
+    ended: d.state === 'offline' || now - d.updatedAt.getTime() > QUIET_AFTER_MS,
+  }));
+}
+
+/** Deletes one of the owner's sessions from JOC. */
+export async function forgetSession(owner: Owner, sessionId: string): Promise<void> {
+  await sessions().deleteOne({ _id: sessionKey(owner, sessionId), owner });
+}
+
 /** Which of `ids` name sessions the owner has, live or in the history. */
 export async function knownSessionIds(owner: Owner, ids: string[]): Promise<Set<string>> {
   if (!ids.length) return new Set();
