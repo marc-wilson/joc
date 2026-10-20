@@ -59,6 +59,7 @@ export {
   Composer,
   type ComposerImageLimits,
   type ComposerProps,
+  type ComposerResume,
   Message,
   type MessageProps,
   PastedImage,
@@ -168,6 +169,14 @@ export {
 } from './pr.tsx';
 export { resumeCommand, shortId, shortPath } from './resume.ts';
 export { ReviewSessionRow, type ReviewSessionRowProps } from './review-session.tsx';
+export {
+  Divider,
+  EndedTag,
+  type EndedTagProps,
+  type ResumeStep,
+  type ResumeStepStatus,
+  ResumeSteps,
+} from './resuming.tsx';
 export {
   NewSessionButton,
   type NewSessionButtonProps,

@@ -31,8 +31,12 @@ export interface HistoryRowProps {
   select?: { checked: boolean; onChange: (checked: boolean) => void; reason?: string };
   /** The row menu at its end, e.g. an OverflowMenu. */
   actions?: ReactNode;
+  /** Resume, "Starting…", Try again or Open session: before the command, in a slot of its own. */
+  resume?: ReactNode;
   /** How an action on it stands, e.g. "Deleting on harbor-mbp…": shown in the meta line's place. */
   status?: ReactNode;
+  /** The status says something failed: drawn in the fail colour. */
+  statusError?: boolean;
   /** It's gone: the row fades to this line and keeps its place, so nothing below it moves. */
   removed?: string;
 }
@@ -53,7 +57,9 @@ export function HistoryRow({
   pr,
   select,
   actions,
+  resume,
   status,
+  statusError,
   removed,
 }: HistoryRowProps) {
   const tip = useId();
@@ -61,7 +67,12 @@ export function HistoryRow({
   const when = duration ? `${ended} · ${duration}` : ended;
   return (
     <div
-      className={cx('joc-hist', select && 'joc-hist--select', removed && 'is-removed')}
+      className={cx(
+        'joc-hist',
+        select && 'joc-hist--select',
+        resume !== undefined && 'joc-hist--resume',
+        removed && 'is-removed',
+      )}
       aria-hidden={removed ? 'true' : undefined}
       inert={removed ? true : undefined}
     >
@@ -84,7 +95,12 @@ export function HistoryRow({
           {pr ? <span className="joc-tag">{pr}</span> : null}
         </div>
         {status ? (
-          <div className="joc-hist__meta joc-hist__status">{status}</div>
+          <div
+            className={cx('joc-hist__meta joc-hist__status', statusError && 'is-error')}
+            role={statusError ? 'alert' : 'status'}
+          >
+            {status}
+          </div>
         ) : (
           <div className="joc-hist__meta">
             {branch ? <Branch>{branch}</Branch> : null}
@@ -102,6 +118,7 @@ export function HistoryRow({
         <time>{ended}</time>
         {duration ? <span className="joc-hist__when-sub">{duration}</span> : null}
       </div>
+      {resume !== undefined ? <div className="joc-hist__act">{resume}</div> : null}
       <div className="joc-hist__cmd">
         <div className="joc-rcmd">
           <span className="joc-rcmd__prompt" aria-hidden="true">

@@ -438,3 +438,59 @@ h4.joc-taskd__label { margin: 0; }
 /* Each live list item wraps one row; the wrapper only fades. */
 .joc-slist__item { display: block; }
 /* ===== End sort and reviews ========================================================== */
+
+/* ===== Resume (#68) =====================================================================
+   From Claude Design's "JOC design pass: sort, reviews, resume", joc-additions.css section 3
+   ("Resume"), copied as drawn. The last part fits it to JOC's markup: the composer keeps its
+   editor mounted (hidden) so a draft survives, and HistoryRow v2 gets a slot for Resume. */
+
+.joc-ended { display: inline-flex; align-items: center; height: 20px; padding: 0 var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; line-height: 16px; font-weight: 500; color: var(--text-secondary); white-space: nowrap; }
+
+.joc-resume__text { flex: 1; min-width: 0; min-height: 22px; font-size: 14px; line-height: 22px; color: var(--text-tertiary); }
+.joc-resume__note { margin-right: auto; font-size: 12px; line-height: 16px; color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.joc-resume__steps { display: flex; align-items: center; gap: var(--space-4); margin-right: auto; min-width: 0; font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+.joc-resume__step { display: inline-flex; align-items: center; gap: var(--space-1\.5); white-space: nowrap; }
+.joc-resume__step.is-todo { color: var(--text-tertiary); }
+.joc-resume__step code { font-family: var(--font-mono); font-size: 12px; }
+
+.joc-composer.joc-resume--failed { border-color: var(--ci-fail); }
+.joc-resume__error { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: var(--space-2); padding: var(--space-3) var(--space-3) var(--space-1); }
+.joc-resume__error .joc-ci { margin-top: 3px; }
+.joc-resume__error-title { font-size: 13px; line-height: 20px; font-weight: 550; color: var(--text-primary); }
+.joc-resume__error-detail { font-family: var(--font-mono); font-size: 12px; line-height: 16px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.joc-resume__bar-cmd .joc-cmd { height: var(--control-md); max-width: 300px; }
+
+.joc-divider { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-5) 0; font-size: 12px; line-height: 16px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.joc-divider::before, .joc-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+.joc-hist__actions { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.joc-hist__actions .joc-cmd { flex: 1; min-width: 0; height: 32px; max-width: none; }
+.joc-hist__status { display: inline-flex; align-items: center; gap: var(--space-1\.5); font-size: 12px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.joc-hist__status.is-error { color: var(--ci-fail); }
+
+/* ---------- Fitted to JOC ---------- */
+/* The composer: the box or editor a resume covers stays mounted, out of sight. The bar's
+   copy command sits where the note does, and gives way before the buttons. */
+.joc-composer__box[hidden], .joc-composer__text[hidden] { display: none; }
+.joc-composer.is-disabled .joc-resume__text { cursor: default; }
+.joc-resume__error-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.joc-resume__bar-cmd { margin-right: auto; min-width: 0; }
+.joc-composer__bar .joc-code-inline { white-space: nowrap; }
+/* A picker near the bottom of the window, such as the composer's machine, opens upwards. */
+.joc-menu__list.is-above { top: auto; bottom: calc(100% + var(--space-1)); }
+
+/* HistoryRow v2 with a Resume slot (`.joc-hist__act`) between the time and the command. The
+   slot is fixed, so the commands still line up whatever button a row shows. */
+.joc-hist__act { grid-area: act; display: flex; align-items: center; justify-content: flex-end; min-width: 0; }
+.joc-hist__act .joc-slink { max-width: 100%; }
+.joc-hist--resume { grid-template-columns: minmax(0, 1fr) 128px 112px minmax(300px, 360px) var(--control-md); grid-template-areas: "main when act cmd menu"; }
+.joc-hist--select.joc-hist--resume { grid-template-columns: var(--control-sm) minmax(0, 1fr) 128px 112px minmax(300px, 360px) var(--control-md); grid-template-areas: "select main when act cmd menu"; }
+@container hist (max-width: 1099px) {
+  .joc-hist--resume { grid-template-columns: minmax(0, 1fr) 112px minmax(260px, 300px) var(--control-md); grid-template-areas: "main act cmd menu"; }
+  .joc-hist--select.joc-hist--resume { grid-template-columns: var(--control-sm) minmax(0, 1fr) 112px minmax(260px, 300px) var(--control-md); grid-template-areas: "select main act cmd menu"; }
+}
+@container hist (max-width: 719px) {
+  .joc-hist--resume { grid-template-columns: auto minmax(0, 1fr) var(--control-md); grid-template-areas: "main main menu" "act cmd cmd"; }
+  .joc-hist--select.joc-hist--resume { grid-template-columns: var(--control-sm) auto minmax(0, 1fr) var(--control-md); grid-template-areas: "select main main menu" ". act cmd cmd"; }
+}
+/* ===== End Resume (#68) ================================================================= */

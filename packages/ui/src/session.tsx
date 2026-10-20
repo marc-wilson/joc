@@ -6,6 +6,7 @@ import { cx } from './cx.ts';
 import { Icon } from './Icon.tsx';
 import { Branch, WorktreeTag } from './inline.tsx';
 import { ReviewSessionRow, type ReviewSessionRowProps } from './review-session.tsx';
+import { EndedTag } from './resuming.tsx';
 import { STATE_LABEL, StateBadge, StateDot } from './state.tsx';
 
 export interface SessionRowProps {
@@ -238,6 +239,8 @@ export interface SessionHeaderProps {
   title: string;
   state?: SessionState;
   stateLabel?: string;
+  /** It ended: this neutral tag ("Ended", "Starting…") takes the state badge's place. */
+  ended?: string;
   repo?: string;
   branch?: string;
   /** The linked worktree it works in, by name. */
@@ -245,6 +248,8 @@ export interface SessionHeaderProps {
   machine?: string;
   model?: string;
   contextLeft?: number;
+  /** A last meta item, such as "Ended 2h ago". */
+  when?: string;
   tabs?: TabItem[];
   tab?: string;
   onTabChange?: (id: string) => void;
@@ -255,12 +260,14 @@ export function SessionHeader({
   title,
   state = 'idle',
   stateLabel,
+  ended,
   repo,
   branch,
   worktree,
   machine,
   model,
   contextLeft,
+  when,
   tabs,
   tab,
   onTabChange,
@@ -271,7 +278,7 @@ export function SessionHeader({
       <div className="joc-shead__top">
         <div className="joc-shead__id">
           <h1 className="joc-shead__title">{title}</h1>
-          <StateBadge state={state} label={stateLabel} />
+          {ended ? <EndedTag label={ended} /> : <StateBadge state={state} label={stateLabel} />}
         </div>
         <div className="joc-shead__actions">{children}</div>
       </div>
@@ -292,6 +299,7 @@ export function SessionHeader({
             <ContextMeter left={contextLeft} />
           </span>
         ) : null}
+        {when ? <span>{when}</span> : null}
       </div>
       {tabs ? <Tabs items={tabs} value={tab} onChange={onTabChange} /> : null}
     </div>

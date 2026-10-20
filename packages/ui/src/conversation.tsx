@@ -1,10 +1,12 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { CIMark } from './ci.tsx';
 import { CommandList } from './cmdlist.tsx';
+import { CopyCommand } from './code.tsx';
 import { Button, CollapseButton } from './controls.tsx';
 import { cx } from './cx.ts';
 import { Icon } from './Icon.tsx';
 import { attachedHint, formatBytes, imageTypeName } from './media.ts';
+import { type ResumeStep, ResumeSteps } from './resuming.tsx';
 import {
   type CommandsStatus,
   type ComposerSuggestion,
@@ -55,6 +57,26 @@ interface Pasted {
   url: string;
 }
 
+/** An ended session's composer: Resume in Send's place, then how starting back up goes. */
+export interface ComposerResume {
+  phase: 'ended' | 'starting' | 'failed';
+  /** The box's line while ended or starting: "This session ended 2h ago. Resume it to keep going." */
+  text?: ReactNode;
+  /** The machine it resumes on. */
+  machine: string;
+  /** Picks another machine, when there's more than one; shown in place of the machine's name. */
+  picker?: ReactNode;
+  /** While starting: reached the machine, `claude --resume`, loading the messages. */
+  steps?: ResumeStep[];
+  /** After a failure: "Couldn't resume on <machine>: <reason>", the fact to fix it, the command. */
+  error?: { title: string; detail?: string; command: string };
+  onResume?: () => void;
+  /** Withdraws it while no machine has taken it yet. */
+  onCancel?: () => void;
+  /** The request is on its way. */
+  busy?: boolean;
+}
+
 export interface ComposerProps {
   value?: string;
   placeholder?: string;
@@ -67,6 +89,8 @@ export interface ComposerProps {
   hint?: ReactNode;
   /** Lets images be pasted in, within these limits. */
   imageLimits?: ComposerImageLimits;
+  /** The session ended: the box offers to resume it instead. What you typed is kept, hidden. */
+  resume?: ComposerResume;
   /** Called with the trimmed text and any pasted images on Enter or the send button; the box
    * then clears. A picked command leads the text: `/name args`. */
   onSubmit?: (text: string, images: File[]) => void;
@@ -83,11 +107,14 @@ export function Composer({
   suggestions = [],
   commandsStatus = 'ready',
   working,
-  disabled,
+  disabled: off,
   hint,
   imageLimits,
+  resume,
   onSubmit,
 }: ComposerProps) {
+  // An ended session takes no messages: the box stays, read-only, until it's live again.
+  const disabled = off || !!resume;
   const box = useRef<HTMLDivElement>(null);
   const [empty, setEmpty] = useState(!value);
   const [images, setImages] = useState<Pasted[]>([]);
@@ -270,7 +297,13 @@ export function Composer({
     // biome-ignore lint/a11y/noStaticElementInteractions: dropping images is a shortcut for pasting them
     <div
       ref={composer}
-      className={cx('joc-composer', disabled && 'is-disabled')}
+      className={cx(
+        'joc-composer',
+        disabled && 'is-disabled',
+        resume?.phase === 'failed' && 'joc-resume--failed',
+      )}
+      role={resume?.phase === 'failed' ? 'alert' : undefined}
+      aria-busy={resume?.phase === 'starting' || undefined}
       onDragOver={(e) => {
         if (imageLimits && !disabled && e.dataTransfer.types.includes('Files')) e.preventDefault();
       }}
@@ -320,12 +353,25 @@ export function Composer({
           onClose={() => setViewing(undefined)}
         />
       ) : null}
-      <div className="joc-composer__box">
-        {picked ? (
+      {resume?.phase === 'failed' && resume.error ? (
+        <div className="joc-resume__error">
+          <CIMark status="fail" />
+          <div className="joc-resume__error-body">
+            <div className="joc-resume__error-title">{resume.error.title}</div>
+            {resume.error.detail ? (
+              <div className="joc-resume__error-detail">{resume.error.detail}</div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      <div className="joc-composer__box" hidden={resume?.phase === 'failed' && !!resume.error}>
+        {resume ? <div className="joc-resume__text">{resume.text}</div> : null}
+        {picked && !resume ? (
           <SlashPill command={picked.shown} removable={!disabled} onRemove={() => unpick('/')} />
         ) : null}
         <div
           ref={box}
+          hidden={!!resume}
           className={cx('joc-composer__text', empty && 'is-empty', argHint && 'has-args')}
           contentEditable={!disabled}
           suppressContentEditableWarning
@@ -366,22 +412,63 @@ export function Composer({
           {value}
         </div>
       </div>
+      {resume ? (
+        <ResumeBar resume={resume} />
+      ) : (
+        <div className="joc-composer__bar">
+          <span className="joc-composer__hint">{notice || attached || hint || barHint}</span>
+          {working ? (
+            <Button variant="secondary" size="sm" icon="stop">
+              Stop
+            </Button>
+          ) : null}
+          <Button
+            variant="primary"
+            size="sm"
+            icon="send"
+            disabled={disabled || (empty && !images.length && !picked)}
+            aria-label="Send"
+            onClick={submit}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The ended composer's bar: where it runs and Resume, the steps and Cancel, or Try again. */
+function ResumeBar({ resume }: { resume: ComposerResume }) {
+  const machine = resume.picker ?? <code className="joc-code-inline">{resume.machine}</code>;
+  if (resume.phase === 'starting') {
+    return (
       <div className="joc-composer__bar">
-        <span className="joc-composer__hint">{notice || attached || hint || barHint}</span>
-        {working ? (
-          <Button variant="secondary" size="sm" icon="stop">
-            Stop
+        <ResumeSteps steps={resume.steps ?? []} />
+        {resume.onCancel ? (
+          <Button variant="ghost" size="sm" onClick={resume.onCancel}>
+            Cancel
           </Button>
         ) : null}
-        <Button
-          variant="primary"
-          size="sm"
-          icon="send"
-          disabled={disabled || (empty && !images.length && !picked)}
-          aria-label="Send"
-          onClick={submit}
-        />
+        <Button variant="primary" size="md" disabled>
+          Starting…
+        </Button>
       </div>
+    );
+  }
+  return (
+    <div className="joc-composer__bar">
+      {resume.phase === 'failed' && resume.error ? (
+        <span className="joc-resume__bar-cmd">
+          <CopyCommand command={resume.error.command} />
+        </span>
+      ) : (
+        <span className="joc-resume__note">
+          Runs <code className="joc-code-inline">claude --resume</code> on
+        </span>
+      )}
+      {machine}
+      <Button variant="primary" size="md" disabled={resume.busy} onClick={resume.onResume}>
+        {resume.phase === 'failed' ? 'Try again' : 'Resume'}
+      </Button>
     </div>
   );
 }
