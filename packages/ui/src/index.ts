@@ -27,6 +27,7 @@ export {
 export { NotificationBell, type NotificationBellProps } from './bell.tsx';
 export { ContextMeter, type ContextMeterProps } from './ContextMeter.tsx';
 export { CIBadge, type CIBadgeProps, CIMark, type CIMarkProps } from './ci.tsx';
+export { CommandList, type CommandListProps } from './cmdlist.tsx';
 export {
   CodeBlock,
   type CodeBlockProps,
@@ -58,7 +59,6 @@ export {
   Composer,
   type ComposerImageLimits,
   type ComposerProps,
-  type ComposerSuggestion,
   Message,
   type MessageProps,
   PastedImage,
@@ -196,6 +196,15 @@ export {
   SettingsSection,
   type SettingsSectionProps,
 } from './settings.tsx';
+export {
+  type CommandsStatus,
+  type ComposerSuggestion,
+  matchSuggestions,
+  type SuggestionRow,
+  type SuggestionSource,
+  slashQuery,
+  sourceLabel,
+} from './slash.ts';
 export {
   STATE_LABEL,
   StateBadge,

@@ -292,3 +292,44 @@ h4.joc-taskd__label { margin: 0; }
   .joc-rcmd__tip { right: 0; width: auto; max-width: none; }
 }
 /* ======================== end HistoryRow v2 (issue #57) ======================== */
+
+/* ===== Slash commands (issue #56) =====================================================
+   From Claude Design's "JOC — slash commands and history rows" pass, joc-next.css: the command
+   list (replaces .joc-suggest) and the composer's argument hint, copied as drawn. The last part
+   fits it to JOC's composer, whose text box is contentEditable rather than an <input>. */
+
+/* ---------- Command list: slash suggestions above the composer ---------- */
+.joc-cmdlist { position: absolute; left: 0; bottom: calc(100% + var(--space-1\.5)); width: min(640px, 100%); display: flex; flex-direction: column; background: var(--bg-overlay); border-radius: var(--radius-lg); box-shadow: var(--shadow-2); z-index: var(--z-popover); overflow: hidden; animation: joc-fade var(--duration-fast) var(--ease-standard) both; }
+.joc-cmdlist.is-static { position: static; animation: none; }
+.joc-cmdlist__scroll { max-height: var(--cmdlist-max, 296px); overflow-y: auto; overscroll-behavior: contain; padding: var(--space-1); scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.joc-cmdlist__group { display: flex; align-items: center; height: var(--row-dense); padding: 0 var(--space-2); font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-tertiary); }
+.joc-cmdlist__item { display: flex; align-items: center; gap: var(--space-3); width: 100%; height: var(--row); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-md); background: none; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; transition: background-color var(--duration-instant) linear; }
+.joc-cmdlist__item.is-active { background: var(--bg-selected); }
+.joc-cmdlist__name { flex: none; min-width: 184px; font-family: var(--font-mono); font-size: 12px; line-height: 16px; font-weight: 450; white-space: nowrap; font-variant-ligatures: none; }
+.joc-cmdlist__name mark { background: none; color: var(--accent); font-weight: 500; }
+.joc-cmdlist__ns { color: var(--text-tertiary); }
+.joc-cmdlist__args { margin-left: var(--space-1\.5); color: var(--text-tertiary); font-weight: 400; }
+.joc-cmdlist__desc { flex: 1; min-width: 0; font-size: 12px; line-height: 16px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.joc-cmdlist__src { flex: none; max-width: 132px; font-size: 12px; line-height: 16px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.joc-cmdlist__src.is-plugin { font-family: var(--font-mono); font-size: 11px; }
+.joc-cmdlist__note { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row); padding: var(--space-2); font-size: 13px; line-height: 20px; color: var(--text-secondary); }
+.joc-cmdlist__note code { font-family: var(--font-mono); font-size: 12px; color: var(--text-primary); }
+.joc-cmdlist__ph { display: flex; align-items: center; gap: var(--space-3); height: var(--row); padding: 0 var(--space-2); }
+.joc-cmdlist__bar { height: 8px; border-radius: var(--radius-full); background: var(--border); }
+.joc-cmdlist__foot { display: flex; align-items: center; gap: var(--space-4); height: var(--row-dense); padding: 0 var(--space-3); border-top: 1px solid var(--border-subtle); font-size: 12px; line-height: 16px; color: var(--text-tertiary); white-space: nowrap; }
+.joc-cmdlist__foot .joc-kbd { margin-right: var(--space-1); }
+.joc-cmdlist__count { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+/* ---------- Composer: argument hint after a command is picked ---------- */
+.joc-composer__input { flex: 1; min-width: 0; height: 22px; padding: 0; border: 0; background: none; outline: none; font-family: var(--font-sans); font-size: 14px; line-height: 22px; color: var(--text-primary); }
+.joc-composer__input::placeholder { color: var(--text-tertiary); }
+.joc-composer__input.has-args::placeholder { font-family: var(--font-mono); font-size: 13px; }
+.joc-composer__input:disabled { cursor: not-allowed; }
+.joc-argghost { font-family: var(--font-mono); font-size: 13px; line-height: 22px; color: var(--text-tertiary); pointer-events: none; user-select: none; }
+.joc-arghint { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 12px; line-height: 16px; color: var(--text-tertiary); white-space: nowrap; }
+.joc-arghint code { font-family: var(--font-mono); font-size: 12px; font-weight: 450; color: var(--text-secondary); font-variant-ligatures: none; }
+
+/* JOC's composer: the argument ghost is the empty box's placeholder, mono as the design's. */
+.joc-composer__text.has-args.is-empty::before { font-family: var(--font-mono); font-size: 13px; }
+.joc-composer.is-disabled .joc-composer__text { color: var(--text-secondary); cursor: not-allowed; }
+/* ===== End slash commands ============================================================= */
