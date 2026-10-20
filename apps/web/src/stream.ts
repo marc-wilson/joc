@@ -7,6 +7,7 @@ import { checkAuth } from './auth.ts';
 const Snapshot = z.object({ type: z.literal('snapshot'), sessions: z.array(Session) });
 const Update = z.object({ type: z.literal('session'), session: Session });
 const ChangesEvent = z.object({ type: z.literal('changes'), sessionId: z.string() });
+const CommandsEvent = z.object({ type: z.literal('commands'), sessionId: z.string() });
 const GitHubEvent = z.object({ type: z.literal('github') });
 const NotificationsEvent = z.object({ type: z.literal('notifications') });
 const AlertsEvent = z.object({ type: z.literal('alerts') });
@@ -25,6 +26,7 @@ export type LiveEvent =
   | z.infer<typeof Update>
   | z.infer<typeof Messages>
   | z.infer<typeof ChangesEvent>
+  | z.infer<typeof CommandsEvent>
   | z.infer<typeof GitHubEvent>
   | z.infer<typeof NotificationsEvent>
   | z.infer<typeof AlertsEvent>
@@ -65,6 +67,7 @@ function start(): () => void {
     on('session', Update);
     on('messages', Messages);
     on('changes', ChangesEvent);
+    on('commands', CommandsEvent);
     on('github', GitHubEvent);
     on('notifications', NotificationsEvent);
     on('alerts', AlertsEvent);

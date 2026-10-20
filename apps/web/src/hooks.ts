@@ -10,7 +10,9 @@ import {
   NotificationsSnapshot,
   ReviewSettings,
   Session,
+  SessionCommands,
   SessionSettings,
+  type SlashCommand,
 } from '@joc/protocol';
 import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
@@ -161,6 +163,64 @@ export function useNow(intervalMs = 30_000): number {
     return () => clearInterval(id);
   }, [intervalMs]);
   return now;
+}
+
+/**
+ * A session's slash commands, as its plugin last sent them; undefined until it has (or while
+ * they load), and refetched whenever it sends them again.
+ */
+export function useCommands(sessionId: string | undefined): SlashCommand[] | undefined {
+  const [commands, setCommands] = useState<{ sessionId: string; list: SlashCommand[] }>();
+
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    const load = () =>
+      apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/commands`)
+        .then(async (r) => {
+          if (cancelled || !r.ok) return;
+          const body = SessionCommands.parse(await r.json());
+          setCommands({ sessionId, list: body.commands });
+        })
+        .catch(() => {});
+    const unsubscribe = subscribe((event) => {
+      if (
+        (event.type === 'commands' && event.sessionId === sessionId) ||
+        event.type === 'snapshot'
+      ) {
+        void load();
+      }
+    });
+    void load();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [sessionId]);
+
+  // Another session's list never shows, not even for a moment after switching.
+  return commands && commands.sessionId === sessionId ? commands.list : undefined;
+}
+
+/**
+ * Caps the composer's command list (`--cmdlist-max` on the dock) at half the thread's height,
+ * less a row, so the newest message stays at least half in view; never past 296px, 8 rows.
+ * Give it the dock; the thread is the element before it.
+ */
+export function useCmdlistMax() {
+  const observer = useRef<ResizeObserver>(undefined);
+  return (dock: HTMLElement | null) => {
+    observer.current?.disconnect();
+    const thread = dock?.previousElementSibling;
+    if (!dock || !thread) return;
+    const fit = () => {
+      const max = Math.min(296, Math.max(80, thread.clientHeight / 2 - 56));
+      dock.style.setProperty('--cmdlist-max', `${Math.round(max)}px`);
+    };
+    observer.current = new ResizeObserver(fit);
+    observer.current.observe(thread);
+    fit();
+  };
 }
 
 export type Changes =
