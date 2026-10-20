@@ -29,15 +29,18 @@ function toItem({ _id: _, owner: _o, sessionId: _s, ...item }: MessageDoc): Conv
   return item as ConversationItem;
 }
 
-/** The latest `limit` items of a session's conversation, oldest first. */
+/**
+ * The latest `limit` items of a session's conversation, oldest first. With `task`, the steps of
+ * that background subagent instead; without, the session's own conversation (no subagent steps).
+ */
 export async function listMessages(
   owner: Owner,
   sessionId: string,
-  limit = 1000,
+  { task, limit = 1000 }: { task?: string; limit?: number } = {},
 ): Promise<ConversationItem[]> {
   await ensureIndex();
   const docs = await messages()
-    .find({ owner, sessionId })
+    .find({ owner, sessionId, task: task ?? { $exists: false } })
     .sort({ at: -1, id: -1 })
     .limit(limit)
     .toArray();
@@ -74,11 +77,13 @@ export async function countMessages(
   await ensureIndex();
   const rows = await messages()
     .aggregate<{ _id: string; n: number }>([
-      // Tool results and command output ride along with their calls, so they don't count.
+      // Tool results and command output ride along with their calls, so they don't count; nor
+      // do a subagent's own steps.
       {
         $match: {
           owner,
           sessionId: { $in: sessionIds },
+          task: { $exists: false },
           kind: { $nin: ['tool_result', 'command_output'] },
         },
       },
