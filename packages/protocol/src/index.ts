@@ -690,6 +690,79 @@ export const LaunchResult = z.object({
 });
 export type LaunchResult = z.infer<typeof LaunchResult>;
 
+// Deleting a session, for real: from the machine it ran on (gone from `claude --resume`) and from
+// JOC. Nothing reaches into the machine: a session running on it takes the delete on its next
+// poll, checks no Claude Code process still has the session, and removes it there, `claude rm`
+// for a background session, the transcript and Claude Code's other files keyed by its id for any
+// other. Only then does the server drop its own copy, and remember the id for a while so a late
+// report can't bring it back. It can't be undone.
+
+/** A Claude Code session id: what the plugin deletes files by, so nothing else ever matches. */
+export const ClaudeSessionId = z.uuid();
+
+/** The most sessions one request deletes. */
+export const MAX_DELETES = 100;
+
+/** `POST /api/deletes`, from the dashboard: delete these ended sessions. */
+export const DeleteRequest = z.object({
+  sessionIds: z.array(z.string().min(1).max(200)).min(1).max(MAX_DELETES),
+});
+export type DeleteRequest = z.infer<typeof DeleteRequest>;
+
+/**
+ * - `waiting`: for a running session on its machine to take it.
+ * - `deleting`: a plugin on the machine took it and is deleting it.
+ * - `deleted`: gone from the machine and from JOC.
+ * - `failed`: it wasn't deleted (or not all of it); `detail` says why.
+ */
+export const DeletionStatus = z.enum(['waiting', 'deleting', 'deleted', 'failed']);
+export type DeletionStatus = z.infer<typeof DeletionStatus>;
+
+/** A delete asked for from the dashboard, as `GET /api/deletes` lists them. */
+export const Deletion = z.object({
+  id: z.string(),
+  sessionId: z.string(),
+  /** The session's title, kept so the delete can still be named once the session is gone. */
+  title: z.string().optional(),
+  /** The machine it runs on, where it's deleted. */
+  machine: z.string(),
+  status: DeletionStatus,
+  detail: z.string().optional(),
+  createdAt: z.iso.datetime(),
+});
+export type Deletion = z.infer<typeof Deletion>;
+
+/** Why a delete request was refused, per session (`POST /api/deletes` answers 400 with them). */
+export const DeleteRefused = z.object({
+  error: z.string(),
+  sessions: z.array(z.object({ id: z.string(), reason: z.string() })).optional(),
+});
+export type DeleteRefused = z.infer<typeof DeleteRefused>;
+
+/** `POST /api/deletes/claim`, a machine's plugin: the deletes waiting for this machine. */
+export const DeleteClaim = z.object({ machine: z.string().min(1).max(200) });
+export type DeleteClaim = z.infer<typeof DeleteClaim>;
+
+/** A session to delete, as the claim hands it to the plugin. */
+export const ClaimedDelete = z.object({ id: z.string(), sessionId: ClaudeSessionId });
+export type ClaimedDelete = z.infer<typeof ClaimedDelete>;
+
+export const ClaimedDeletes = z.object({ deletes: z.array(ClaimedDelete) });
+export type ClaimedDeletes = z.infer<typeof ClaimedDeletes>;
+
+/** The most paths a delete result lists. */
+export const MAX_REMOVED_PATHS = 200;
+
+/** `POST /api/deletes/:id/result`, from the plugin: whether the session is gone from the machine. */
+export const DeleteResult = z.object({
+  ok: z.boolean(),
+  /** What was removed, for the record. */
+  removed: z.array(z.string().max(1000)).max(MAX_REMOVED_PATHS).optional(),
+  /** Why it wasn't deleted, short: still running, unpushed commits, a worktree left. */
+  detail: z.string().max(1000).optional(),
+});
+export type DeleteResult = z.infer<typeof DeleteResult>;
+
 /** Server-sent events on `GET /api/stream`. */
 export type StreamEvent =
   | { type: 'snapshot'; sessions: Session[] }
@@ -705,6 +778,10 @@ export type StreamEvent =
   | { type: 'alerts' }
   /** A new session was asked for or changed; fetch them from `/api/launches`. */
   | { type: 'launches' }
+  /** A delete was asked for or changed; fetch them from `/api/deletes`. */
+  | { type: 'deletes' }
+  /** The session was deleted: it's gone from the machine and from JOC. */
+  | { type: 'deleted'; sessionId: string }
   /** The person's preferences changed, maybe in another tab. */
   | { type: 'prefs'; prefs: Prefs };
 
