@@ -93,6 +93,26 @@ export function TaskRow({
   );
 }
 
+export interface TaskGroupHeaderProps {
+  title: string;
+  count?: number;
+  /** Actions at its end, e.g. a "Show all" button. */
+  children?: ReactNode;
+}
+
+/** Heads a group of `TaskRow`s inside the same list: "Running", "Finished". */
+export function TaskGroupHeader({ title, count, children }: TaskGroupHeaderProps) {
+  return (
+    <div className="joc-taskgroup">
+      <h3 className="joc-taskgroup__title">
+        {title}
+        {count != null ? <span className="joc-taskgroup__count">{count}</span> : null}
+      </h3>
+      {children ? <div className="joc-taskgroup__actions">{children}</div> : null}
+    </div>
+  );
+}
+
 export interface TaskFact {
   label: string;
   value: ReactNode;
