@@ -15,6 +15,8 @@ import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { commandLine } from './commands.ts';
 import type { PendingPrompt } from './pending.ts';
+import { plain } from './plain.ts';
+import { toggled, usePref } from './prefs.ts';
 
 const time = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -113,17 +115,23 @@ function UserMessage({
   );
 }
 
+/** A collapsed message's one line: its first line of text, as plain text. */
+const firstLine = (text: string) => plain(text.split('\n').find((l) => l.trim()) ?? '');
+
 interface Props {
+  sessionId: string;
   items: ConversationItem[];
   pending: PendingPrompt[];
   state: SessionState;
 }
 
 /** A session's conversation, kept pinned to the newest message while you're at the bottom. */
-export function Conversation({ items, pending, state }: Props) {
+export function Conversation({ sessionId, items, pending, state }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const [viewing, setViewing] = useState<Viewing>();
+  // Claude's messages you folded, remembered per session.
+  const [folded, setFolded] = usePref<string[]>(`joc:folded-messages:${sessionId}`, []);
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -186,7 +194,14 @@ export function Conversation({ items, pending, state }: Props) {
               }
               case 'claude':
                 return (
-                  <Message key={item.id} from="claude" time={time(item.at)}>
+                  <Message
+                    key={item.id}
+                    from="claude"
+                    time={time(item.at)}
+                    collapsed={folded.includes(item.id)}
+                    preview={firstLine(item.text)}
+                    onToggle={() => setFolded(toggled(folded, item.id, !folded.includes(item.id)))}
+                  >
                     <div className="joc-md">
                       <Markdown remarkPlugins={[remarkGfm]} components={markdown}>
                         {item.text}

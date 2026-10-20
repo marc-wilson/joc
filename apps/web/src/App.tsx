@@ -193,6 +193,7 @@ export default function App() {
                 <>
                   <Conversation
                     key={selected.id}
+                    sessionId={selected.id}
                     items={items}
                     pending={waiting}
                     state={selected.state}
