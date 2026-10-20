@@ -203,6 +203,47 @@ export type MarkReadRequest = z.infer<typeof MarkReadRequest>;
 export const ReadsClaim = z.object({ ids: z.array(GitHubNotification.shape.id) });
 export type ReadsClaim = z.infer<typeof ReadsClaim>;
 
+// Alerts: JOC's own record of what involved the person, kept on the server so they can look back
+// on what they missed. The server raises them from what the plugin reports: a session that went
+// to `needs`, a turn that finished, a pull request newly asking for their review.
+
+/** What an alert is about. */
+export const AlertKind = z.enum(['needs', 'finished', 'review']);
+export type AlertKind = z.infer<typeof AlertKind>;
+
+/** Most alerts kept per person; older ones go first. */
+export const MAX_ALERTS = 200;
+
+/** An alert's id, made by the server. */
+export const AlertId = z.uuid();
+
+/** One alert, as `GET /api/alerts` lists them, newest first. */
+export const Alert = z.object({
+  id: AlertId,
+  kind: AlertKind,
+  /** The session's title, or the pull request's. */
+  title: z.string(),
+  /**
+   * One line more: what the session said it needs, how its turn ended, or (for `review`) the
+   * pull request's author.
+   */
+  detail: z.string().optional(),
+  /** `owner/name`, matching Session.repo. */
+  repo: z.string(),
+  /** The session it's about, for `needs` and `finished`. */
+  sessionId: z.string().optional(),
+  /** The pull request, for `review`. */
+  number: z.number().int().positive().optional(),
+  url: z.url().optional(),
+  at: z.iso.datetime(),
+  read: z.boolean(),
+});
+export type Alert = z.infer<typeof Alert>;
+
+/** `POST /api/alerts/read` and `/api/alerts/clear`, from the dashboard. */
+export const AlertIdsRequest = z.object({ ids: z.array(AlertId).min(1).max(MAX_ALERTS) });
+export type AlertIdsRequest = z.infer<typeof AlertIdsRequest>;
+
 /** How a background task (shell command or subagent) ended. */
 export const TaskStatus = z.enum(['completed', 'failed', 'killed']);
 export type TaskStatus = z.infer<typeof TaskStatus>;
@@ -351,7 +392,9 @@ export type StreamEvent =
   /** New GitHub data; fetch it from `/api/github`. */
   | { type: 'github' }
   /** The unread GitHub notifications changed; fetch them from `/api/notifications`. */
-  | { type: 'notifications' };
+  | { type: 'notifications' }
+  /** The person's alerts changed; fetch them from `/api/alerts`. */
+  | { type: 'alerts' };
 
 /** A signed-in person, as the dashboard shows them. */
 export const User = z.object({
