@@ -1,6 +1,8 @@
 import {
   Alert,
   type ConversationItem,
+  DeleteRefused,
+  Deletion,
   GitHubSnapshot,
   HistorySession,
   Launch,
@@ -22,15 +24,28 @@ const Sessions = z.array(Session);
  * Live sessions, in first-seen order. `reload` reads the list afresh, for when the person changed
  * which sessions it keeps.
  */
-export function useSessions(): { sessions: Session[]; connected: boolean; reload: () => void } {
+export function useSessions(): {
+  sessions: Session[];
+  connected: boolean;
+  reload: () => void;
+  /** Sessions deleted since the list was read: they keep their place, faded, until it's read again. */
+  deleted: ReadonlySet<string>;
+} {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [connected, setConnected] = useState(false);
+  const [deleted, setDeleted] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(
     () =>
       subscribe((event) => {
         if (event.type === 'status') setConnected(event.connected);
-        if (event.type === 'snapshot') setSessions(event.sessions);
+        if (event.type === 'snapshot') {
+          setSessions(event.sessions);
+          setDeleted(new Set());
+        }
+        if (event.type === 'deleted') {
+          setDeleted((set) => new Set([...set, event.sessionId]));
+        }
         if (event.type === 'session') {
           const { session } = event;
           // Update in place so rows never move; new sessions go at the end.
@@ -52,7 +67,7 @@ export function useSessions(): { sessions: Session[]; connected: boolean; reload
       // Unreachable for now: the next reconnect snapshot has the list.
       .catch(() => {});
 
-  return { sessions, connected, reload };
+  return { sessions, connected, reload, deleted };
 }
 
 /** Which sessions the live list keeps, and a way to change it. Undefined until loaded. */
@@ -404,4 +419,49 @@ export function useHistory(enabled = true): HistorySession[] | undefined {
     };
   }, [enabled]);
   return history;
+}
+
+const Deletions = z.array(Deletion);
+
+/** The person's deletes of the last day, oldest first, refetched whenever one changes. */
+export function useDeletes(): Deletion[] {
+  const [deletes, setDeletes] = useState<Deletion[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      apiFetch('/api/deletes')
+        .then(async (r) => {
+          if (r.ok && !cancelled) setDeletes(Deletions.parse(await r.json()));
+        })
+        // Unreachable for now: the next deletes event or reconnect snapshot loads them again.
+        .catch(() => {});
+    const unsubscribe = subscribe((event) => {
+      if (event.type === 'deletes' || event.type === 'snapshot') void load();
+    });
+    void load();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+  return deletes;
+}
+
+/** Asks for sessions to be deleted on their machines and in JOC. The deletes, or why not. */
+export async function askDeletes(sessionIds: string[]): Promise<Deletion[] | { error: string }> {
+  try {
+    const res = await apiFetch('/api/deletes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionIds }),
+    });
+    const body: unknown = await res.json().catch(() => ({}));
+    if (res.ok) return Deletions.parse(body);
+    const refused = DeleteRefused.safeParse(body);
+    if (!refused.success) return { error: "JOC couldn't delete them." };
+    const [one] = refused.data.sessions ?? [];
+    return { error: refused.data.sessions?.length === 1 && one ? one.reason : refused.data.error };
+  } catch {
+    return { error: "JOC couldn't reach the server. Try again." };
+  }
 }

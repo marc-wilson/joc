@@ -501,6 +501,298 @@
   }
 }
 
+/* Confirm dialog, overflow menu, checkbox and removed rows (@joc/ui ConfirmDialog, OverflowMenu,
+   Checkbox; HistoryRow and SessionRow `removed`). Drawn here like the dialog above; the styles
+   belong in the design system, so move them there when it next syncs. Motion is opacity only. */
+.joc-confirm .joc-dialog__panel {
+  max-width: calc(var(--sidebar) * 1.5);
+}
+
+.joc-confirm .joc-dialog__title {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+
+.joc-confirm__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+.joc-confirm__body p {
+  margin: 0;
+}
+
+.joc-confirm__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: calc(var(--row) * 6);
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.joc-confirm__list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--row);
+  padding: 0 var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.joc-confirm__list li:first-child {
+  border-top: 0;
+}
+
+.joc-confirm__list span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.joc-confirm__list span + span {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.joc-confirm .joc-dialog__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.joc-confirm__error {
+  flex: 1;
+  min-width: 0;
+  color: var(--state-offline);
+}
+
+.joc-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.joc-menu__list {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: var(--z-popover);
+  min-width: 240px;
+  padding: var(--space-1);
+  background: var(--bg-overlay);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  animation: joc-fade var(--duration-fast) var(--ease-standard) both;
+}
+
+.joc-menu__item {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: start;
+  column-gap: var(--space-2);
+  width: 100%;
+  min-height: var(--row);
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--duration-instant) linear;
+}
+
+.joc-menu__item .joc-icon {
+  margin-top: 3px;
+}
+
+.joc-menu__item:hover:not(:disabled),
+.joc-menu__item:focus-visible {
+  background: var(--bg-hover);
+}
+
+.joc-menu__item:focus-visible {
+  outline-offset: -2px;
+}
+
+.joc-menu__item.is-danger {
+  color: var(--state-offline);
+}
+
+.joc-menu__item:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+.joc-menu__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.joc-menu__reason {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-tertiary);
+}
+
+.joc-cbox {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.joc-cbox input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.joc-cbox:has(input:focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.joc-cbox__box {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  color: transparent;
+  transition:
+    background-color var(--duration-instant) linear,
+    border-color var(--duration-instant) linear;
+}
+
+.joc-cbox.is-on .joc-cbox__box {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.joc-cbox.is-disabled {
+  cursor: default;
+}
+
+.joc-cbox.is-disabled .joc-cbox__box {
+  border-color: var(--border);
+  background: var(--bg-sunken);
+}
+
+/* History rows with a checkbox before and actions after. */
+.joc-hist--tools {
+  position: relative;
+  grid-template-columns:
+    var(--control-sm) minmax(260px, 1.2fr) minmax(0, 1fr) minmax(300px, 380px)
+    var(--control-sm);
+}
+
+.joc-hist__status {
+  color: var(--text-secondary);
+}
+
+.joc-hist__status .joc-ci {
+  display: inline-block;
+  vertical-align: -1px;
+}
+
+.joc-hist__status .is-failed {
+  color: var(--text-primary);
+}
+
+/* Session header: how its delete stands, beside the actions menu. */
+.app-shead__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1\.5);
+  max-width: 480px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  animation: joc-fade var(--duration-fade) var(--ease-standard) both;
+}
+
+.app-shead__status.is-failed {
+  color: var(--text-primary);
+}
+
+/* History: what's picked and what to do with it, always there so nothing shifts. */
+.app-history__bulk {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.app-history__picked {
+  min-width: 28ch;
+  text-align: right;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A removed row fades to one quiet line and keeps its height, so nothing below it moves. */
+.joc-hist > *,
+.joc-srow > * {
+  transition: opacity var(--duration-fade) var(--ease-standard);
+}
+
+.joc-hist.is-removed > :not(.joc-hist__removed),
+.joc-srow.is-removed > :not(.joc-srow__removed) {
+  opacity: 0;
+}
+
+.joc-hist.is-removed,
+.joc-srow.is-removed {
+  background: var(--bg-base);
+}
+
+.joc-hist__removed,
+.joc-srow__removed {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-4);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-tertiary);
+  animation: joc-fade var(--duration-fade) var(--ease-standard) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .joc-menu__list,
+  .joc-hist__removed,
+  .joc-srow__removed {
+    animation: none;
+  }
+}
+
 /* The session list settings: a small dialog of choices. */
 .app-settings-dialog .joc-dialog__panel {
   max-width: calc(var(--sidebar) * 1.5);

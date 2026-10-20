@@ -1,7 +1,17 @@
 import type { HistorySession } from '@joc/protocol';
-import { EmptyState, HistoryRow, RepoGroupHeader, SectionHeader } from '@joc/ui';
-import { Fragment } from 'react';
-import { useGitHub, useHistory, useNow } from './hooks.ts';
+import {
+  Button,
+  CIMark,
+  EmptyState,
+  HistoryRow,
+  OverflowMenu,
+  RepoGroupHeader,
+  SectionHeader,
+} from '@joc/ui';
+import { Fragment, useState } from 'react';
+import { DeleteDialog } from './DeleteSessions.tsx';
+import { cantDelete, deletionLine, deletionOf, machineLive, removedLine } from './deletes.ts';
+import { useDeletes, useGitHub, useHistory, useNow, useSessions } from './hooks.ts';
 import { prFor, resumeCommand } from './links.ts';
 import { Nav } from './Nav.tsx';
 import { plain } from './plain.ts';
@@ -19,7 +29,24 @@ export function HistoryPage() {
   const history = useHistory();
   const github = useGitHub();
   const now = useNow();
+  const { sessions: live, deleted } = useSessions();
+  const deletes = useDeletes();
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const [confirming, setConfirming] = useState<HistorySession[]>();
   const prs = github?.state === 'reported' ? [...github.mine, ...github.reviewRequested] : [];
+
+  const isGone = (id: string) => deleted.has(id) || deletionOf(deletes, id)?.status === 'deleted';
+  // Only rows still there and still deletable stay picked.
+  const chosen = (history ?? []).filter(
+    (s) => picked.has(s.id) && !isGone(s.id) && !cantDelete(s, now),
+  );
+  const pick = (id: string, on: boolean) =>
+    setPicked((set) => {
+      const next = new Set(set);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
 
   return (
     <div className="joc-app app">
@@ -30,7 +57,27 @@ export function HistoryPage() {
           title="History"
           count={history?.length}
           description="Every session JOC has seen, newest first. Copy a command to pick one up where it left off."
-        />
+        >
+          {history?.length ? (
+            <span className="app-history__bulk">
+              <span className="app-history__picked">
+                {chosen.length ? `${chosen.length} selected` : 'Select ended sessions to delete'}
+              </span>
+              <Button size="sm" disabled={!chosen.length} onClick={() => setPicked(new Set())}>
+                Clear
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                icon="trash"
+                disabled={!chosen.length}
+                onClick={() => setConfirming(chosen)}
+              >
+                Delete
+              </Button>
+            </span>
+          ) : null}
+        </SectionHeader>
         {history && !history.length ? (
           <EmptyState
             title="No sessions yet"
@@ -44,6 +91,11 @@ export function HistoryPage() {
                 <div className="app-list">
                   {list.map((s) => {
                     const pr = prFor(s, prs);
+                    const reason = cantDelete(s, now);
+                    const deletion = deletionOf(deletes, s.id);
+                    const line =
+                      deletion && deletionLine(deletion, machineLive(live, deletion.machine, now));
+                    const failed = deletion?.status === 'failed';
                     return (
                       <HistoryRow
                         key={s.id}
@@ -55,6 +107,34 @@ export function HistoryPage() {
                         summary={s.activity && plain(s.activity)}
                         pr={pr ? `#${pr.number}` : undefined}
                         command={resumeCommand(s)}
+                        removed={isGone(s.id) ? removedLine(s.machine) : undefined}
+                        select={{
+                          checked: chosen.some((c) => c.id === s.id),
+                          onChange: (on) => pick(s.id, on),
+                          reason,
+                        }}
+                        status={
+                          line ? (
+                            <span className={failed ? 'is-failed' : undefined}>
+                              {failed ? <CIMark status="fail" size={12} /> : null} {line}
+                            </span>
+                          ) : undefined
+                        }
+                        actions={
+                          <OverflowMenu
+                            label={`Actions for ${s.title ?? 'New session'}`}
+                            items={[
+                              {
+                                id: 'delete',
+                                label: 'Delete session…',
+                                icon: 'trash',
+                                danger: true,
+                                disabledReason: reason,
+                                onSelect: () => setConfirming([s]),
+                              },
+                            ]}
+                          />
+                        }
                       />
                     );
                   })}
@@ -63,6 +143,16 @@ export function HistoryPage() {
             ))
           : null}
       </main>
+      {confirming ? (
+        <DeleteDialog
+          sessions={confirming}
+          onAsked={() => {
+            setConfirming(undefined);
+            setPicked(new Set());
+          }}
+          onClose={() => setConfirming(undefined)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -7,9 +7,11 @@ import {
 } from '@joc/protocol';
 import {
   Button,
+  CIMark,
   Composer,
   EmptyState,
   NewSessionButton,
+  OverflowMenu,
   RepoGroupHeader,
   SessionHeader,
   SessionListFooter,
@@ -25,10 +27,13 @@ import { BackgroundView } from './Background.tsx';
 import { backgroundTasks, runningCount, runningLine } from './background.ts';
 import { ChangesView } from './Changes.tsx';
 import { Conversation } from './Conversation.tsx';
+import { DeleteDialog } from './DeleteSessions.tsx';
+import { cantDelete, deletionLine, deletionOf, machineLive, removedLine } from './deletes.ts';
 import {
   useAlerts,
   useChanges,
   useConversation,
+  useDeletes,
   useHistory,
   useNow,
   useReadWhileViewing,
@@ -96,8 +101,48 @@ async function uploadImage(file: File): Promise<ImageRef | undefined> {
   return parsed.success ? parsed.data : undefined;
 }
 
+/** The session header's actions: how a delete stands, and the menu with Delete in it. */
+function SessionActions({
+  session,
+  line,
+  now,
+  onDelete,
+}: {
+  session: Session;
+  line?: { text: string; failed: boolean };
+  now: number;
+  onDelete: () => void;
+}) {
+  return (
+    <>
+      {line ? (
+        <span className={line.failed ? 'app-shead__status is-failed' : 'app-shead__status'}>
+          {line.failed ? <CIMark status="fail" size={12} /> : null}
+          {line.text}
+        </span>
+      ) : null}
+      <OverflowMenu
+        label="Session actions"
+        items={[
+          {
+            id: 'delete',
+            label: 'Delete session…',
+            icon: 'trash',
+            danger: true,
+            disabledReason: cantDelete(session, now),
+            onSelect: onDelete,
+          },
+        ]}
+      />
+    </>
+  );
+}
+
 export default function App() {
-  const { sessions, connected } = useSessions();
+  const { sessions, connected, deleted } = useSessions();
+  const deletes = useDeletes();
+  // The session whose delete is being confirmed.
+  const [deleting, setDeleting] = useState<Session>();
   const now = useNow();
   // A link like /?session=<id> (from a PR on the GitHub page) opens that session.
   const [selectedId, setSelectedId] = useState(
@@ -120,6 +165,8 @@ export default function App() {
     sessions.find((s) => s.id === selectedId) ??
     (opened?.id === selectedId ? opened : undefined) ??
     sessions[0];
+  // A deleted session stays where it was in the list, faded; nothing is selected in its place.
+  const gone = selected && deleted.has(selected.id) ? selected : undefined;
   const keep = useSessionSettings();
   // The repo a new session is being started on.
   const [newIn, setNewIn] = useState<string>();
@@ -139,6 +186,13 @@ export default function App() {
   const [pending, setPending] = useState<PendingPrompt[]>([]);
   // A sent prompt shows until the session's own transcript has it.
   const waiting = pending.filter((p) => p.sessionId === selected?.id && !delivered(items, p));
+
+  /** Where the session's delete stands, while one is under way or after it failed. */
+  function deletingLine(s: Session): { text: string; failed: boolean } | undefined {
+    const deletion = deletionOf(deletes, s.id);
+    const text = deletion && deletionLine(deletion, machineLive(sessions, deletion.machine, now));
+    return text ? { text, failed: deletion?.status === 'failed' } : undefined;
+  }
 
   async function send(sessionId: string, text: string, files: File[] = []) {
     const prompt: PendingPrompt = { id: crypto.randomUUID(), sessionId, text, images: [] };
@@ -233,7 +287,8 @@ export default function App() {
                           activity={activityOf(s, now)}
                           time={age(s.updatedAt, now)}
                           quiet={quietOf(s, now)}
-                          selected={s.id === selected?.id}
+                          selected={s.id === selected?.id && !gone}
+                          removed={deleted.has(s.id) ? removedLine(s.machine) : undefined}
                           pinned={g.id === PINNED_GROUP}
                           onSelect={() => setSelectedId(s.id)}
                           onPinChange={(on) => updatePrefs({ pinned: toggled(pinned, s.id, on) })}
@@ -291,7 +346,12 @@ export default function App() {
           </aside>
         )}
         <main className="joc-app__main">
-          {selected ? (
+          {gone ? (
+            <EmptyState
+              title="Session deleted"
+              body={`It's gone from ${gone.machine ?? 'its machine'} and from JOC. Pick another session from the list.`}
+            />
+          ) : selected ? (
             <>
               <SessionHeader
                 title={selected.title ?? UNTITLED}
@@ -321,7 +381,14 @@ export default function App() {
                   setTab(id);
                   setListOpen(false);
                 }}
-              />
+              >
+                <SessionActions
+                  session={selected}
+                  line={deletingLine(selected)}
+                  now={now}
+                  onDelete={() => setDeleting(selected)}
+                />
+              </SessionHeader>
               {tab === 'background' ? (
                 <BackgroundView key={selected.id} sessionId={selected.id} tasks={tasks} />
               ) : tab === 'changes' ? (
@@ -368,6 +435,13 @@ export default function App() {
           )}
         </main>
       </div>
+      {deleting ? (
+        <DeleteDialog
+          sessions={[deleting]}
+          onAsked={() => setDeleting(undefined)}
+          onClose={() => setDeleting(undefined)}
+        />
+      ) : null}
       {newIn ? (
         <NewSessionDialog
           repo={newIn}
