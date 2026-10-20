@@ -124,17 +124,20 @@ test('refuses to remove anything not named by the session id', () => {
   assert.equal(readdirSync(join(config, 'debug')).length, 1);
 });
 
-test("finds the plugin's own read positions and diff hash for the session", () => {
+test("finds the plugin's own read positions, diff hash and last state for the session", () => {
   const data = join(root, 'data');
   file(join(data, 'offsets', `${ID}.offset`));
   file(join(data, 'offsets', `${ID}_agent-a00ff4898eedbbd11.offset`));
   file(join(data, 'offsets', `${OTHER}.offset`));
   file(join(data, 'changes', `${ID}.hash`));
   file(join(data, 'changes', `${OTHER}.hash`));
+  file(join(data, 'reported', `${ID}.json`));
+  file(join(data, 'reported', `${OTHER}.json`));
   assert.deepEqual(pluginFiles([data, join(root, 'missing')], ID).sort(), [
     join(data, 'changes', `${ID}.hash`),
     join(data, 'offsets', `${ID}.offset`),
     join(data, 'offsets', `${ID}_agent-a00ff4898eedbbd11.offset`),
+    join(data, 'reported', `${ID}.json`),
   ]);
 });
 
