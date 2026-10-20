@@ -930,6 +930,9 @@ test("preferences are each owner's own, only a signed-in person's, and heard onl
     saved: false,
     prefs: {
       browserNotifications: false,
+      desktopWhenAway: true,
+      notificationKinds: {},
+      notificationTab: 'all',
       pinned: [],
       foldedGroups: [],
       listFolded: false,
@@ -943,6 +946,7 @@ test("preferences are each owner's own, only a signed-in person's, and heard onl
   const heard = await listen('bob', async () => {
     const res = await asPerson('alice', {
       browserNotifications: true,
+      notificationKinds: { github: { panel: false, toast: false, desktop: false } },
       // Bob's session id is no session of Alice's, so it's dropped.
       pinned: ['alice-pref', 'bob-pref'],
       sessions: [
@@ -962,9 +966,11 @@ test("preferences are each owner's own, only a signed-in person's, and heard onl
     alice.prefs.sessions.map((s) => [s.id, s.foldedMessages]),
     [['alice-pref', ['m1']]],
   );
+  assert.deepEqual(Object.keys(alice.prefs.notificationKinds), ['github']);
   const bob = await read(await asPerson('bob'), PrefsSnapshot);
   assert.equal(bob.saved, false);
   assert.equal(bob.prefs.browserNotifications, false);
+  assert.deepEqual(bob.prefs.notificationKinds, {});
 
   // A patch keeps what it doesn't name, and Alice's other tabs hear the result.
   const own = await listen('alice', async () => {
