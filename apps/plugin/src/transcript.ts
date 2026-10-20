@@ -2,6 +2,7 @@ import {
   closeSync,
   existsSync,
   fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -10,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { ConversationItem, ImageRef } from '@joc/protocol';
 import { imageType, MAX_IMAGES, takeImageLines } from './images.ts';
 import { firstLine, toolLabel, toolTarget } from './report.ts';
@@ -118,6 +119,47 @@ export function findTranscript(sessionId: string, cwd: string): string | undefin
   return undefined;
 }
 
+/** New lines of one background subagent's own transcript. */
+export interface SubagentLines extends NewLines {
+  /** The `toolUseId` of the call that started it. */
+  task: string;
+}
+
+/**
+ * New lines from the transcripts of the session's subagents, which Claude Code keeps next to the
+ * session's: `<session id>/subagents/agent-<id>.jsonl`, each with an `agent-<id>.meta.json` that
+ * names the call that started it. Stops after about `budget` bytes; the rest comes next time.
+ */
+export function readSubagents(
+  sessionId: string,
+  transcriptPath: string,
+  budget = MAX_READ_BYTES,
+): SubagentLines[] {
+  const dir = join(dirname(transcriptPath), sessionId, 'subagents');
+  let names: string[];
+  try {
+    names = readdirSync(dir).filter((n) => /^agent-[\w-]+\.jsonl$/.test(n));
+  } catch {
+    return [];
+  }
+  const found: SubagentLines[] = [];
+  let read = 0;
+  for (const name of names) {
+    if (read >= budget) break;
+    const agent = basename(name, '.jsonl');
+    try {
+      const { lines, commit } = readNewLines(`${sessionId}.${agent}`, join(dir, name));
+      if (!lines.length) continue;
+      const meta: unknown = JSON.parse(readFileSync(join(dir, `${agent}.meta.json`), 'utf8'));
+      const task = isBlock(meta) ? str(meta.toolUseId) : undefined;
+      if (!task) continue; // Can't tell which task it belongs to: leave it.
+      read += lines.reduce((n, l) => n + l.length, 0);
+      found.push({ task: cut(task, 200), lines, commit });
+    } catch {}
+  }
+  return found;
+}
+
 interface Entry {
   type?: string;
   subtype?: string;
@@ -180,14 +222,45 @@ type TaskUpdate = Extract<ConversationItem, { kind: 'task_update' }>;
 
 const STATUSES: readonly string[] = ['completed', 'failed', 'killed'];
 
+/** Most of a background shell's output kept, from its end. */
+const MAX_OUTPUT = 20_000;
+
+/**
+ * The end of what a background shell printed, from the file Claude Code wrote it to. Only a
+ * plain file named for the task: a subagent's output file is a link to its transcript, which
+ * is sent as steps instead.
+ */
+function shellOutput(path: string, taskId: string): string | undefined {
+  if (basename(path) !== `${taskId}.output`) return undefined;
+  try {
+    if (!lstatSync(path).isFile()) return undefined;
+    const fd = openSync(path, 'r');
+    try {
+      const size = fstatSync(fd).size;
+      const length = Math.min(size, MAX_OUTPUT * 4);
+      const buffer = Buffer.alloc(length);
+      readSync(fd, buffer, 0, length, size - length);
+      const text = buffer.toString('utf8').replace(ANSI, '').trimEnd();
+      return text.length > MAX_OUTPUT ? `…${text.slice(-(MAX_OUTPUT - 1))}` : text || undefined;
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Claude Code tells Claude a background task ended with a `<task-notification>` message:
- * `<task-id>`, `<tool-use-id>` (not always), `<status>` and `<summary>`. Notifications without
- * a final status (progress events) are skipped.
+ * `<task-id>`, `<tool-use-id>` (not always), `<status>` and `<summary>`; a subagent's carries
+ * its final report in `<result>`, a shell's names the `<output-file>` it printed to.
+ * Notifications without a final status (progress events) are skipped.
  */
 export function taskNotification(
   text: string,
-): Pick<TaskUpdate, 'taskId' | 'toolUseId' | 'status' | 'summary'> | undefined {
+):
+  | Pick<TaskUpdate, 'taskId' | 'toolUseId' | 'status' | 'summary' | 'result' | 'output'>
+  | undefined {
   const block = text.match(/<task-notification>([\s\S]*?)<\/task-notification>/)?.[1];
   if (!block) return undefined;
   const tag = (name: string) =>
@@ -195,11 +268,16 @@ export function taskNotification(
   const taskId = tag('task-id');
   const status = tag('status');
   if (!taskId || !status || !STATUSES.includes(status)) return undefined;
+  const result = tag('result');
+  const outputFile = tag('output-file');
+  const output = !result && outputFile ? shellOutput(outputFile, taskId) : undefined;
   return {
     taskId: cut(taskId, 200),
     toolUseId: tag('tool-use-id')?.slice(0, 200),
     status: status as TaskUpdate['status'],
     summary: firstLine(tag('summary'), 500) ?? '',
+    ...(result ? { result: cut(result, 50_000) } : {}),
+    ...(output ? { output } : {}),
   };
 }
 
@@ -211,6 +289,9 @@ function startedTask(result: unknown): string | undefined {
     str(r.backgroundTaskId) ?? (r.status === 'async_launched' ? str(r.agentId) : undefined);
   return id ? cut(id, 200) : undefined;
 }
+
+/** Whether a tool result is a subagent's, by Claude Code's record of it. */
+const startedAgent = (result: unknown) => isBlock(result) && typeof result.agentId === 'string';
 
 /** An image pasted into a prompt, still to be uploaded and added to its item's `images`. */
 export interface TranscriptImage {
@@ -256,8 +337,21 @@ export interface Parsed {
   aiTitle?: string;
 }
 
-export function parseLines(lines: string[], cwd: string): Parsed {
+/**
+ * Conversation items from transcript lines. With `task`, the lines are that subagent's own
+ * transcript: its entries are all sidechain ones, its first message is the prompt (already sent
+ * with the call that started it) and every item is marked with the task.
+ */
+export function parseLines(lines: string[], cwd: string, task?: string): Parsed {
+  const parsed = parseEntries(lines, cwd, task !== undefined);
+  if (task) for (const item of parsed.items) item.task = task;
+  return parsed;
+}
+
+function parseEntries(lines: string[], cwd: string, sidechain: boolean): Parsed {
   const items: ConversationItem[] = [];
+  /** Subagent calls seen so far, whose results are their final reports. */
+  const subagentCalls = new Set<string>();
   const images: TranscriptImage[] = [];
   let aiTitle: string | undefined;
   for (const line of lines) {
@@ -268,7 +362,8 @@ export function parseLines(lines: string[], cwd: string): Parsed {
       continue;
     }
     if (entry.type === 'ai-title' && entry.aiTitle) aiTitle = entry.aiTitle;
-    if (entry.isMeta || entry.isSidechain || !entry.uuid || !entry.timestamp) continue;
+    if (entry.isMeta || !entry.uuid || !entry.timestamp) continue;
+    if (!!entry.isSidechain !== sidechain) continue;
     const at = new Date(entry.timestamp).toISOString();
     const content = entry.message?.content;
 
@@ -307,6 +402,7 @@ export function parseLines(lines: string[], cwd: string): Parsed {
     if (entry.type !== 'user' && entry.type !== 'assistant') continue;
 
     if (entry.type === 'user' && typeof content === 'string') {
+      if (sidechain && !entry.parentUuid) continue; // The subagent's prompt.
       if (!content.startsWith('<')) {
         // Other tagged strings are Claude Code's own bookkeeping (command output, caveats).
         items.push(userItem(entry.uuid, at, content));
@@ -330,11 +426,14 @@ export function parseLines(lines: string[], cwd: string): Parsed {
         >;
         const subagent = name === 'Agent' || name === 'Task';
         const background = input.run_in_background === true || input.run_in_background === 'true';
+        const toolUseId = str(block.id) ?? id;
+        if (subagent) subagentCalls.add(toolUseId);
+        const command = str(input.command);
         items.push({
           id,
           at,
           kind: 'tool_call',
-          toolUseId: str(block.id) ?? id,
+          toolUseId,
           name: toolLabel(name),
           summary: cut(
             toolTarget({
@@ -349,15 +448,23 @@ export function parseLines(lines: string[], cwd: string): Parsed {
           description: firstLine(str(input.description), 200),
           background: background && (subagent || name === 'Bash') ? true : undefined,
           subagent: subagent ? cut(str(input.subagent_type) ?? 'general-purpose', 100) : undefined,
+          prompt: subagent && str(input.prompt) ? cut(str(input.prompt) ?? '', 20_000) : undefined,
+          command:
+            background && name === 'Bash' && command?.trim().includes('\n')
+              ? cut(command, 5_000)
+              : undefined,
         });
       } else if (entry.type === 'user' && block.type === 'tool_result') {
+        const toolUseId = str(block.tool_use_id) ?? '';
+        // A subagent's result is its final report: keep more of it.
+        const report = subagentCalls.has(toolUseId) || startedAgent(entry.toolUseResult);
         items.push({
           id,
           at,
           kind: 'tool_result',
-          toolUseId: str(block.tool_use_id) ?? '',
+          toolUseId,
           isError: block.is_error === true,
-          text: cut(resultText(block.content), 5_000),
+          text: cut(resultText(block.content), report ? 50_000 : 5_000),
           taskId: results === 1 ? startedTask(entry.toolUseResult) : undefined,
         });
       } else if (entry.type === 'user' && block.type === 'text' && str(block.text)?.trim()) {

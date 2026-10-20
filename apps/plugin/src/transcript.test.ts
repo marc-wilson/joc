@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
-import { parseLines } from './transcript.ts';
+import { parseLines, readSubagents, taskNotification } from './transcript.ts';
 
 // Slash commands as Claude Code records them. Made-up fixtures in the transcript's own shapes.
 
@@ -123,4 +126,105 @@ test('an assistant message with plain string content is not mistaken for a promp
     message: { content: 'hi' },
   });
   assert.deepEqual(parseLines([line], '/work').items, []);
+});
+
+const assistant = (uuid: string, content: unknown[], extra: Record<string, unknown> = {}) =>
+  JSON.stringify({ type: 'assistant', uuid, timestamp: at, message: { content }, ...extra });
+
+test('a subagent call carries its prompt, and its result its whole report', () => {
+  const report = 'The auth flow starts in src/auth.ts. '.repeat(400);
+  const { items } = parseLines(
+    [
+      assistant('a1', [
+        {
+          type: 'tool_use',
+          id: 'toolu_1',
+          name: 'Agent',
+          input: {
+            description: 'Map the auth flow',
+            subagent_type: 'Explore',
+            prompt: 'Find where harbor-labs/atlas-web signs people in.',
+          },
+        },
+        {
+          type: 'tool_use',
+          id: 'toolu_2',
+          name: 'Bash',
+          input: { command: 'pnpm build &&\npnpm test', run_in_background: true },
+        },
+      ]),
+      user('u1', '', {
+        message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: report }] },
+      }),
+    ],
+    '/work',
+  );
+  const call = items.find((i) => i.kind === 'tool_call' && i.toolUseId === 'toolu_1');
+  assert.equal(
+    call?.kind === 'tool_call' && call.prompt,
+    'Find where harbor-labs/atlas-web signs people in.',
+  );
+  const shell = items.find((i) => i.kind === 'tool_call' && i.toolUseId === 'toolu_2');
+  assert.equal(shell?.kind === 'tool_call' && shell.command, 'pnpm build &&\npnpm test');
+  const result = items.find((i) => i.kind === 'tool_result');
+  assert.equal(result?.kind === 'tool_result' && result.text, report);
+});
+
+test("a task notification brings a subagent's report, or the end of a shell's output", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'joc-tasks-'));
+  writeFileSync(join(dir, 'b1.output'), `${'line\n'.repeat(10_000)}Done in 4s\n`);
+  symlinkSync(join(dir, 'b1.output'), join(dir, 'a1.output'));
+  const notice = (id: string, extra: string) =>
+    `<task-notification>\n<task-id>${id}</task-id>\n<output-file>${join(dir, `${id}.output`)}</output-file>\n<status>completed</status>\n<summary>Done</summary>\n${extra}</task-notification>`;
+
+  const agent = taskNotification(notice('a1', '<result>All 12 routes checked.</result>\n'));
+  assert.equal(agent?.result, 'All 12 routes checked.');
+  assert.equal(agent?.output, undefined);
+  const shell = taskNotification(notice('b1', ''));
+  assert.equal(shell?.output?.endsWith('line\nDone in 4s'), true);
+  assert.equal(shell?.output?.length, 20_000);
+  // A link, or a file not named for the task, is never read.
+  assert.equal(taskNotification(notice('a1', ''))?.output, undefined);
+  assert.equal(taskNotification(notice('b2', ''))?.output, undefined);
+});
+
+test("a subagent's own transcript becomes steps of its task", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'joc-subagents-'));
+  process.env.CLAUDE_PLUGIN_DATA = dir;
+  const session = 'harbor-session';
+  const agents = join(dir, session, 'subagents');
+  mkdirSync(agents, { recursive: true });
+  const side = { isSidechain: true, agentId: 'abc' };
+  writeFileSync(
+    join(agents, 'agent-abc.jsonl'),
+    [
+      user('p1', 'Find where harbor-labs/atlas-web signs people in.', side),
+      assistant('s1', [{ type: 'text', text: 'Looking at src/auth.ts.' }], {
+        ...side,
+        parentUuid: 'p1',
+      }),
+      '',
+    ].join('\n'),
+  );
+  writeFileSync(join(agents, 'agent-abc.meta.json'), JSON.stringify({ toolUseId: 'toolu_1' }));
+  // No meta: can't be placed, so it's left alone.
+  writeFileSync(join(agents, 'agent-def.jsonl'), `${user('x1', 'hi', side)}\n`);
+
+  const found = readSubagents(session, join(dir, `${session}.jsonl`));
+  assert.deepEqual(
+    found.map((f) => f.task),
+    ['toolu_1'],
+  );
+  const [first] = found;
+  assert.ok(first);
+  assert.deepEqual(parseLines(first.lines, '/work', first.task).items, [
+    { id: 's1:0', at, kind: 'claude', text: 'Looking at src/auth.ts.', task: 'toolu_1' },
+  ]);
+  // Sidechain entries never reach the session's own conversation.
+  assert.deepEqual(parseLines(first.lines, '/work').items, []);
+  first.commit();
+  assert.deepEqual(
+    readSubagents(session, join(dir, `${session}.jsonl`)).map((f) => f.task),
+    [],
+  );
 });
