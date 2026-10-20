@@ -3,6 +3,7 @@ import {
   Button,
   CIMark,
   EmptyState,
+  HistoryList,
   HistoryRow,
   OverflowMenu,
   RepoGroupHeader,
@@ -12,9 +13,8 @@ import { Fragment, useState } from 'react';
 import { DeleteDialog } from './DeleteSessions.tsx';
 import { cantDelete, deletionLine, deletionOf, machineLive, removedLine } from './deletes.ts';
 import { useDeletes, useGitHub, useHistory, useNow, useSessions } from './hooks.ts';
-import { prFor, resumeCommand } from './links.ts';
+import { prFor } from './links.ts';
 import { Nav } from './Nav.tsx';
-import { plain } from './plain.ts';
 import { ago, duration } from './time.ts';
 
 // Repos in the order their latest session appears: the list is already newest first.
@@ -51,7 +51,7 @@ export function HistoryPage() {
   return (
     <div className="joc-app app">
       <Nav page="history" />
-      <main className="joc-app__main app-page">
+      <main className="joc-app__main app-page app-page--wide">
         <SectionHeader
           size="lg"
           title="History"
@@ -88,7 +88,7 @@ export function HistoryPage() {
           ? groupByRepo(history).map(([repo, list]) => (
               <Fragment key={repo}>
                 <RepoGroupHeader repo={repo} count={list.length} />
-                <div className="app-list">
+                <HistoryList>
                   {list.map((s) => {
                     const pr = prFor(s, prs);
                     const reason = cantDelete(s, now);
@@ -104,9 +104,9 @@ export function HistoryPage() {
                         ended={ago(s.updatedAt, now)}
                         duration={duration(s.startedAt, s.updatedAt)}
                         messages={s.messages}
-                        summary={s.activity && plain(s.activity)}
                         pr={pr ? `#${pr.number}` : undefined}
-                        command={resumeCommand(s)}
+                        sessionId={s.id}
+                        path={s.cwd}
                         removed={isGone(s.id) ? removedLine(s.machine) : undefined}
                         select={{
                           checked: chosen.some((c) => c.id === s.id),
@@ -123,6 +123,7 @@ export function HistoryPage() {
                         actions={
                           <OverflowMenu
                             label={`Actions for ${s.title ?? 'New session'}`}
+                            size="md"
                             items={[
                               {
                                 id: 'delete',
@@ -138,7 +139,7 @@ export function HistoryPage() {
                       />
                     );
                   })}
-                </div>
+                </HistoryList>
               </Fragment>
             ))
           : null}
