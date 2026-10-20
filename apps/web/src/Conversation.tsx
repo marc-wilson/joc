@@ -1,4 +1,4 @@
-import type { ConversationItem, ImageRef, SessionState } from '@joc/protocol';
+import type { ConversationItem, ImageRef, Session, SessionState } from '@joc/protocol';
 import {
   Attachment,
   Code,
@@ -13,6 +13,7 @@ import {
 import { isValidElement, type ReactNode, useLayoutEffect, useRef, useState } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { WaitingCards } from './Answering.tsx';
 import { commandLine } from './commands.ts';
 import type { PendingPrompt } from './pending.ts';
 import { plain } from './plain.ts';
@@ -229,10 +230,12 @@ interface Props {
   items: ConversationItem[];
   pending: PendingPrompt[];
   state: SessionState;
+  /** The session, for answering what it waits on from here. */
+  session?: Session;
 }
 
 /** A session's conversation, kept pinned to the newest message while you're at the bottom. */
-export function Conversation({ sessionId, items, pending, state }: Props) {
+export function Conversation({ sessionId, items, pending, state, session }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const [viewing, setViewing] = useState<Viewing>();
@@ -254,7 +257,7 @@ export function Conversation({ sessionId, items, pending, state }: Props) {
         pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
       }}
     >
-      {items.length || pending.length ? (
+      {items.length || pending.length || session?.waiting ? (
         <Thread>
           <ThreadItems
             items={items}
@@ -277,6 +280,7 @@ export function Conversation({ sessionId, items, pending, state }: Props) {
               onOpen={setViewing}
             />
           ))}
+          {session ? <WaitingCards session={session} items={items.length} /> : null}
         </Thread>
       ) : (
         <EmptyState

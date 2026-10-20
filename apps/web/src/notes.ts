@@ -5,6 +5,7 @@ import {
   type NotificationKind,
   type Prefs,
   type Session,
+  type Waiting,
 } from '@joc/protocol';
 import { plain } from './plain.ts';
 
@@ -54,6 +55,8 @@ export interface Note {
   number?: number;
   /** The session it's about, if any. */
   sessionId?: string;
+  /** What a session waiting on you now waits on, when its plugin takes answers from JOC. */
+  waiting?: Waiting;
   /** For a failed CI run: the branch it ran on, to find the session working there. */
   branch?: string;
   /** The alert and GitHub threads that marking it read or clearing it changes. */
@@ -86,8 +89,15 @@ export function needsNotes(sessions: Session[], alerts: Alert[] = []): Note[] {
   return sessions
     .filter((s) => s.state === 'needs')
     .map((s) => {
-      const { kind, text } = waiting(s.activity);
+      const asked = s.waiting;
+      const said = waiting(s.activity);
+      const kind = asked?.kind ?? said.kind;
+      const text = asked?.kind === 'permission' ? asked.summary || said.text : said.text;
       const title = s.title ?? UNTITLED;
+      const wants =
+        asked?.kind === 'permission' && asked.tool === 'Bash'
+          ? 'wants to run a command'
+          : 'wants permission';
       const since = alerts.find((a) => a.kind === 'needs' && a.sessionId === s.id && !a.read);
       return {
         id: `session:${s.id}`,
@@ -95,7 +105,7 @@ export function needsNotes(sessions: Session[], alerts: Alert[] = []): Note[] {
         group: 'needs',
         github: false,
         lead: { state: 'needs' },
-        title: kind === 'permission' ? `${title} wants permission` : `${title} needs you`,
+        title: kind === 'permission' ? `${title} ${wants}` : `${title} needs you`,
         source: repoName(s.repo),
         text,
         mono: kind === 'permission',
@@ -106,6 +116,7 @@ export function needsNotes(sessions: Session[], alerts: Alert[] = []): Note[] {
         external: false,
         repo: s.repo,
         sessionId: s.id,
+        waiting: asked,
         threadIds: [],
       };
     });

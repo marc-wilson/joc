@@ -338,6 +338,7 @@ export default function App() {
                     items={items}
                     pending={waiting}
                     state={selected.state}
+                    session={selected}
                   />
                   <div className="app-main__dock">
                     {selected.state === 'offline' ? (
