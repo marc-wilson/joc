@@ -43,6 +43,32 @@ test('a permission request needs you', () => {
   );
 });
 
+test("a permission prompt's notice keeps what its request said", () => {
+  assert.deepEqual(
+    event('Notification', {
+      notification_type: 'permission_prompt',
+      message: 'Claude needs your permission',
+    }),
+    { state: 'needs' },
+  );
+  assert.deepEqual(event('Notification', { message: 'Claude is waiting for your input' }), {
+    state: 'needs',
+    activity: 'Claude is waiting for your input',
+  });
+});
+
+test('a question needs you, and says what it asks', () => {
+  const questions = [{ question: 'Which sender domain should I use?', options: [] }];
+  assert.deepEqual(
+    event('PermissionRequest', { tool_name: 'AskUserQuestion', tool_input: { questions } }),
+    { state: 'needs', activity: 'Which sender domain should I use?' },
+  );
+  assert.deepEqual(event('PermissionRequest', { tool_name: 'AskUserQuestion', tool_input: {} }), {
+    state: 'needs',
+    activity: 'Claude is asking',
+  });
+});
+
 test('stop is idle, or background while tasks still run', () => {
   assert.equal(event('Stop', { last_assistant_message: 'All tests pass.' })?.state, 'idle');
   assert.equal(
