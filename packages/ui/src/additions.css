@@ -130,6 +130,40 @@
 .joc-setrow__hint { font-size: 12px; line-height: 16px; color: var(--text-tertiary); }
 .joc-setcard { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-raised); box-shadow: var(--shadow-1); }
 
+/* ---------- PR page ---------- */
+.joc-prpage { box-sizing: border-box; max-width: var(--thread-max); margin: 0 auto; padding: var(--space-6) var(--space-8) var(--space-8); display: flex; flex-direction: column; gap: var(--space-6); }
+.joc-prhead { display: flex; flex-direction: column; gap: var(--space-2); }
+.joc-prhead__title { margin: 0; font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -.01em; }
+.joc-prhead__num { font-family: var(--font-mono); font-weight: 400; color: var(--text-tertiary); }
+.joc-prhead__meta { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-3); row-gap: var(--space-1); font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+.joc-into { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-1\.5); min-width: 0; font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+.joc-prgrid { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-6); }
+.joc-prgrid__main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: var(--space-6); }
+.joc-prgrid__side { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: var(--space-6); }
+.joc-card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-raised); box-shadow: var(--shadow-1); overflow: hidden; }
+.joc-card__head { display: flex; align-items: center; gap: var(--space-2); height: var(--row); padding: 0 var(--space-3) 0 var(--space-4); border-bottom: 1px solid var(--border-subtle); font-size: 13px; line-height: 20px; font-weight: 600; }
+.joc-card__count { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--text-tertiary); }
+.joc-card__spacer { flex: 1; }
+.joc-cirow { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: center; column-gap: var(--space-2); height: var(--row-dense); padding: 0 var(--space-4); font-size: 12px; line-height: 16px; }
+.joc-cirow__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+.joc-cirow__time { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.joc-file { display: grid; grid-template-columns: 14px minmax(0, 1fr) 6ch 6ch; align-items: center; column-gap: var(--space-2); height: var(--row-dense); padding: 0 var(--space-4); border-top: 1px solid var(--border-subtle); font-family: var(--font-mono); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.joc-file:first-child { border-top: 0; }
+.joc-file:hover { background: var(--bg-hover); }
+.joc-file__path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); text-decoration: none; }
+.joc-file__dir { color: var(--text-tertiary); }
+.joc-file__status { font-size: 11px; font-weight: 500; text-align: center; color: var(--text-tertiary); }
+.joc-file__add { text-align: right; color: var(--diff-add-sign); }
+.joc-file__del { text-align: right; color: var(--diff-del-sign); }
+.joc-file__add.is-zero, .joc-file__del.is-zero { color: var(--text-disabled); }
+.joc-review { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4); }
+.joc-review__what { margin: 0; font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+.joc-revrow { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; column-gap: var(--space-2); min-height: var(--row); padding: var(--space-2) var(--space-4); border-top: 1px solid var(--border-subtle); }
+.joc-revrow__main { display: flex; flex-direction: column; min-width: 0; }
+.joc-revrow__session { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 20px; }
+.joc-revrow__status { font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+.joc-revrow__time { font-size: 12px; line-height: 16px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
 /* ---------- Fitted to JOC's markup ---------- */
 /* Settings: the page title and save line the artboard draws inline, and section actions. */
 .joc-settings__title { margin: 0; padding: 0 var(--space-2) var(--space-2); font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -.01em; }
@@ -154,3 +188,16 @@ h4.joc-taskd__label { margin: 0; }
 .joc-step .joc-sdot, .joc-step .joc-ci { justify-self: center; }
 .joc-step .joc-sdot { --dot: 6px; }
 .joc-taskd .joc-cmd { max-width: none; }
+
+/* PR page: the pieces the artboard draws inline. */
+.joc-prhead__back { align-self: flex-start; font-size: 12px; line-height: 16px; }
+.joc-prhead__state { display: inline-flex; align-items: center; gap: 4px; color: var(--ci-pass); font-weight: 500; }
+.joc-prhead__state.is-draft { color: var(--text-tertiary); }
+.joc-cirow__detail { color: var(--text-tertiary); }
+.joc-cirow:first-of-type { margin-top: var(--space-1); }
+.joc-cirow:last-child { margin-bottom: var(--space-1); }
+.joc-card__head + .joc-revrow { border-top: 0; }
+.joc-revrow__mark { display: flex; align-items: center; justify-content: center; height: 20px; align-self: start; }
+.joc-revrow__time { align-self: start; line-height: 20px; }
+.joc-review__button { display: flex; }
+.joc-card__note { margin: 0; padding: var(--space-3) var(--space-4); font-size: 12px; line-height: 16px; color: var(--text-secondary); }

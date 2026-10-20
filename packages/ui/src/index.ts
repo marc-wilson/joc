@@ -135,6 +135,21 @@ export {
   type ToastStackProps,
 } from './notifications.tsx';
 export {
+  Card,
+  CardNote,
+  type CardProps,
+  ChangedFile,
+  type ChangedFileProps,
+  CIRow,
+  type CIRowProps,
+  PRHeader,
+  type PRHeaderProps,
+  ReviewAction,
+  type ReviewActionProps,
+  ReviewRow,
+  type ReviewRowProps,
+} from './pr.tsx';
+export {
   NewSessionButton,
   type NewSessionButtonProps,
   RepoGroupHeader,
