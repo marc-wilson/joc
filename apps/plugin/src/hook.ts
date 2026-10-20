@@ -4,9 +4,9 @@
 // plugin's local problem log instead (problems.ts), and on to the server once it answers.
 //
 // Besides Claude Code's own hook events it takes `Sync`, which register.ts sends every 30s:
-// it catches the server up (the conversation backlog, the diff) and refreshes the session
-// without changing its state. Only a sync prints anything: the GitHub notifications for
-// register.ts to show.
+// it catches the server up (the conversation backlog, the diff) and refreshes the session. It
+// changes the state only to settle a session whose background work ended between turns
+// (settle.ts). Only a sync prints anything: the GitHub notifications for register.ts to show.
 import { readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -34,7 +34,14 @@ import {
   responseOutcome,
   toSend,
 } from './problems.ts';
-import { eventFields, type HookInput } from './report.ts';
+import { type EventFields, eventFields, type HookInput } from './report.ts';
+import {
+  lastReported,
+  readTail,
+  readTranscriptState,
+  rememberReported,
+  settledFields,
+} from './settle.ts';
 import { updateStatus } from './status.ts';
 import {
   findTranscript,
@@ -209,8 +216,13 @@ async function main() {
   if (syncing && !input.transcript_path) {
     input.transcript_path = findTranscript(input.session_id, input.cwd);
   }
-  // A sync reports no state of its own, so the server keeps the one it has.
-  const fields = syncing ? {} : eventFields(input);
+  // A sync reports no state of its own, so the server keeps the one it has, unless the session
+  // was left showing background work that has since ended.
+  const settled = syncing ? settle(input) : undefined;
+  const fields = syncing ? (settled ?? {}) : eventFields(input);
+  // A settled state counts from when register.ts saw no turn running: a turn that started since
+  // reports a later time, so the server keeps that one whatever arrives first.
+  const reportAt = settled && input.checked_at ? Math.min(at, input.checked_at) : at;
   ending = event === 'SessionEnd';
   const timeout = ending ? 1000 : 3000;
 
@@ -221,7 +233,7 @@ async function main() {
   if (fields) {
     const report: SessionReport = {
       sessionId: input.session_id,
-      at,
+      at: reportAt,
       repo: repoOf(input.cwd),
       branch: branchOf(input.cwd),
       machine,
@@ -230,7 +242,8 @@ async function main() {
       ...fields,
       name: fields.name ?? conversation.aiTitle,
     };
-    await post('/api/reports', report, timeout);
+    const response = await post('/api/reports', report, timeout);
+    if (response?.ok && fields.state) remember(input.session_id, fields, reportAt);
   }
 
   // The images first, so the dashboard can show them as soon as their messages arrive.
@@ -263,6 +276,26 @@ async function main() {
       await new Promise((resolve) => process.stdout.write(line, resolve));
     }
   }
+}
+
+/** The state a sync settles on (settle.ts), or undefined to keep the server's. Never throws. */
+function settle(input: HookInput): EventFields | undefined {
+  if (input.between_turns !== true || !input.transcript_path) return undefined;
+  try {
+    const reported = lastReported(input.session_id);
+    if (reported?.state !== 'background') return undefined;
+    const transcript = readTranscriptState(readTail(input.transcript_path));
+    return settledFields(reported, true, transcript);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Notes what the server took, for a later sync to settle from. A failed write keeps the old. */
+function remember(sessionId: string, fields: EventFields, reportAt: number) {
+  try {
+    rememberReported(sessionId, fields, reportAt);
+  } catch {}
 }
 
 /** What background subagents did, from their own transcripts, as steps of their tasks. */
