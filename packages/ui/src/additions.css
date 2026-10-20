@@ -164,6 +164,21 @@
 .joc-revrow__status { font-size: 12px; line-height: 16px; color: var(--text-secondary); }
 .joc-revrow__time { font-size: 12px; line-height: 16px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+/* ---------- Banners ---------- */
+/* Full-width strip under the NavBar. Wraps instead of clipping: the command drops to its own line and scrolls. */
+.joc-banner { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-3); row-gap: var(--space-2); box-sizing: border-box; min-height: var(--banner-min); padding: var(--space-1\.5) var(--space-2) var(--space-1\.5) var(--space-4); background: var(--bg-raised); border-bottom: 1px solid var(--border); color: var(--text-primary); font-size: 13px; line-height: 20px; }
+.joc-banner__icon { flex: none; width: 16px; height: 16px; color: var(--text-secondary); }
+.joc-banner__text { flex: 1 1 260px; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-2); row-gap: var(--space-1); }
+.joc-banner__sessions { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); min-width: 0; }
+.joc-banner__session { display: inline-flex; align-items: center; gap: var(--space-1\.5); max-width: 220px; height: 20px; padding: 0 var(--space-1\.5); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-base); color: var(--text-primary); font-size: 12px; line-height: 16px; text-decoration: none; transition: background-color var(--duration-instant) linear; }
+.joc-banner__session:hover { background: var(--bg-hover); }
+.joc-banner__session span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.joc-banner__more { font-size: 12px; line-height: 16px; color: var(--text-tertiary); }
+.joc-banner__actions { flex: none; display: flex; align-items: center; gap: var(--space-1); margin-left: auto; }
+.joc-banner .joc-cmd { flex: 1 1 300px; min-width: 0; max-width: 480px; height: var(--control-md); }
+.joc-banner .joc-cmd__text { scrollbar-width: thin; }
+.joc-cmd__copy { flex: none; }
+
 /* ---------- Fitted to JOC's markup ---------- */
 /* Settings: the page title and save line the artboard draws inline, and section actions. */
 .joc-settings__title { margin: 0; padding: 0 var(--space-2) var(--space-2); font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -.01em; }
@@ -201,3 +216,6 @@ h4.joc-taskd__label { margin: 0; }
 .joc-revrow__time { align-self: start; line-height: 20px; }
 .joc-review__button { display: flex; }
 .joc-card__note { margin: 0; padding: var(--space-3) var(--space-4); font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+
+/* Banners: JOC's CopyCommand copies with .joc-copy, which keeps its place as the text scrolls. */
+.joc-banner .joc-copy { flex: none; }
