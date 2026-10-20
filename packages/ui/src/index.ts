@@ -167,6 +167,7 @@ export {
   type ReviewRowProps,
 } from './pr.tsx';
 export { resumeCommand, shortId, shortPath } from './resume.ts';
+export { ReviewSessionRow, type ReviewSessionRowProps } from './review-session.tsx';
 export {
   NewSessionButton,
   type NewSessionButtonProps,
@@ -205,6 +206,7 @@ export {
   slashQuery,
   sourceLabel,
 } from './slash.ts';
+export { SortBar, type SortBarProps, type SortOption } from './sort.tsx';
 export {
   STATE_LABEL,
   StateBadge,
