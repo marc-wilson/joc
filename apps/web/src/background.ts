@@ -11,8 +11,16 @@ export interface BackgroundTask {
   /** The subagent's type, for subagents. */
   label?: string;
   title: string;
-  /** The command, for shells. */
+  /** The command's first line, for shells. */
   command?: string;
+  /** The whole command, for shells, when it runs past one line. */
+  fullCommand?: string;
+  /** What it was asked, for subagents. */
+  prompt?: string;
+  /** Its final report, for subagents; or why it failed to start. */
+  report?: string;
+  /** The end of what it printed, for shells. */
+  output?: string;
   /**
    * `running` until it ends; `pass`/`fail` once its outcome is known; `ended` when it stopped
    * without an outcome: killed, its session ended, or Claude Code never said.
@@ -61,7 +69,10 @@ export function backgroundTasks(
 
 function describe(
   call: Call,
-): Pick<BackgroundTask, 'id' | 'kind' | 'label' | 'title' | 'command' | 'startedAt'> {
+): Pick<
+  BackgroundTask,
+  'id' | 'kind' | 'label' | 'title' | 'command' | 'fullCommand' | 'prompt' | 'startedAt'
+> {
   const base = { id: call.toolUseId, startedAt: call.at };
   if (call.subagent) {
     return {
@@ -69,6 +80,7 @@ function describe(
       kind: 'subagent',
       label: call.subagent,
       title: call.description ?? (call.summary || 'Subagent'),
+      ...(call.prompt ? { prompt: call.prompt } : {}),
     };
   }
   return {
@@ -76,6 +88,7 @@ function describe(
     kind: 'shell',
     title: call.description ?? 'Background command',
     command: call.summary || undefined,
+    ...(call.command ? { fullCommand: call.command } : {}),
   };
 }
 
@@ -84,7 +97,7 @@ function outcome(
   result: Result | undefined,
   updates: Map<string, Update>,
   sessionState: SessionState,
-): Pick<BackgroundTask, 'status' | 'tail' | 'endedAt'> {
+): Pick<BackgroundTask, 'status' | 'tail' | 'endedAt' | 'report' | 'output'> {
   const update =
     updates.get(call.toolUseId) ?? (result?.taskId ? updates.get(result.taskId) : undefined);
   if (update) {
@@ -93,14 +106,19 @@ function outcome(
         update.status === 'completed' ? 'pass' : update.status === 'failed' ? 'fail' : 'ended',
       tail: update.summary || (update.status === 'killed' ? 'Stopped' : undefined),
       endedAt: update.at,
+      ...(update.result ? { report: update.result } : {}),
+      ...(update.output ? { output: update.output } : {}),
     };
   }
   if (result && !result.taskId) {
     // Ended with its result: a blocking subagent, or a call that failed to start. A background
     // shell whose result names no task can't be followed further.
     const tail = firstLine(result.text);
-    if (result.isError) return { status: 'fail', tail, endedAt: result.at };
-    if (call.subagent && !call.background) return { status: 'pass', tail, endedAt: result.at };
+    const report = result.text.trim() ? { report: result.text } : {};
+    if (result.isError) return { status: 'fail', tail, endedAt: result.at, ...report };
+    if (call.subagent && !call.background) {
+      return { status: 'pass', tail, endedAt: result.at, ...report };
+    }
     return { status: 'ended', tail: 'Claude Code did not report how it ended' };
   }
   if (sessionState === 'offline') return { status: 'ended', tail: 'The session ended' };

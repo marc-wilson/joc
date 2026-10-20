@@ -147,3 +147,72 @@ test('elapsed time reads compactly', () => {
   assert.equal(elapsed(at(0), Date.parse(at(0)) + 252_000), '4m 12s');
   assert.equal(elapsed(at(0), Date.parse(at(0)) + 7_500_000), '2h 5m');
 });
+
+test('a task keeps what it was asked and how it ended, for its details', () => {
+  const tasks = backgroundTasks(
+    [
+      {
+        id: 'c1',
+        at: at(0),
+        kind: 'tool_call',
+        toolUseId: 't1',
+        name: 'Agent',
+        summary: 'Map auth',
+        subagent: 'Explore',
+        background: true,
+        prompt: 'Find where harbor-labs/atlas-web signs people in.',
+      },
+      {
+        id: 'r1',
+        at: at(1),
+        kind: 'tool_result',
+        toolUseId: 't1',
+        isError: false,
+        text: 'started',
+        taskId: 'ag1',
+      },
+      {
+        id: 'u1',
+        at: at(9),
+        kind: 'task_update',
+        taskId: 'ag1',
+        status: 'completed',
+        summary: 'Agent "Map auth" finished',
+        result: 'Sign-in starts in src/auth.ts.',
+      },
+      {
+        id: 'c2',
+        at: at(2),
+        kind: 'tool_call',
+        toolUseId: 't2',
+        name: 'Bash',
+        summary: 'pnpm build &&',
+        command: 'pnpm build &&\npnpm test',
+        background: true,
+      },
+      {
+        id: 'u2',
+        at: at(8),
+        kind: 'task_update',
+        taskId: 'bg1',
+        toolUseId: 't2',
+        status: 'failed',
+        summary: 'Exit code 1',
+        output: '1 test failed',
+      },
+    ],
+    'idle',
+  );
+  assert.deepEqual(
+    tasks.map((t) => [t.prompt, t.report, t.fullCommand, t.output]),
+    [
+      [
+        'Find where harbor-labs/atlas-web signs people in.',
+        'Sign-in starts in src/auth.ts.',
+        undefined,
+        undefined,
+      ],
+      [undefined, undefined, 'pnpm build &&\npnpm test', '1 test failed'],
+    ],
+  );
+});

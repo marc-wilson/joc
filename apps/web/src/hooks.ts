@@ -103,16 +103,20 @@ function merge(list: ConversationItem[], incoming: ConversationItem[]): Conversa
   return fresh.length ? [...list, ...fresh].sort(byTime) : list;
 }
 
-/** A session's conversation: what the server has, plus live additions. */
-export function useConversation(sessionId: string | undefined): ConversationItem[] {
+/**
+ * A session's conversation: what the server has, plus live additions. With `task`, the steps of
+ * that background subagent instead, from its own transcript.
+ */
+export function useConversation(sessionId: string | undefined, task?: string): ConversationItem[] {
   const [items, setItems] = useState<ConversationItem[]>([]);
 
   useEffect(() => {
     setItems([]);
     if (!sessionId) return;
     let cancelled = false;
+    const path = `/api/sessions/${encodeURIComponent(sessionId)}`;
     const load = () =>
-      apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`)
+      apiFetch(task ? `${path}/tasks/${encodeURIComponent(task)}/messages` : `${path}/messages`)
         .then((r) => (r.ok ? (r.json() as Promise<ConversationItem[]>) : []))
         .then((loaded) => {
           if (!cancelled) setItems((list) => merge(list, loaded));
@@ -121,7 +125,8 @@ export function useConversation(sessionId: string | undefined): ConversationItem
     // Subscribe first so nothing that arrives during the fetch is lost; merge drops repeats.
     const unsubscribe = subscribe((event) => {
       if (event.type === 'messages' && event.sessionId === sessionId) {
-        setItems((list) => merge(list, event.items));
+        const mine = event.items.filter((i) => i.task === task);
+        if (mine.length) setItems((list) => merge(list, mine));
       }
       // A reconnect may have missed messages.
       if (event.type === 'snapshot') void load();
@@ -131,7 +136,7 @@ export function useConversation(sessionId: string | undefined): ConversationItem
       cancelled = true;
       unsubscribe();
     };
-  }, [sessionId]);
+  }, [sessionId, task]);
 
   return items;
 }
