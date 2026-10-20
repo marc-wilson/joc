@@ -1,4 +1,5 @@
 import type { ConversationItem, SessionState } from '@joc/protocol';
+import { plain } from './plain.ts';
 
 type Call = Extract<ConversationItem, { kind: 'tool_call' }>;
 type Result = Extract<ConversationItem, { kind: 'tool_result' }>;
@@ -133,4 +134,37 @@ export function elapsed(from: string, to: string | number): string {
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m ${s % 60}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+/** Finished tasks shown before "Show all". */
+export const FINISHED_SHOWN = 5;
+
+/**
+ * The tasks still running, in the order they started, then the finished ones, newest first.
+ * `held` are kept with the running ones though they've ended, so a row doesn't move from under
+ * the pointer.
+ */
+export function arrangeTasks(
+  tasks: BackgroundTask[],
+  held: readonly string[] = [],
+): { running: BackgroundTask[]; finished: BackgroundTask[] } {
+  const isRunning = (t: BackgroundTask) => t.status === 'running' || held.includes(t.id);
+  const ended = (t: BackgroundTask) => Date.parse(t.endedAt ?? t.startedAt);
+  return {
+    running: tasks.filter(isRunning),
+    finished: tasks.filter((t) => !isRunning(t)).sort((a, b) => ended(b) - ended(a)),
+  };
+}
+
+/** What a subagent is doing now, one line, from its latest step. */
+export function latestStep(steps: ConversationItem[]): string | undefined {
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const step = steps[i];
+    if (step?.kind === 'tool_call') return [step.name, step.summary].filter(Boolean).join(' ');
+    if (step?.kind === 'claude') {
+      const line = firstLine(step.text);
+      if (line) return plain(line);
+    }
+  }
+  return undefined;
 }
