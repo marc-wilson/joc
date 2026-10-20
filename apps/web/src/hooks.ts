@@ -1,7 +1,6 @@
 import {
   Alert,
   type ConversationItem,
-  type GitHubNotification,
   GitHubSnapshot,
   HistorySession,
   Launch,
@@ -10,14 +9,11 @@ import {
   ReviewSettings,
   Session,
   SessionSettings,
-  type SessionState,
 } from '@joc/protocol';
 import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
-import { freshThreads, newlyNeeding, seenNow, sessionAlert, threadAlert } from './alerts.ts';
 import { apiFetch } from './auth.ts';
 import { type DiffFile, parseDiff } from './diff.ts';
-import { show } from './notify.ts';
 import { subscribe } from './stream.ts';
 
 const Sessions = z.array(Session);
@@ -245,37 +241,6 @@ export function useNotifications(): NotificationsSnapshot | undefined {
   return notifications;
 }
 
-/**
- * Raises browser notifications for news while the page is open (see alerts.ts). What's there
- * when the page loads is the starting point, never news, so a reload or another page never
- * repeats one.
- */
-export function useBrowserAlerts(
-  threads: GitHubNotification[] | undefined,
-  sessions: Session[],
-  connected: boolean,
-) {
-  const seen = useRef<Set<string>>(undefined);
-  const states = useRef<Map<string, SessionState>>(undefined);
-
-  useEffect(() => {
-    if (!threads) return;
-    if (!seen.current) {
-      seen.current = seenNow(threads);
-      return;
-    }
-    for (const t of freshThreads(seen.current, threads)) show(threadAlert(t));
-  }, [threads]);
-
-  useEffect(() => {
-    // Before the stream's first snapshot the list is empty, not known.
-    if (!connected) return;
-    const before = states.current;
-    states.current = new Map(sessions.map((s) => [s.id, s.state]));
-    if (before) for (const s of newlyNeeding(before, sessions)) show(sessionAlert(s));
-  }, [sessions, connected]);
-}
-
 const Alerts = z.array(Alert);
 
 /** The person's alerts, newest first, refetched whenever the server says they changed. */
@@ -317,7 +282,7 @@ export async function changeAlerts(action: 'read' | 'clear', ids?: string[]): Pr
 
 /**
  * Marks the alerts about the session read while it's on screen: looking at it is reading them.
- * Each is sent once; if that fails, the Inbox still has it.
+ * Each is sent once; if that fails, the notifications still have it.
  */
 export function useReadWhileViewing(alerts: Alert[] | undefined, sessionId: string | undefined) {
   const sent = useRef(new Set<string>());

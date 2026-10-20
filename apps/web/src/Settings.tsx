@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { apiFetch } from './auth.ts';
 import { useReviewSettings, useSessions } from './hooks.ts';
 import { Nav } from './Nav.tsx';
+import { NotificationSettingsForm, resetNotificationSettings } from './NotificationSettings.tsx';
 
 type Saved = 'saving' | 'saved' | 'failed' | undefined;
 
@@ -70,6 +71,17 @@ export function SettingsPage() {
           description="What the Review button on a pull request runs, in a new session."
         />
         {review ? <ReviewInstructions value={review.instructions ?? ''} /> : null}
+        <SectionHeader
+          title="Notifications"
+          description="Choose where each kind shows up. Everything is kept in history for 30 days."
+        >
+          <Button variant="ghost" size="sm" onClick={resetNotificationSettings}>
+            Reset to defaults
+          </Button>
+        </SectionHeader>
+        <div className="app-settings-page__form">
+          <NotificationSettingsForm />
+        </div>
       </main>
     </div>
   );
