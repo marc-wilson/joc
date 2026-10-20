@@ -58,7 +58,6 @@ export function slashCommands(
     if (!c.name || c.name.startsWith('_') || c.name.length > MAX_NAME) continue;
     let provider: string;
     let source: SlashCommand['source'];
-    let name = c.name;
     let plugin: string | undefined;
     if (c.source === 'builtin') {
       provider = 'engine';
@@ -68,10 +67,8 @@ export function slashCommands(
       if (!plugin || plugin.length > MAX_NAME) continue;
       provider = plugin;
       source = 'plugin';
-      // `plugin:command`: the composer adds the prefix back only where two plugins share a name.
-      if (name.startsWith(`${plugin}:`) && name.length > plugin.length + 1) {
-        name = name.slice(plugin.length + 1);
-      }
+      // Kept as listed: a plugin's file commands and skills run as `plugin:command`, the ones it
+      // registers on $ by their bare name. The composer shows the short form.
     } else if (c.source === 'user') {
       // The project's own `.claude` and the user's `~/.claude` both list as `user`.
       provider = described.has(describedKey('project', c.name)) ? 'project' : 'user';
@@ -81,13 +78,13 @@ export function slashCommands(
     }
     const about = described.get(describedKey(provider, c.name));
     if (about?.hidden) continue;
-    const key = `${source}\n${plugin ?? ''}\n${name}`;
+    const key = `${source}\n${plugin ?? ''}\n${c.name}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const hint = about?.argumentHint?.trim();
     const skill = (source === 'project' || source === 'user') && skills.has(`${source}\n${c.name}`);
     out.push({
-      name,
+      name: c.name,
       description: cut(oneLine(c.description), MAX_DESCRIPTION),
       ...(hint ? { argumentHint: cut(argumentHint(hint), MAX_HINT) } : {}),
       source,
