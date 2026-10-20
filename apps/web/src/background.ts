@@ -114,7 +114,8 @@ function outcome(
   if (result && !result.taskId) {
     // Ended with its result: a blocking subagent, or a call that failed to start. A background
     // shell whose result names no task can't be followed further.
-    const tail = firstLine(result.text);
+    const line = firstLine(result.text);
+    const tail = line && plain(line);
     const report = result.text.trim() ? { report: result.text } : {};
     if (result.isError) return { status: 'fail', tail, endedAt: result.at, ...report };
     if (call.subagent && !call.background) {
