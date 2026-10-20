@@ -23,6 +23,8 @@ const PATHS = {
   sparkle: 'M8 2.5v3M8 10.5v3M2.5 8h3M10.5 8h3',
   lock: 'M4.5 7.5h7v5.5h-7zM6 7.5V5.5a2 2 0 014 0v2',
   inbox: 'M2.5 9.5l1.5-6h8l1.5 6v3h-11zM2.5 9.5h3.5l.5 1.5h3l.5-1.5h3.5',
+  bell: 'M4 10.5V7a4 4 0 018 0v3.5l1.5 2h-11zM6.5 13.5a1.5 1.5 0 003 0',
+  settings: 'M2.5 5h7M12.5 5h1M2.5 11h1M6.5 11h7M11 3.5v3M5 9.5v3',
 } as const;
 
 export type IconName = keyof typeof PATHS;
