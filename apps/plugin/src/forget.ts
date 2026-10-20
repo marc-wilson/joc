@@ -13,7 +13,7 @@
 // session), `shell-snapshots/`, `paste-cache/`, `tasks/session-<short id>/`.
 //
 // What the JOC plugin keeps of a session, in its data folders: `offsets/<id>.offset`,
-// `offsets/<id>_agent-<agent>.offset` and `changes/<id>.hash`.
+// `offsets/<id>_agent-<agent>.offset`, `changes/<id>.hash` and `reported/<id>.json`.
 import { lstatSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
@@ -175,7 +175,7 @@ export function pluginDataDirs(config: string, env: NodeJS.ProcessEnv = process.
   return [...dirs];
 }
 
-/** The JOC plugin's own files of the session: read positions and the last diff's hash. */
+/** The JOC plugin's own files of the session: read positions, the last diff's hash and state. */
 export function pluginFiles(dirs: string[], sessionId: string): string[] {
   if (!isSessionId(sessionId)) return [];
   const found: string[] = [];
@@ -183,6 +183,7 @@ export function pluginFiles(dirs: string[], sessionId: string): string[] {
     for (const [folder, matches] of [
       ['offsets', (n: string) => n === `${sessionId}.offset` || isAgentOffset(n, sessionId)],
       ['changes', (n: string) => n === `${sessionId}.hash`],
+      ['reported', (n: string) => n === `${sessionId}.json`],
     ] as const) {
       const path = join(dir, folder);
       let names: string[] = [];
