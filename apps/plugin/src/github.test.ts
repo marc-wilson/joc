@@ -57,6 +57,39 @@ test('a result maps to a pull request, and a partial one is dropped', () => {
   assert.equal(toPullRequest(node(null, { headRefName: undefined })), undefined);
 });
 
+test('a pull request carries its base branch and changed files', () => {
+  const pr = toPullRequest(
+    node(null, {
+      baseRefName: 'main',
+      changedFiles: 3,
+      files: {
+        nodes: [
+          { path: 'src/mail/resend.ts', additions: 120, deletions: 0, changeType: 'ADDED' },
+          { path: 'src/mail/smtp.ts', additions: 0, deletions: 90, changeType: 'DELETED' },
+          { path: 'package.json', additions: 2, deletions: 1, changeType: 'CHANGED' },
+          { additions: 1, deletions: 1, changeType: 'MODIFIED' },
+        ],
+      },
+    }),
+  );
+  assert.equal(pr?.base, 'main');
+  assert.equal(pr?.changedFiles, 3);
+  assert.deepEqual(
+    pr?.files?.map((f) => [f.path, f.status, f.additions, f.deletions]),
+    [
+      ['src/mail/resend.ts', 'added', 120, 0],
+      ['src/mail/smtp.ts', 'deleted', 0, 90],
+      ['package.json', 'modified', 2, 1],
+    ],
+  );
+  // GitHub left them out: nothing is made up.
+  const bare = toPullRequest(node(null));
+  assert.deepEqual(
+    [bare?.base, bare?.files, bare?.changedFiles],
+    [undefined, undefined, undefined],
+  );
+});
+
 test('GitHub is read at most once a minute per machine', () => {
   const file = join(mkdtempSync(join(tmpdir(), 'joc-github-')), 'stamp');
   assert.equal(githubDue(1_000_000, file), true);

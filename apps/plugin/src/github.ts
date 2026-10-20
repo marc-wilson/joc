@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { GitHubReport, PullRequest } from '@joc/protocol';
+import type { GitHubReport, PullRequest, PullRequestFile } from '@joc/protocol';
 
 const EVERY_MS = 60_000;
 const stampFile = () => join(homedir(), '.claude', 'joc', 'github-read-at');
@@ -26,7 +26,8 @@ export function githubDue(now = Date.now(), file = stampFile()): boolean {
 
 const PR_FIELDS = `
   ... on PullRequest {
-    number title url isDraft additions deletions reviewDecision updatedAt headRefName
+    number title url isDraft additions deletions reviewDecision updatedAt headRefName baseRefName
+    changedFiles files(first: 100) { nodes { path additions deletions changeType } }
     repository { nameWithOwner }
     author { login }
     commits(last: 1) { nodes { commit { statusCheckRollup { state contexts {
@@ -56,6 +57,13 @@ export type Rollup = {
   };
 } | null;
 
+export interface GraphFile {
+  path?: string;
+  additions?: number;
+  deletions?: number;
+  changeType?: string;
+}
+
 export interface GraphNode {
   number?: number;
   title?: string;
@@ -66,6 +74,9 @@ export interface GraphNode {
   reviewDecision?: string | null;
   updatedAt?: string;
   headRefName?: string;
+  baseRefName?: string;
+  changedFiles?: number;
+  files?: { nodes?: GraphFile[] } | null;
   repository?: { nameWithOwner?: string };
   author?: { login?: string } | null;
   commits?: { nodes?: { commit?: { statusCheckRollup?: Rollup } }[] };
@@ -78,6 +89,32 @@ const REVIEW = new Map<string, PullRequest['review']>([
 ]);
 
 const PASSED = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
+
+/** GitHub's change types, as JOC shows them; COPIED and CHANGED read as modified. */
+const CHANGE = new Map<string, PullRequestFile['status']>([
+  ['ADDED', 'added'],
+  ['DELETED', 'deleted'],
+  ['RENAMED', 'renamed'],
+]);
+
+const count = (n: unknown) => (typeof n === 'number' && n >= 0 ? Math.floor(n) : 0);
+
+/** The PR's changed files GitHub listed, each checked; one without a path is dropped. */
+function toFiles(nodes: GraphFile[] | undefined): PullRequestFile[] | undefined {
+  if (!Array.isArray(nodes)) return undefined;
+  return nodes.flatMap((f) =>
+    typeof f?.path === 'string' && f.path
+      ? [
+          {
+            path: f.path.slice(0, 1000),
+            status: CHANGE.get(f.changeType ?? '') ?? 'modified',
+            additions: count(f.additions),
+            deletions: count(f.deletions),
+          },
+        ]
+      : [],
+  );
+}
 
 /** One search result as a PullRequest, or undefined when it isn't a whole pull request. */
 export function toPullRequest(node: GraphNode): PullRequest | undefined {
@@ -116,6 +153,9 @@ export function toPullRequest(node: GraphNode): PullRequest | undefined {
     review: node.reviewDecision ? REVIEW.get(node.reviewDecision) : undefined,
     ci,
     ciDetail: total ? `${passed}/${total}` : undefined,
+    base: node.baseRefName || undefined,
+    files: toFiles(node.files?.nodes),
+    changedFiles: typeof node.changedFiles === 'number' ? count(node.changedFiles) : undefined,
   };
 }
 
