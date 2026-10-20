@@ -12,13 +12,15 @@ export const STATE_LABEL: Record<SessionState, string> = {
 export interface StateDotProps {
   state?: SessionState;
   label?: string;
+  /** Its machine stopped reporting: the last known state, without the live pulse. */
+  quiet?: boolean;
   className?: string;
 }
 
-export function StateDot({ state = 'idle', label, className }: StateDotProps) {
+export function StateDot({ state = 'idle', label, quiet, className }: StateDotProps) {
   return (
     <span
-      className={cx('joc-sdot', `joc-sdot--${state}`, className)}
+      className={cx('joc-sdot', `joc-sdot--${state}`, quiet && 'is-quiet', className)}
       role="img"
       aria-label={label || STATE_LABEL[state]}
     />
