@@ -69,7 +69,14 @@ export interface ComposerResume {
   /** While starting: reached the machine, `claude --resume`, loading the messages. */
   steps?: ResumeStep[];
   /** After a failure: "Couldn't resume on <machine>: <reason>", the fact to fix it, the command. */
-  error?: { title: string; detail?: string; command: string };
+  error?: {
+    title: string;
+    detail?: string;
+    /** The command shown, short: `claude --resume 7f3a2c1e`. */
+    command: string;
+    /** What Copy takes, when longer: with the `cd` to the session's folder. */
+    copy?: string;
+  };
   onResume?: () => void;
   /** Withdraws it while no machine has taken it yet. */
   onCancel?: () => void;
@@ -458,7 +465,7 @@ function ResumeBar({ resume }: { resume: ComposerResume }) {
     <div className="joc-composer__bar">
       {resume.phase === 'failed' && resume.error ? (
         <span className="joc-resume__bar-cmd">
-          <CopyCommand command={resume.error.command} />
+          <CopyCommand command={resume.error.command} copy={resume.error.copy} />
         </span>
       ) : (
         <span className="joc-resume__note">

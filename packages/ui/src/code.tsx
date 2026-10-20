@@ -106,16 +106,18 @@ export function CodeBlock({ code, lang, filename, lineNumbers = true }: CodeBloc
 export interface CopyCommandProps {
   command: string;
   prompt?: string;
+  /** What Copy puts on the clipboard, when it's longer than what's shown (a `cd` first). */
+  copy?: string;
 }
 
-export function CopyCommand({ command, prompt = '$' }: CopyCommandProps) {
+export function CopyCommand({ command, prompt = '$', copy }: CopyCommandProps) {
   return (
-    <div className="joc-cmd">
+    <div className="joc-cmd" title={copy}>
       <span className="joc-cmd__prompt" aria-hidden="true">
         {prompt}
       </span>
       <code className="joc-cmd__text">{command}</code>
-      <CopyButton text={command} />
+      <CopyButton text={copy ?? command} />
     </div>
   );
 }
