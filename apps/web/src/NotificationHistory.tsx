@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useGitHub, useNow } from './hooks.ts';
 import { Nav } from './Nav.tsx';
 import { NoteRow, useNotes } from './Notifications.tsx';
-import { clearNotes, markRead } from './note-actions.ts';
+import { clearNotes, markRead } from './note-data.ts';
 import type { Note, NoteGroup } from './notes.ts';
 
 // /notifications: everything to look back on, in day groups with clock times. JOC keeps its own
@@ -58,7 +58,7 @@ function useSearchShortcut() {
 }
 
 export function NotificationsPage() {
-  const { notes, loaded, sessions, snapshot, connected } = useNotes(true);
+  const { notes, loaded, sessions, snapshot, connected, problem } = useNotes(true);
   const github = useGitHub();
   const prs = github?.state === 'reported' ? [...github.reviewRequested, ...github.mine] : [];
   const now = useNow();
@@ -146,17 +146,20 @@ export function NotificationsPage() {
               size="lg"
               title="Notifications"
               count={notes.length || undefined}
-              description="JOC's alerts from the last 30 days and your unread GitHub notifications, newest first."
+              description={
+                problem ??
+                "JOC's alerts from the last 30 days and your unread GitHub notifications, newest first."
+              }
             >
               <Button
                 variant="secondary"
                 icon="check"
                 disabled={!unread.length}
-                onClick={() => void markRead(unread)}
+                onClick={() => markRead(unread)}
               >
                 Mark all read
               </Button>
-              <Button variant="ghost" disabled={!read.length} onClick={() => void clearNotes(read)}>
+              <Button variant="ghost" disabled={!read.length} onClick={() => clearNotes(read)}>
                 Clear read
               </Button>
             </SectionHeader>

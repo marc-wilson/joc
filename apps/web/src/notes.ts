@@ -201,8 +201,8 @@ const OTHER_VERBS = new Map([
   ['ci_activity', 'CI finished'],
 ]);
 
-/** One of the person's unread GitHub threads as a note. */
-export function threadNote(t: GitHubNotification): Note {
+/** One of the person's GitHub threads as a note: unread, unless read here. */
+export function threadNote(t: GitHubNotification, unread = true): Note {
   const kind = threadKind(t);
   const on = t.number ? ` on #${t.number}` : '';
   const base = {
@@ -211,7 +211,7 @@ export function threadNote(t: GitHubNotification): Note {
     github: true,
     source: t.number ? `${repoName(t.repo)}#${t.number}` : repoName(t.repo),
     at: t.updatedAt,
-    unread: true,
+    unread,
     href: t.url,
     external: true,
     repo: t.repo,
@@ -262,13 +262,14 @@ const prKey = (repo: string, number: number | undefined) => `${repo}#${number}`;
 /**
  * Every note: sessions waiting now, then JOC's alerts and the GitHub threads, newest first. A
  * pull request asking for review both ways is one note that marks both read. `records` adds the
- * answered `needs` alerts, for the history.
+ * answered `needs` alerts, for the history; `read` names the threads read here.
  */
 export function allNotes(
   sessions: Session[],
   alerts: Alert[],
   threads: GitHubNotification[],
   records = false,
+  read: ReadonlySet<string> = new Set(),
 ): Note[] {
   const waitingNow = new Set(sessions.filter((s) => s.state === 'needs').map((s) => s.id));
   // A needs alert still waiting is the live session's note; once answered it's a record.
@@ -284,9 +285,9 @@ export function allNotes(
     if (twin) {
       twin.threadIds.push(t.id);
       // Unread on GitHub still: the note is too.
-      twin.unread = true;
+      if (!read.has(t.id)) twin.unread = true;
     } else {
-      fromThreads.push(threadNote(t));
+      fromThreads.push(threadNote(t, !read.has(t.id)));
     }
   }
   const rest = [...fromAlerts, ...fromThreads].sort(newestFirst);

@@ -119,6 +119,24 @@ test('a review requested both ways is one note that marks both read', () => {
   );
 });
 
+test('threads read here are read notes, a review asked both ways too', () => {
+  const notes = allNotes(
+    [],
+    [alert('1', { kind: 'review', sessionId: undefined, number: 7, read: true, detail: 'mira' })],
+    [thread('7', { reason: 'review_requested' }), thread('8', { reason: 'mention' })],
+    false,
+    new Set(['7', '8']),
+  );
+  assert.deepEqual(
+    notes.map((n) => [n.threadIds, n.unread]),
+    [
+      [['7'], false],
+      [['8'], false],
+    ],
+  );
+  assert.deepEqual(bellCounts(notes), { needs: 0, unread: 0 });
+});
+
 test('failed CI is activity on the GitHub tab, and its prompt names the run', () => {
   const [ci] = allNotes(
     [],
