@@ -5,13 +5,13 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import {
-  type GitHubReport,
-  MAX_PR_CHECKS,
-  type PullRequest,
-  type PullRequestCheck,
-  type PullRequestFile,
-} from '@joc/protocol';
+import type { GitHubReport, PullRequest, PullRequestCheck, PullRequestFile } from '@joc/protocol';
+
+/**
+ * The most checks sent per pull request: @joc/protocol's MAX_PR_CHECKS, copied because an installed
+ * plugin has no node_modules (github.test.ts keeps the two equal).
+ */
+export const MAX_PR_CHECKS = 50;
 
 const EVERY_MS = 60_000;
 const stampFile = () => join(homedir(), '.claude', 'joc', 'github-read-at');
