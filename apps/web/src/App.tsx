@@ -296,6 +296,7 @@ export default function App() {
                     id: 'background',
                     label: 'Background',
                     count: running || undefined,
+                    countLabel: running ? `${running} running` : undefined,
                     state: running ? 'background' : undefined,
                   },
                   {
