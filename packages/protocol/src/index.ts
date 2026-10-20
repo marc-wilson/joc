@@ -148,6 +148,8 @@ export const Session = z.object({
   /** GitHub `owner/name`, or the folder name outside a GitHub repo. */
   repo: z.string(),
   branch: z.string().optional(),
+  /** The worktree the session works in, by its folder's name; unset in the repo's main checkout. */
+  worktree: z.string().optional(),
   state: SessionState,
   /** What Claude is doing right now, one line. */
   activity: z.string().optional(),
@@ -226,6 +228,11 @@ export const SessionReport = z.object({
   state: SessionState.optional(),
   repo: z.string().min(1),
   branch: z.string().optional(),
+  /**
+   * The linked worktree the session's folder is in, by the folder's name; empty in the repo's main
+   * checkout, which clears it. Plugins before 0.11.1 leave it out, so it stays as it was.
+   */
+  worktree: z.string().max(300).optional(),
   /** Fallback title, from the first prompt. Kept from the first report that has one. */
   title: z.string().max(200).optional(),
   /** Claude Code's own name for the session (a custom name or its generated title). Latest wins. */
