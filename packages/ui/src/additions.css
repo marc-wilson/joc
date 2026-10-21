@@ -525,3 +525,183 @@ h4.joc-taskd__label { margin: 0; }
 .joc-jump__btn { pointer-events: auto; border-radius: var(--radius-full); box-shadow: var(--shadow-2); padding: 0 var(--space-3); }
 .joc-jump__label { font-variant-numeric: tabular-nums; }
 /* ===== End Jump to latest (#89) ========================================================== */
+/* ===== Teammates (#82) ===================================================================
+   Claude Design's pass for issue #82, copied from its teammates.css. One change: its step list
+   (.joc-steps / .joc-step) is renamed .joc-msteps / .joc-mstep here, as the Background tab's
+   task details already use those names for a different list. The last section fits it to
+   JOC's markup. */
+/* JOC — Teammates. Proposed addition to components/bundle.css.
+   Every value is a token. Motion is opacity/colour only.
+   Live teammates (working, waiting) use StateDot; finished ones (done, failed, stopped) use CI marks.
+   A dot is never drawn for an outcome. */
+
+/* ---------- New tokens (add to tokens.json → tokens.css, theme-independent) ---------- */
+:root {
+  --row-teammate: 56px;   /* Team list row: 8 + 20 + 20 + 8 */
+  --team-list: 440px;     /* Team tab master column */
+  --mate-indent: 36px;    /* nested teammate rows line up with the lead's title (12 pad + 16 glyph + 8 gap) */
+  --mark: 12px;           /* outcome mark (check / cross / dash) in dense rows */
+  --glance-dot: 6px;      /* dots in the header glance strip */
+}
+
+/* ---------- Outcome mark: CI glyph at row size ---------- */
+.joc-mark { flex: none; display: block; width: var(--mark); height: var(--mark); }
+
+/* ---------- Team tab layout: list + detail ---------- */
+.joc-teamview { display: flex; flex-wrap: wrap; min-height: 0; flex: 1 1 0; background: var(--bg-base); }
+.joc-teamview__list { flex: 1 1 var(--team-list); max-width: var(--team-list); min-width: 0; background: var(--bg-raised); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.joc-teamview__detail { flex: 999 1 560px; min-width: 0; overflow: auto; }
+
+/* Group header inside the list: "Active 3", "Finished 2" */
+.joc-mategroup { display: flex; align-items: center; gap: var(--space-1\.5); height: var(--row-dense); padding: 0 var(--space-4); border-bottom: 1px solid var(--border-subtle); background: var(--bg-base); color: var(--text-secondary); font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.joc-mategroup__count { font-family: var(--font-mono); font-weight: 400; letter-spacing: 0; color: var(--text-tertiary); }
+
+/* ---------- Teammate row: fixed height, text replaced in place ---------- */
+.joc-mate { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: var(--space-3); height: var(--row-teammate); padding: var(--space-2) var(--space-4); background: var(--bg-raised); border: 0; border-bottom: 1px solid var(--border-subtle); width: 100%; text-align: left; color: inherit; cursor: pointer; transition: background-color var(--duration-instant) linear; }
+.joc-mate:hover { background: var(--bg-hover); }
+.joc-mate.is-selected { background: var(--bg-selected); box-shadow: inset 2px 0 0 var(--accent); }
+.joc-mate__glyph { display: flex; align-items: center; justify-content: center; height: 20px; }
+.joc-mate__main { display: grid; grid-template-rows: 20px 20px; min-width: 0; }
+.joc-mate__line1, .joc-mate__line2 { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.joc-mate__title { font-size: 13px; line-height: 20px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+.joc-mate__issue { flex: none; font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.joc-mate__line1 .joc-sbadge, .joc-mate__line1 .joc-cibadge { height: 18px; font-size: 11px; flex: none; }
+.joc-mate__step { flex: 1 1 auto; min-width: 0; font-family: var(--font-mono); font-size: 12px; line-height: 20px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.joc-mate__pr { flex: none; display: inline-flex; align-items: center; gap: 3px; font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); }
+.joc-mate__aside { display: grid; grid-template-rows: 20px 20px; justify-items: end; }
+.joc-mate__elapsed { font-family: var(--font-mono); font-size: 11px; line-height: 20px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; min-width: 5ch; text-align: right; }
+.joc-mate--waiting .joc-mate__step { color: var(--text-primary); }
+.joc-mate--done .joc-mate__title, .joc-mate--stopped .joc-mate__title { color: var(--text-secondary); }
+.joc-mate--failed .joc-mate__step { color: var(--ci-fail); }
+.joc-mate--needs { background: var(--state-needs-soft); }
+.joc-mate--needs:hover, .joc-mate--needs.is-selected { background: var(--state-needs-soft); box-shadow: inset 0 0 0 1px var(--state-needs); }
+.joc-mate--needs .joc-mate__step { color: var(--text-primary); }
+
+/* Calm re-sort: order is recomputed only while the pointer is outside the list and nothing in it has focus.
+   A row that changes place fades in at its new slot; nothing slides. */
+.joc-mate.is-moved { animation: joc-fade var(--duration-fade) var(--ease-standard) both; }
+
+/* ---------- Teammate detail ---------- */
+.joc-matedetail { max-width: var(--thread-max); margin: 0 auto; padding: var(--space-6) var(--space-8) var(--space-12); display: flex; flex-direction: column; gap: var(--space-6); }
+.joc-matedetail__head { display: flex; flex-direction: column; gap: var(--space-2); }
+.joc-matedetail__top { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.joc-matedetail__title { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; min-width: 0; }
+.joc-matedetail__actions { margin-left: auto; display: flex; gap: var(--space-2); }
+.joc-matedetail__meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+.joc-matedetail__path { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); }
+.joc-matesec { display: flex; flex-direction: column; gap: var(--space-2); }
+.joc-matesec__head { display: flex; align-items: center; gap: var(--space-2); font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-secondary); }
+.joc-matesec__count { font-family: var(--font-mono); font-weight: 400; letter-spacing: 0; color: var(--text-tertiary); }
+.joc-matesec__aside { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+/* Brief: the prompt the lead gave. Prose, clamped to 4 lines until expanded. */
+.joc-brief { max-width: var(--reading-measure); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-sunken); font-size: 14px; line-height: 22px; color: var(--text-primary); }
+.joc-brief__text { margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.joc-brief.is-open .joc-brief__text { display: block; }
+.joc-brief__more { margin-top: var(--space-1); padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; line-height: 16px; cursor: pointer; }
+
+/* Steps: dense, like Background tab rows */
+.joc-msteps { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-raised); overflow: hidden; }
+.joc-mstep { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; column-gap: var(--space-2); height: var(--row-dense); padding: 0 var(--space-3); border-bottom: 1px solid var(--border-subtle); }
+.joc-mstep:last-child { border-bottom: 0; }
+.joc-step__lead { display: flex; align-items: center; justify-content: center; }
+.joc-step__text { font-family: var(--font-mono); font-size: 12px; line-height: 16px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.joc-step__time { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.joc-mstep.is-current .joc-step__text { color: var(--text-primary); }
+.joc-mstep.is-failed .joc-step__text { color: var(--ci-fail); }
+.joc-steps__more { display: flex; align-items: center; height: var(--row-dense); padding: 0 var(--space-3) 0 34px; border-bottom: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-tertiary); background: var(--bg-base); }
+
+/* Lead ↔ teammate thread: the lead's messages sit in the user-bubble ground, the teammate's are plain — same grammar as Conversation */
+.joc-mthread { display: flex; flex-direction: column; gap: var(--space-3); max-width: var(--reading-measure); }
+.joc-mmsg { display: flex; flex-direction: column; gap: 2px; }
+.joc-mmsg__head { display: flex; align-items: baseline; gap: var(--space-2); font-size: 12px; line-height: 16px; }
+.joc-mmsg__who { font-weight: 550; color: var(--text-primary); }
+.joc-mmsg__dir { color: var(--text-tertiary); }
+.joc-mmsg__time { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.joc-mmsg__body { font-size: 13px; line-height: 20px; color: var(--text-primary); }
+.joc-mmsg--lead .joc-mmsg__body { padding: var(--space-2) var(--space-3); border-radius: var(--radius-lg); background: var(--bubble-user); }
+.joc-mmsg--mate .joc-mmsg__body { padding: 0 var(--space-3); }
+
+/* Final report */
+.joc-report { max-width: var(--reading-measure); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-raised); }
+.joc-report__head { display: flex; align-items: center; gap: var(--space-2); height: 36px; padding: 0 var(--space-4); border-bottom: 1px solid var(--border-subtle); font-weight: 550; }
+.joc-report__time { margin-left: auto; font-family: var(--font-mono); font-size: 11px; font-weight: 400; color: var(--text-tertiary); }
+.joc-report__body { padding: var(--space-3) var(--space-4); font-size: 14px; line-height: 22px; }
+.joc-report__body p { margin: 0 0 var(--space-2); }
+.joc-report__body ul { margin: 0; padding-left: 18px; }
+.joc-report--failed { border-color: var(--ci-fail); }
+
+/* Links out: branch, worktree, PR */
+.joc-matelinks { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.joc-matelink { display: inline-flex; align-items: center; gap: var(--space-1\.5); height: var(--control-md); padding: 0 var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-raised); color: var(--text-primary); font-size: 12px; text-decoration: none; }
+.joc-matelink:hover { background: var(--bg-hover); }
+.joc-matelink__mono { font-family: var(--font-mono); }
+.joc-matelink__sub { color: var(--text-tertiary); }
+
+/* Screenshots the teammate produced */
+.joc-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-2); }
+.joc-shots .joc-attach { display: flex; width: 100%; }
+.joc-shot__frame { height: 120px; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); background: var(--bg-sunken); }
+
+/* ---------- Session list: lead row additions ---------- */
+/* Team chip on line 2 of SessionRow, before the context meter */
+.joc-teamchip { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 11px; line-height: 16px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.joc-teamchip .joc-icon { width: 12px; height: 12px; }
+.joc-teamchip__sep { color: var(--text-tertiary); }
+.joc-teamchip__fail { color: var(--ci-fail); }
+/* Expand toggle sits under the state dot, in the glyph column, on line 2 */
+.joc-srow__expand { position: absolute; left: var(--space-2); top: 28px; width: var(--control-sm); height: 20px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-tertiary); cursor: pointer; }
+.joc-srow__expand:hover { background: var(--bg-hover); color: var(--text-primary); }
+/* Icon swaps chevron-right ↔ chevron-down; no rotation */
+
+/* Nested teammate rows under an expanded lead: dense, never auto-expanded */
+.joc-smates { background: var(--bg-base); border-bottom: 1px solid var(--border-subtle); }
+.joc-smate { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto; align-items: center; column-gap: var(--space-2); height: var(--row-dense); padding: 0 var(--space-3) 0 var(--mate-indent); font-size: 12px; line-height: 16px; color: var(--text-secondary); cursor: pointer; }
+.joc-smate:hover { background: var(--bg-hover); color: var(--text-primary); }
+.joc-smate__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+.joc-smate__issue, .joc-smate__time { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.joc-smate__time { min-width: 5ch; text-align: right; }
+.joc-smate--done .joc-smate__title, .joc-smate--stopped .joc-smate__title { color: var(--text-secondary); }
+.joc-smate--needs { background: var(--state-needs-soft); }
+.joc-smate .joc-sdot { --dot: 7px; }
+.joc-smates__more { display: flex; align-items: center; height: var(--row-dense); padding: 0 var(--space-3) 0 var(--mate-indent); font-size: 12px; color: var(--accent); text-decoration: none; }
+.joc-smates__more:hover { background: var(--bg-hover); }
+
+/* ---------- Header glance: "3 teammates · 1 done" → Team tab ---------- */
+.joc-teamsum { display: inline-flex; align-items: center; gap: var(--space-2); height: var(--control-sm); padding: 0 var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-raised); color: var(--text-secondary); font-size: 12px; line-height: 16px; white-space: nowrap; cursor: pointer; text-decoration: none; transition: background-color var(--duration-instant) linear; }
+.joc-teamsum:hover { background: var(--bg-hover); color: var(--text-primary); }
+.joc-teamsum__dots { display: inline-flex; align-items: center; gap: 4px; }
+.joc-teamsum__dots .joc-sdot { --dot: var(--glance-dot); }
+.joc-teamsum__num { font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.joc-teamsum__sep { color: var(--text-tertiary); }
+.joc-teamsum__fail { display: inline-flex; align-items: center; gap: 3px; color: var(--ci-fail); }
+.joc-teamsum--needs { border-color: var(--state-needs); }
+
+@media (prefers-reduced-motion: reduce) {
+  .joc-mate.is-moved { animation: none; }
+}
+
+/* ---------- Fitted to JOC ---------- */
+/* The glance, nested rows, "open Team" and links are buttons here, not links. */
+.joc-teamsum, .joc-smate, .joc-smates__more, .joc-matelink { font: inherit; font-size: 12px; line-height: 16px; }
+.joc-smate, .joc-smates__more { width: 100%; border: 0; background: none; text-align: left; }
+.joc-smates__more { cursor: pointer; }
+.joc-matelink { cursor: pointer; }
+.joc-teamsum:focus-visible, .joc-smate:focus-visible, .joc-smates__more:focus-visible, .joc-matelink:focus-visible, .joc-mate:focus-visible, .joc-srow__expand:focus-visible, .joc-brief__more:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.joc-teamsum .joc-mark, .joc-teamsum__fail .joc-mark { width: var(--mark); height: var(--mark); }
+/* The tab fills the main pane below the header; the list and the detail scroll on their own. */
+.joc-teamview { min-height: 0; overflow: hidden; }
+.joc-teamview__list { overflow-y: auto; }
+.joc-teamview__list .joc-empty { margin: var(--space-8) var(--space-4); }
+.joc-mate { font: inherit; font-size: 13px; line-height: 20px; }
+.joc-mate__line1 .joc-sbadge, .joc-mate__line1 .joc-cibadge, .joc-matedetail__top .joc-cibadge { flex: none; }
+.joc-mate__glyph .joc-sdot, .joc-matedetail__top .joc-sdot, .joc-mstep__lead .joc-sdot, .joc-smate .joc-sdot { flex: none; }
+/* The space where a live teammate's report goes. */
+.joc-report-slot { max-width: var(--reading-measure); padding: var(--space-3) var(--space-4); border: 1px dashed var(--border); border-radius: var(--radius-lg); font-size: 13px; line-height: 20px; color: var(--text-tertiary); }
+.joc-report__body > :last-child { margin-bottom: 0; }
+.joc-report__head { min-width: 0; }
+.joc-mmsg__body p { margin: 0; }
+.joc-shots .joc-attach img { display: block; width: 100%; height: 120px; object-fit: cover; }
+/* A session row with teammates keeps its chip before the meter; the toggle sits under its dot. */
+.joc-srow__expand .joc-icon { width: 16px; height: 16px; }
+/* ===== End Teammates (#82) =============================================================== */
