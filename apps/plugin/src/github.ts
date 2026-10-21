@@ -56,7 +56,7 @@ const PR_FIELDS = `
     changedFiles files(first: 100) { nodes { path additions deletions changeType } }
     repository { nameWithOwner }
     author { ${ACTOR} }
-    reviews(last: ${MAX_PR_REVIEWS}) { nodes { state submittedAt author { ${ACTOR} } } }
+    reviews(last: ${MAX_PR_REVIEWS}) { nodes { state submittedAt url author { ${ACTOR} } } }
     reviewRequests(first: ${MAX_PR_REVIEWERS}) { nodes { requestedReviewer {
       __typename ... on User { login name avatarUrl } ... on Team { slug name }
     } } }
@@ -144,7 +144,12 @@ export interface GraphNode {
   repository?: { nameWithOwner?: string };
   author?: GraphActor | null;
   reviews?: {
-    nodes?: ({ state?: string; submittedAt?: string | null; author?: GraphActor | null } | null)[];
+    nodes?: ({
+      state?: string;
+      submittedAt?: string | null;
+      url?: string;
+      author?: GraphActor | null;
+    } | null)[];
   } | null;
   reviewRequests?: {
     nodes?: ({ requestedReviewer?: (GraphActor & { slug?: string }) | null } | null)[];
@@ -301,7 +306,9 @@ function toDetails(node: GraphNode, repo: string): Partial<PullRequest> {
   const reviews = nodesOf(node.reviews).flatMap((r) => {
     const by = toPerson(r.author);
     const state = REVIEW_STATE.get(r.state ?? '');
-    return by && state ? [clean({ by, state, submittedAt: time(r.submittedAt) })] : [];
+    return by && state
+      ? [clean({ by, state, submittedAt: time(r.submittedAt), url: link(r.url) })]
+      : [];
   });
   const asked = nodesOf(node.reviewRequests).map((r) => r.requestedReviewer);
   const teams = asked.flatMap((t) => {
