@@ -28,7 +28,10 @@ machine with `/joc-login` in Claude Code, and you see only your own sessions.
 ```
 
 - The **plugin** runs inside each Claude Code session. It pushes reports to the server and polls
-  it for prompts and answers. GitHub data comes from the `gh` CLI on your machine, via the plugin.
+  it for prompts and answers.
+- **GitHub** data comes from the JOC GitHub App's webhooks, the moment it changes
+  ([docs/github-app.md](docs/github-app.md)). Without the App, the plugin reads it with the `gh`
+  CLI on your machine instead.
 - The **server** streams live updates to the dashboard over Server-Sent Events.
 - Nothing reaches into your machine: every connection starts from the plugin.
 
@@ -65,7 +68,8 @@ pnpm dev
 | ------------- | -------- | ----------------------------------------------------- |
 | `MONGODB_URI` | yes      | Any MongoDB connection string, e.g. an Atlas cluster  |
 | `PORT`        | no       | Server port, defaults to `3000`                       |
-| `JOC_GITHUB_CLIENT_ID`, `JOC_GITHUB_CLIENT_SECRET` | no | A GitHub OAuth app for sign-in; unset means open (dev only) |
+| `JOC_GITHUB_CLIENT_ID`, `JOC_GITHUB_CLIENT_SECRET` | no | The GitHub App's (or an OAuth app's) client, for sign-in; unset means open (dev only) |
+| `JOC_GITHUB_WEBHOOK_SECRET`, `JOC_GITHUB_APP_ID`, `JOC_GITHUB_APP_PRIVATE_KEY` | no | The JOC GitHub App ([docs/github-app.md](docs/github-app.md)); unset means the plugin reads GitHub with `gh` |
 | `JOC_PUBLIC_URL` | no | Where the dashboard is reached, for the OAuth callback (dev: `http://localhost:5173`) |
 
 `pnpm dev` starts the server (http://localhost:3000) and the Vite dev server for the dashboard
@@ -87,18 +91,15 @@ and the plugin's recent problems (an unreachable server, a refused token or repo
 the plugin itself). They're kept, capped, in `~/.claude/joc/status.json`, and also shown under
 Plugin problems on the Machines page once the server is reachable again.
 
-The plugin also reads your GitHub pull requests and unread notifications through `gh`, once per
-machine (notifications no more often than GitHub's `X-Poll-Interval`, with conditional requests).
-Notifications show on the dashboard's **Inbox**, grouped by reason with review requests, mentions
-and CI first; marking one read there marks it read on GitHub on your machine's next read. Review
-requests, mentions and failed CI also raise a native notification in Claude Code, once per
-machine, and, if you turn on the Inbox's switch, a browser notification while the dashboard is
-open (as does a session that needs you).
+With the JOC GitHub App installed on your account or org, GitHub's webhooks keep your pull
+requests, reviews and CI current, and a comment on your pull request or one that @mentions you
+shows in the dashboard's notifications ([docs/github-app.md](docs/github-app.md)). The plugin
+then reads nothing from GitHub. Without the App, it reads your pull requests through `gh`, once a
+minute per machine.
 
 | Variable in Claude Code's environment | Effect |
 | --- | --- |
-| `JOC_GITHUB=0` | Keeps GitHub on your machine: no pull requests, no notifications |
-| `JOC_NOTIFY=0` | No native notifications in Claude Code (the Inbox still fills) |
+| `JOC_GITHUB=0` | Keeps GitHub on your machine: the plugin reads no pull requests with `gh` |
 
 The server expects the plugin version it was built with. The Machines page shows each machine's
 plugin version, and the dashboard shows a banner while one is out of date. In Claude Code, an out
@@ -154,7 +155,9 @@ One workflow, `.github/workflows/ci.yml`, with two jobs:
   `joc.marcswilson.com`. `MONGODB_URI` and `JOC_GITHUB_CLIENT_SECRET` are secrets, and
   `JOC_GITHUB_CLIENT_ID` a variable (it's public), in the GitHub `production` environment; the
   chart turns them into the `joc-secrets` Kubernetes secret at deploy time, and the deploy fails
-  if any is empty.
+  if any is empty. The GitHub App's `JOC_GITHUB_APP_PRIVATE_KEY` (base64, one line) and
+  `JOC_GITHUB_WEBHOOK_SECRET` are secrets and `JOC_GITHUB_APP_ID` a variable there too; they're
+  optional.
 - Every `/api/*` route acts for one user: a browser signed in with GitHub (an HttpOnly session
   cookie) or a linked machine (its own bearer token). Everything stored belongs to that user.
   `/health` and `/health/db` stay open for the probes.
