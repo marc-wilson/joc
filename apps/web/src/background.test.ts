@@ -8,8 +8,10 @@ import {
   clock,
   elapsed,
   latestStep,
+  lineCount,
   runningCount,
   runningLine,
+  taskRowText,
   taskSteps,
 } from './background.ts';
 
@@ -403,4 +405,44 @@ test('listed work has ended with its session', () => {
     [['ended', 'The session ended']],
   );
   assert.equal(arrangeTasks(tasks).finished.length, 1);
+});
+
+test('a shell row is titled by its command, with the output Claude last read as it runs', () => {
+  const read = (id: string, s: number, text: string): ConversationItem[] => [
+    {
+      id: `c-${id}`,
+      at: at(s),
+      kind: 'tool_call',
+      toolUseId: id,
+      name: 'TaskOutput',
+      summary: 'bg1',
+    },
+    { id: `r-${id}`, at: at(s), kind: 'tool_result', toolUseId: id, isError: false, text },
+  ];
+  const shell = (extra: ConversationItem[]) =>
+    backgroundTasks([...items.slice(0, 2), ...extra], 'working')[0] as BackgroundTask;
+
+  // Before Claude read any of it: what it's for.
+  assert.deepEqual(taskRowText(shell([])), { title: 'pnpm dev', line: 'Dev server' });
+  // Then the last line it read, its tags left out; the newest read wins.
+  const running = shell([
+    ...read('o1', 4, 'Starting'),
+    ...read('o2', 6, '<status>running</status>\n<output>\n  ready on :5173\n</output>'),
+  ]);
+  assert.deepEqual(taskRowText(running), { title: 'pnpm dev', line: 'ready on :5173' });
+
+  // Once it ended, how it ended.
+  const done = shell([
+    {
+      id: 'u1',
+      at: at(8),
+      kind: 'task_update',
+      taskId: 'bg1',
+      status: 'failed',
+      summary: 'exit 1',
+      output: 'a\nb\nc\n',
+    },
+  ]);
+  assert.deepEqual(taskRowText(done), { title: 'pnpm dev', line: 'exit 1' });
+  assert.equal(lineCount(done.output ?? ''), 3);
 });
