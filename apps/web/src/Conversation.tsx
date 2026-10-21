@@ -208,6 +208,8 @@ interface ThreadItemsProps {
   insert?: { index: number; node: ReactNode };
   /** Items that took a pending message's place: they show at once, without fading in. */
   settled?: ReadonlySet<string>;
+  /** A tool call to mark, by its tool use id, so the thread can be scrolled to it. */
+  anchor?: string;
 }
 
 /** Conversation items as messages, for a `Thread`: a session's, or a subagent's own steps. */
@@ -219,6 +221,7 @@ export function ThreadItems({
   onOpen = () => {},
   insert,
   settled,
+  anchor,
 }: ThreadItemsProps) {
   const results = new Map(
     items.flatMap((i) => (i.kind === 'tool_result' ? [[i.toolUseId, i] as const] : [])),
@@ -278,7 +281,7 @@ export function ThreadItems({
       case 'tool_call': {
         const result = results.get(item.toolUseId);
         const running = !result && item === lastCall && working;
-        return (
+        const message = (
           <Message
             key={item.id}
             from="tool"
@@ -288,6 +291,14 @@ export function ThreadItems({
           >
             {result?.text || 'No output'}
           </Message>
+        );
+        // A box-less wrapper, so marking the call changes nothing in the thread's layout.
+        return item.toolUseId === anchor ? (
+          <div key={item.id} className="joc-anchor" data-call={item.toolUseId}>
+            {message}
+          </div>
+        ) : (
+          message
         );
       }
       default:
@@ -314,6 +325,12 @@ interface Props {
   divider?: { text: string; at?: string };
   /** Shown after the transcript's items, e.g. a review's verdict. */
   after?: ReactNode;
+  /**
+   * A tool call to bring into view once, by its tool use id: the person asked for it (a background
+   * task's "Open in conversation"). `onRevealed` says it's done, so it isn't done again.
+   */
+  reveal?: string;
+  onRevealed?: () => void;
 }
 
 /** A session's conversation, kept pinned to the newest message while you're at the bottom. */
@@ -327,6 +344,8 @@ export function Conversation({
   session,
   divider,
   after,
+  reveal,
+  onRevealed,
 }: Props) {
   const at = divider?.at;
   const insert = divider
@@ -352,6 +371,20 @@ export function Conversation({
     if (pinned.current) el.scrollTop = el.scrollHeight;
     // New messages below grow what's left to read without a scroll; nothing on screen moves.
     else setFar(el.scrollHeight - el.scrollTop - el.clientHeight > el.clientHeight);
+  });
+
+  // A call you asked to see: one jump to it, after the pin above, and the thread stops following
+  // new messages, as when you scroll up yourself. Until it's in the thread, it waits.
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el || !reveal) return;
+    const call = el.querySelector(`[data-call="${CSS.escape(reveal)}"]`)?.firstElementChild;
+    if (!call) return;
+    call.scrollIntoView({ block: 'center' });
+    pinned.current = false;
+    setSeen((s) => s ?? seenIds(items));
+    setFar(el.scrollHeight - el.scrollTop - el.clientHeight > el.clientHeight);
+    onRevealed?.();
   });
 
   // You asked for it, so the one jump: straight there, never a smooth scroll.
@@ -407,6 +440,7 @@ export function Conversation({
               onOpen={setViewing}
               insert={insert}
               settled={settled}
+              anchor={reveal}
             />
             {after}
             {pending.map((view) => (
