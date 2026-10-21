@@ -48,6 +48,21 @@ export function NavBar({
         <LogoMark size={20} />
         JOC
       </a>
+      {/* Narrow, the links fold into this menu; CSS shows one or the other. */}
+      <div className="joc-nav__pages">
+        <OverflowMenu
+          label="Pages"
+          trigger={items.find((it) => it.id === value)?.label ?? 'Pages'}
+          items={items.map((it) => ({
+            id: it.id,
+            label: it.needs
+              ? `${it.label}, ${it.needs} ${it.needs === 1 ? 'needs' : 'need'} you`
+              : it.label,
+            checked: it.id === value,
+            onSelect: () => window.location.assign(it.href ?? `/${it.id}`),
+          }))}
+        />
+      </div>
       <nav className="joc-nav__links" aria-label="Primary">
         {items.map((it) => {
           const on = it.id === value;
