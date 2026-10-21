@@ -80,22 +80,33 @@ export function teammateTitle(text: string): { title: string; issue?: number } {
   return { title: title.slice(0, 200), ...(issue ? { issue } : {}) };
 }
 
-interface Draft extends Teammate {
+/** A teammate as its session's conversation alone tells, before `settleTeam` places it. */
+export interface TeamDraft extends Teammate {
+  /** Started in the background, so Claude Code's list of what runs knows of it. */
   background: boolean;
-  /** When the session last messaged it, and when it last messaged the session. */
+  /** When the session last messaged it. */
   leadAt?: string;
+  /** When it last messaged the session. */
   mateAt?: string;
-  mateText?: string;
+  /** That message's first line, when it asks something. */
+  mateAsks?: string;
 }
 
 /**
- * The session's teammates, oldest first, from its own conversation (not its subagents' steps):
- * each Agent call starts one; its result (a blocking one), a task notification (a background
- * one) or a stop ends it; a `SendMessage` to one that ended starts it again, as Claude Code
- * resumes it. A live one waits on the session when its latest message, unanswered, asks
- * something, and on you while its question or permission request does.
+ * The session's teammates, oldest first, from its own conversation (not its subagents' steps).
+ * `teamDrafts` reads the conversation, `settleTeam` adds what the session says now.
  */
 export function teamOf(items: ConversationItem[], context: TeamContext): Teammate[] {
+  return settleTeam(teamDrafts(items), context);
+}
+
+/**
+ * Each Agent call starts a teammate; its result (a blocking one), a task notification (a
+ * background one) or a stop ends it; a `SendMessage` to one that ended starts it again, as
+ * Claude Code resumes it. The latest `MAX_TEAMMATES`.
+ */
+export function teamDrafts(items: ConversationItem[]): TeamDraft[] {
+  type Draft = TeamDraft;
   const team: Draft[] = [];
   const byId = new Map<string, Draft>();
   const find = (id: string | undefined) => (id ? byId.get(id) : undefined);
@@ -155,10 +166,21 @@ export function teamOf(items: ConversationItem[], context: TeamContext): Teammat
       const t = find(item.from);
       if (!t) continue;
       t.mateAt = item.at;
-      t.mateText = item.text;
+      if (asks(item.text)) t.mateAsks = firstLine(item.text);
+      else delete t.mateAsks;
     }
   }
+  return team.slice(-MAX_TEAMMATES);
+}
 
+/**
+ * The drafts as they stand now: a live teammate stops with its session, needs you while its
+ * question or permission request waits on you, waits on the session while its latest message
+ * asks something the session hasn't answered, and has ended once Claude Code's list (newer than
+ * its start) leaves it out. Agents only that list knows of are added.
+ */
+export function settleTeam(drafts: TeamDraft[], context: TeamContext): Teammate[] {
+  const team = drafts.map((d) => ({ ...d }));
   const { background: listed, state, waiting } = context;
   const listedIds = new Set(listed?.tasks.map((t) => t.id));
   const listedAt = listed ? Date.parse(listed.at) : 0;
@@ -173,9 +195,9 @@ export function teamOf(items: ConversationItem[], context: TeamContext): Teammat
         waiting.kind === 'permission'
           ? `Asks to run ${waiting.tool}`
           : firstLine(waiting.questions[0]?.question);
-    } else if (t.mateAt && t.mateText && (!t.leadAt || t.leadAt < t.mateAt) && asks(t.mateText)) {
+    } else if (t.mateAt && t.mateAsks && (!t.leadAt || t.leadAt < t.mateAt)) {
       t.status = 'waiting';
-      t.tail = firstLine(t.mateText);
+      t.tail = t.mateAsks;
     } else if (
       listed &&
       t.background &&
@@ -209,7 +231,7 @@ export function teamOf(items: ConversationItem[], context: TeamContext): Teammat
   const folders = new Map(context.folders?.map((f) => [f.task, f]));
   return team
     .slice(-MAX_TEAMMATES)
-    .map(({ background: _b, leadAt: _l, mateAt: _m, mateText: _t, ...t }) => {
+    .map(({ background: _b, leadAt: _l, mateAt: _m, mateAsks: _a, ...t }) => {
       const folder = folders.get(t.id);
       return {
         ...t,
