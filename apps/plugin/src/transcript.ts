@@ -332,7 +332,7 @@ export function agentMessage(
   text: string,
 ): { from: string; text: string; report?: true } | undefined {
   const found = text.match(
-    /^\s*<agent-message from="([\w-]{1,200})">([\s\S]*?)(?:<\/agent-message>\s*)?$/,
+    /<agent-message from="([\w-]{1,200})">([\s\S]*?)(?:<\/agent-message>|$)/,
   );
   const body = found?.[2]?.trim();
   if (!found?.[1] || !body) return undefined;
@@ -438,7 +438,12 @@ function parseEntries(lines: string[], cwd: string, sidechain: boolean): Parsed 
       continue;
     }
     if (entry.type === 'ai-title' && entry.aiTitle) aiTitle = entry.aiTitle;
-    if (entry.isMeta || !entry.uuid || !entry.timestamp) continue;
+    // A teammate's message to a session that waits is a meta entry: "Another Claude session sent
+    // a message: <agent-message …>". Other meta entries are Claude Code's own.
+    const meta =
+      entry.isMeta === true &&
+      !(entry.type === 'user' && str(entry.message?.content)?.includes('<agent-message from='));
+    if (meta || !entry.uuid || !entry.timestamp) continue;
     if (!!entry.isSidechain !== sidechain) continue;
     const at = new Date(entry.timestamp).toISOString();
     const content = entry.message?.content;
