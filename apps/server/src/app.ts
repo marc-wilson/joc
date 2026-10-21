@@ -43,8 +43,9 @@ import {
   type ServerVersion,
   type SessionPrompts,
   SessionReport,
-  SessionSettings,
+  StoredSessionSettings,
   type StreamEvent,
+  settleSessionSettings,
   teamDrafts,
   Waiting,
   WaitingDone,
@@ -456,10 +457,13 @@ export function createApp({
 
   app.put('/api/settings/sessions', async (c) => {
     if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
-    const parsed = SessionSettings.safeParse(await c.req.json().catch(() => null));
+    // A tab from before the keep times changed may send one no longer offered: it's settled to
+    // the nearest one, as a stored one is.
+    const parsed = StoredSessionSettings.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
-    await saveSessionSettings(c.get('owner'), parsed.data);
-    return c.json(parsed.data);
+    const value = settleSessionSettings(parsed.data);
+    await saveSessionSettings(c.get('owner'), value);
+    return c.json(value);
   });
 
   // Pins, folds and the notifications switch: the person's own, never a machine's.

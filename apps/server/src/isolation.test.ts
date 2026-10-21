@@ -723,14 +723,28 @@ test("how long sessions stay is each owner's own setting, and only a signed-in p
   await quietFor('gh_1', 'alice-ended', 2 * 60 * 60_000);
   assert.equal((await live('alice')).includes('alice-ended'), true);
 
-  // Alice keeps quiet sessions for good, and ended ones for an hour.
-  assert.equal((await asPerson('alice', { quiet: 'never', ended: '1h' })).status, 200);
+  // Alice keeps quiet sessions for a month, and lets ended ones go right away.
+  assert.equal((await asPerson('alice', { quiet: '30d', ended: 'now' })).status, 200);
   assert.deepEqual(await read(await asPerson('alice'), SessionSettings), {
-    quiet: 'never',
-    ended: '1h',
+    quiet: '30d',
+    ended: 'now',
   });
   assert.equal((await live('alice')).includes('alice-old'), true);
   assert.equal((await live('alice')).includes('alice-ended'), false);
+
+  // A keep time no longer offered, stored or sent by an older tab, moves to the nearest one.
+  await getDb()
+    .collection('settings')
+    .updateOne({ _id: 'gh_1' as never }, { $set: { sessions: { quiet: 'never', ended: '1h' } } });
+  assert.deepEqual(await read(await asPerson('alice'), SessionSettings), {
+    quiet: '30d',
+    ended: 'now',
+  });
+  assert.deepEqual(
+    await read(await asPerson('alice', { quiet: '1h', ended: '30d' }), SessionSettings),
+    { quiet: '1d', ended: '1w' },
+  );
+  await asPerson('alice', { quiet: '30d', ended: 'now' });
 
   // Bob still has the defaults, and his quiet session stays off his list.
   assert.deepEqual(await read(await asPerson('bob'), SessionSettings), {

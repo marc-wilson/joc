@@ -21,10 +21,13 @@ test('the note says what the list leaves out', () => {
     'Quiet sessions leave after 1 week, ended ones leave after 1 day.',
   );
   assert.equal(
-    keepNote({ quiet: 'never', ended: '1h' }),
-    'Quiet sessions stay, ended ones leave after 1 hour.',
+    keepNote({ quiet: '30d', ended: 'now' }),
+    'Quiet sessions leave after 1 month, ended ones leave right away.',
   );
-  assert.equal(keepNote({ quiet: 'never', ended: 'never' }), 'Quiet and ended sessions stay.');
+  assert.equal(
+    keepNote({ quiet: '1d', ended: '1d' }),
+    'Quiet and ended sessions leave after 1 day.',
+  );
 });
 
 test('the filter matches title, repo or branch, ignoring case', () => {

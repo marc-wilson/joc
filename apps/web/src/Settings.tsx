@@ -1,4 +1,4 @@
-import { DropAfter, type SessionSettings, STANDARD_REVIEW, Theme } from '@joc/protocol';
+import { SessionSettings, STANDARD_REVIEW, Theme } from '@joc/protocol';
 import {
   Button,
   type SaveStatus,
@@ -18,7 +18,7 @@ import { useReviewSettings, useSessionSettings, useSessions } from './hooks.ts';
 import { Nav } from './Nav.tsx';
 import { NotificationSettingsForm, resetNotificationSettings } from './NotificationSettings.tsx';
 import { updatePrefs, usePrefs } from './prefs.ts';
-import { DROP_AFTER_OPTIONS } from './session-list.ts';
+import { ENDED_OPTIONS, QUIET_OPTIONS } from './session-list.ts';
 
 const SECTIONS = [
   { id: 'sessions', label: 'Session list' },
@@ -105,8 +105,8 @@ function SessionList({ track }: { track: Track }) {
   const { settings, save } = useSessionSettings();
   if (!settings) return null;
   const pick = (key: keyof SessionSettings) => (id: string) => {
-    const parsed = DropAfter.safeParse(id);
-    if (parsed.success) track(save({ ...settings, [key]: parsed.data }));
+    const parsed = SessionSettings.safeParse({ ...settings, [key]: id });
+    if (parsed.success) track(save(parsed.data));
   };
   return (
     <>
@@ -116,7 +116,7 @@ function SessionList({ track }: { track: Track }) {
       >
         <SegmentedControl
           label="Quiet sessions stay for"
-          options={DROP_AFTER_OPTIONS}
+          options={QUIET_OPTIONS}
           value={settings.quiet}
           onChange={pick('quiet')}
         />
@@ -124,7 +124,7 @@ function SessionList({ track }: { track: Track }) {
       <SettingRow label="Ended sessions" hint="You exited Claude Code.">
         <SegmentedControl
           label="Ended sessions stay for"
-          options={DROP_AFTER_OPTIONS}
+          options={ENDED_OPTIONS}
           value={settings.ended}
           onChange={pick('ended')}
         />

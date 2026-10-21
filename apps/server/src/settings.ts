@@ -1,25 +1,35 @@
 // The owner's dashboard settings. One document per owner; an owner who never saved any gets the
 // defaults.
 import { getDb } from '@joc/db';
-import { DEFAULT_SESSION_SETTINGS, ReviewSettings, SessionSettings } from '@joc/protocol';
+import {
+  DEFAULT_SESSION_SETTINGS,
+  ReviewSettings,
+  type SessionSettings,
+  StoredSessionSettings,
+  settleSessionSettings,
+} from '@joc/protocol';
 import type { Owner } from './owner.ts';
 
 interface SettingsDoc {
   /** The owner. */
   _id: string;
-  sessions?: SessionSettings;
+  /** Saved before the keep times changed, it may hold one no longer offered (settled on read). */
+  sessions?: StoredSessionSettings;
   review?: ReviewSettings;
   updatedAt: Date;
 }
 
 const settings = () => getDb().collection<SettingsDoc>('settings');
 
-/** Which sessions the owner's live list keeps. */
+/**
+ * Which sessions the owner's live list keeps. A keep time saved before the choices changed reads
+ * as the nearest one offered now.
+ */
 export async function getSessionSettings(owner: Owner): Promise<SessionSettings> {
   const doc = await settings().findOne({ _id: owner });
   // A stored value from an older shape falls back to the defaults rather than failing the list.
-  const parsed = SessionSettings.safeParse(doc?.sessions);
-  return parsed.success ? parsed.data : DEFAULT_SESSION_SETTINGS;
+  const parsed = StoredSessionSettings.safeParse(doc?.sessions);
+  return parsed.success ? settleSessionSettings(parsed.data) : DEFAULT_SESSION_SETTINGS;
 }
 
 export async function saveSessionSettings(owner: Owner, value: SessionSettings): Promise<void> {
