@@ -21,7 +21,7 @@ settings → GitHub Apps → New GitHub App** (for an org: the org's **Settings 
 | GitHub App name | Any unique name, e.g. `JOC` plus your server's name |
 | Homepage URL | `https://<host>` |
 | Callback URL | `https://<host>/auth/github/callback` |
-| Expire user authorization tokens | Either; JOC uses the token once at sign-in and keeps none |
+| Expire user authorization tokens | Either; JOC uses the token once at sign-in (profile and installations) and keeps none |
 | Request user authorization (OAuth) during installation | **On** |
 | Enable Device Flow | Off |
 | Setup URL | Empty |
@@ -88,6 +88,36 @@ The App is installed once per account, and covers everyone in it:
 
 Installing signs the installer in to JOC. Everyone else is picked up at once (the App reads the
 org's members), or the next time they sign in.
+
+From the dashboard, **Install** (in the banner, or **Settings → GitHub**) goes through
+`/auth/github/install`, which opens the App's install page and remembers the page you were on.
+GitHub returns to the callback URL (no Setup URL is needed, as "Request user authorization during
+installation" is on). JOC signs you in through the App again, which GitHub answers at once, reads
+your installations, and lands you back on that page with the banner gone. If an org owner still
+has to approve the install, JOC says so.
+
+## Switching an existing server to the App
+
+People already signed in keep their browser session, which predates the App, so JOC has never
+seen their installations. JOC records when each person signs in through the App; anyone without
+that record:
+
+- sees **Reconnect GitHub to get live updates** under the nav bar, and **Reconnect GitHub** in
+  the avatar menu. One click signs them in through the App and back to the same page;
+- keeps the plugin's `gh` reads, about once a minute, until the App covers them.
+
+After reconnecting, someone the App doesn't cover yet sees **Install JOC Dashboard on your
+account or org** (using the App's own name), with **Install** and **Check again** (signs in
+through the App again to re-read installations; JOC keeps no GitHub token). Covered people see
+nothing. **Settings → GitHub** shows which accounts and orgs cover you, with Manage and Install
+links and Reconnect.
+
+Nobody gets locked out. A sign-in that fails, is cancelled or expires goes back to the page it
+started from and says so, and the session you already had stays. Only a sign-in that succeeds
+replaces it. Machines keep their own tokens throughout and never need to link again.
+
+The Install link needs the App's slug, which the server reads from GitHub with the App's id and
+key. Without those, set `JOC_GITHUB_APP_SLUG`.
 
 ## What JOC does with it
 
