@@ -11,8 +11,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
-import type { ConversationItem, ImageRef } from '@joc/protocol';
+import { basename, dirname, join, relative, sep } from 'node:path';
+import type { ConversationItem, ImageRef, TeamFolder } from '@joc/protocol';
 import { imageType, MAX_IMAGES, takeImageLines } from './images.ts';
 import { firstLine, toolLabel, toolTarget } from './report.ts';
 
@@ -123,6 +123,39 @@ export function findTranscript(sessionId: string, cwd: string): string | undefin
 export interface SubagentLines extends NewLines {
   /** The `toolUseId` of the call that started it. */
   task: string;
+  /** The folder and branch it works in, as of these lines. */
+  folder: TeamFolder;
+}
+
+/**
+ * Where a subagent works: the worktree Claude Code made for it (its meta file says), else the
+ * folder its entries ran in, relative to the session's folder when inside it; and the branch its
+ * latest entry saw.
+ */
+export function subagentFolder(
+  task: string,
+  meta: Record<string, unknown>,
+  lines: string[],
+  sessionFolder: string,
+): TeamFolder {
+  let branch: string | undefined;
+  let cwd: string | undefined;
+  for (let i = lines.length - 1; i >= 0 && !(branch && cwd); i--) {
+    try {
+      const entry: unknown = JSON.parse(lines[i] ?? '');
+      if (!isBlock(entry)) continue;
+      branch ??= str(entry.gitBranch) || undefined;
+      cwd ??= str(entry.cwd) || undefined;
+    } catch {}
+  }
+  const path = str(meta.worktreePath) ?? (cwd && cwd !== sessionFolder ? cwd : undefined);
+  const inside = path && sessionFolder && path.startsWith(sessionFolder + sep);
+  const worktree = path ? (inside ? relative(sessionFolder, path) : basename(path)) : undefined;
+  return {
+    task,
+    ...(branch && branch !== 'HEAD' ? { branch: cut(branch, 300) } : {}),
+    ...(worktree ? { worktree: cut(worktree, 300) } : {}),
+  };
 }
 
 /**
@@ -134,6 +167,7 @@ export function readSubagents(
   sessionId: string,
   transcriptPath: string,
   budget = MAX_READ_BYTES,
+  sessionFolder = '',
 ): SubagentLines[] {
   const dir = join(dirname(transcriptPath), sessionId, 'subagents');
   let names: string[];
@@ -152,9 +186,15 @@ export function readSubagents(
       if (!lines.length) continue;
       const meta: unknown = JSON.parse(readFileSync(join(dir, `${agent}.meta.json`), 'utf8'));
       const task = isBlock(meta) ? str(meta.toolUseId) : undefined;
-      if (!task) continue; // Can't tell which task it belongs to: leave it.
+      if (!task || !isBlock(meta)) continue; // Can't tell which task it belongs to: leave it.
       read += lines.reduce((n, l) => n + l.length, 0);
-      found.push({ task: cut(task, 200), lines, commit });
+      const id = cut(task, 200);
+      found.push({
+        task: id,
+        lines,
+        commit,
+        folder: subagentFolder(id, meta, lines, sessionFolder),
+      });
     } catch {}
   }
   return found;
@@ -281,6 +321,30 @@ export function taskNotification(
   };
 }
 
+/**
+ * A teammate's message to the session, which Claude Code hands it as
+ * `<agent-message from="<agent id>">…</agent-message>`. Its final report comes that way too,
+ * marked as a hand-back, and again as a task notification, which is the one kept.
+ */
+export function agentMessage(text: string): { from: string; text: string } | undefined {
+  const found = text.match(
+    /^\s*<agent-message from="([\w-]{1,200})">([\s\S]*?)(?:<\/agent-message>\s*)?$/,
+  );
+  const body = found?.[2]?.trim();
+  if (!found?.[1] || !body || body.startsWith('[Subagent hand-back]')) return undefined;
+  return { from: found[1], text: cut(body, 20_000) };
+}
+
+/** Who a `SendMessage` call writes to and what it says. */
+function sentMessage(input: Record<string, unknown>): { to?: string; message?: string } {
+  const to = str(input.to) ?? str(input.recipient);
+  const message = str(input.message) ?? str(input.content);
+  return {
+    ...(to ? { to: cut(to, 200) } : {}),
+    ...(message ? { message: cut(message, 20_000) } : {}),
+  };
+}
+
 /** The background task a tool result left running: a shell's task id or an async agent's id. */
 function startedTask(result: unknown): string | undefined {
   if (!result || typeof result !== 'object') return undefined;
@@ -381,6 +445,11 @@ function parseEntries(lines: string[], cwd: string, sidechain: boolean): Parsed 
       items.push({ id: entry.uuid, at, kind: 'task_update', ...update });
       continue;
     }
+    const message = notice ? agentMessage(notice) : undefined;
+    if (message) {
+      items.push({ id: entry.uuid, at, kind: 'agent_message', ...message });
+      continue;
+    }
     // A command and what it printed: user entries, or `local_command` system ones.
     const recorded =
       entry.type === 'user' && typeof content === 'string'
@@ -453,6 +522,7 @@ function parseEntries(lines: string[], cwd: string, sidechain: boolean): Parsed 
             background && name === 'Bash' && command?.trim().includes('\n')
               ? cut(command, 5_000)
               : undefined,
+          ...(name === 'SendMessage' ? sentMessage(input) : {}),
         });
       } else if (entry.type === 'user' && block.type === 'tool_result') {
         const toolUseId = str(block.tool_use_id) ?? '';

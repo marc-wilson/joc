@@ -331,17 +331,18 @@ async function sendSubagentSteps(input: HookInput, folder: string) {
   if (!input.transcript_path) return;
   let found: ReturnType<typeof readSubagents>;
   try {
-    found = readSubagents(input.session_id, input.transcript_path);
+    found = readSubagents(input.session_id, input.transcript_path, undefined, folder);
   } catch {
     return;
   }
-  for (const { task, lines, commit } of found) {
+  for (const { task, lines, commit, folder: teammate } of found) {
     // Pasted images stay out: a subagent's prompts come from Claude, not you.
     const { items } = parseLines(lines, folder, task);
     for (let i = 0; i < items.length; i += BATCH) {
       const batch: MessagesReport = {
         sessionId: input.session_id,
         items: items.slice(i, i + BATCH),
+        teammate,
       };
       const response = await post('/api/messages', batch, 3000);
       if (!response?.ok) return; // Keep the old positions so the next hook resends.
