@@ -71,6 +71,7 @@ import {
 import { plain } from './plain.ts';
 import { updatePrefs, usePrefs } from './prefs.ts';
 import { useResumeView } from './Resuming.tsx';
+import { ReviewPanel, ReviewTab, ReviewVerdict, useSessionReview } from './ReviewPR.tsx';
 import { reviewGone, reviewRowText } from './review-rows.ts';
 import { isQuiet, keepNote, matchesFilter } from './session-list.ts';
 import {
@@ -336,6 +337,7 @@ export default function App() {
   // The teammate the Team tab shows, per session.
   const [mates, setMates] = useState<Record<string, string>>({});
   const [tab, setTab] = useState('conversation');
+  const review = useSessionReview(selected);
   // The Changes tab needs the width, so the session list folds into a rail of state dots.
   const [listOpen, setListOpen] = useState(false);
   // You can also fold it on any tab; that choice, the groups you folded and the sessions you
@@ -751,6 +753,9 @@ export default function App() {
                 }
                 tabs={[
                   { id: 'conversation', label: 'Conversation' },
+                  ...(selected.review
+                    ? [{ id: 'pr', label: `PR #${selected.review.number}` }]
+                    : []),
                   {
                     // Always there, so the tabs never shift; counted once a teammate is at work.
                     id: 'team',
@@ -785,7 +790,15 @@ export default function App() {
                   onResume={resuming?.canResume ? resuming.resume : undefined}
                 />
               </SessionHeader>
-              {tab === 'background' ? (
+              {tab === 'pr' && selected.review ? (
+                <ReviewTab
+                  key={selected.id}
+                  session={selected}
+                  items={items}
+                  review={review}
+                  onOpenChanges={() => setTab('changes')}
+                />
+              ) : tab === 'background' ? (
                 <BackgroundView key={selected.id} sessionId={selected.id} tasks={tasks} />
               ) : tab === 'team' ? (
                 <TeamTab
@@ -814,6 +827,13 @@ export default function App() {
                 />
               ) : (
                 <>
+                  <ReviewPanel
+                    key={`pr-${selected.id}`}
+                    session={selected}
+                    items={items}
+                    review={review}
+                    onSend={(text) => send(selected.id, text)}
+                  />
                   <Conversation
                     key={selected.id}
                     sessionId={selected.id}
@@ -824,6 +844,14 @@ export default function App() {
                     state={selected.state}
                     session={selected}
                     divider={resuming?.divider}
+                    after={
+                      <ReviewVerdict
+                        session={selected}
+                        items={items}
+                        review={review}
+                        onSend={(text) => send(selected.id, text)}
+                      />
+                    }
                   />
                   <div className="app-main__dock" ref={dockRef}>
                     {queued ? <QueueNote>{queued}</QueueNote> : null}
