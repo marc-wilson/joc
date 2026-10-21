@@ -1,4 +1,5 @@
 import {
+  arrangeTeam,
   IMAGE_TYPES,
   ImageRef,
   MAX_IMAGE_BYTES,
@@ -6,6 +7,7 @@ import {
   MAX_PREF_ITEMS,
   PromptQueued,
   type Session,
+  type Teammate,
 } from '@joc/protocol';
 import {
   Button,
@@ -22,14 +24,20 @@ import {
   SessionListNote,
   SessionRail,
   SessionRow,
+  type SessionRowProps,
+  SessionTeammate,
+  SessionTeammates,
   SortBar,
+  TEAMMATE_LABEL,
+  TeamChip,
+  TeamGlance,
   TextInput,
   TextLink,
 } from '@joc/ui';
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { apiFetch } from './auth.ts';
 import { BackgroundView } from './Background.tsx';
-import { backgroundTasks, runningCount, runningLine } from './background.ts';
+import { backgroundTasks, runningCount, runningLine, withoutTeammates } from './background.ts';
 import { ChangesView } from './Changes.tsx';
 import { Conversation } from './Conversation.tsx';
 import { DeleteDialog } from './DeleteSessions.tsx';
@@ -75,6 +83,8 @@ import {
   SORT_OPTIONS,
 } from './sessions.ts';
 import { sessionSuggestions } from './slash-commands.ts';
+import { TeamTab } from './Team.tsx';
+import { sessionTeam, shortElapsed, teamCounts, teamLine } from './team.ts';
 import { age, ago, clock } from './time.ts';
 import { toggled } from './toggled.ts';
 
@@ -82,13 +92,19 @@ const UNTITLED = 'New session';
 
 const FILTER_ID = 'session-filter';
 
+/** Claude Code's list types that are teammates, which the Team tab counts instead. */
+const TEAMMATE_TYPES = ['subagent', 'teammate', 'agent'];
+
 /** The row's activity line: what Claude is doing, or, once it stopped reporting, what it last did. */
-function activityOf(s: Session, now: number): string | undefined {
-  // Work running on in the background is counted from Claude Code's list, as the tab counts it.
+function activityOf(s: Session, now: number, team: Teammate[] = s.team ?? []): string | undefined {
+  // Work running on in the background is counted from Claude Code's list, as the tab counts it;
+  // teammates have a line of their own.
+  const running = s.background?.tasks.filter((t) => !TEAMMATE_TYPES.includes(t.type)).length ?? 0;
+  const waitingOnTeam = s.state !== 'working' && s.state !== 'needs' ? teamLine(team) : undefined;
   const activity =
-    s.state === 'background' && s.background?.tasks.length
-      ? runningLine(s.background.tasks.length)
-      : s.activity && plain(s.activity);
+    s.state === 'background' && running
+      ? runningLine(running)
+      : (waitingOnTeam ?? (s.activity && plain(s.activity)));
   if (!isQuiet(s, now)) return activity;
   const silent = `No word from ${s.machine ?? 'its machine'}`;
   return activity ? `${silent} · last: ${activity}` : silent;
@@ -97,6 +113,16 @@ function activityOf(s: Session, now: number): string | undefined {
 /** "Quiet 6m" for a session whose machine stopped reporting, in place of its time. */
 const quietOf = (s: Session, now: number) =>
   isQuiet(s, now) ? `Quiet ${age(s.updatedAt, now)}` : undefined;
+
+/** Nested teammate rows shown before the rest are summed up in one link. */
+const NESTED_SHOWN = 5;
+
+/** "+1 stopped", "+3 more": the teammates past the nested rows. */
+function moreLine(rest: Teammate[]): string {
+  const [first] = rest;
+  const same = first && rest.every((t) => t.status === first.status);
+  return `+${rest.length} ${same ? TEAMMATE_LABEL[first.status].toLowerCase() : 'more'} · open Team`;
+}
 
 /** A row in the live list, faded while a re-sort moves it. */
 function ListItem({ moving, children }: { moving?: 'leaving' | 'arriving'; children: ReactNode }) {
@@ -190,6 +216,67 @@ function SessionActions({
   );
 }
 
+/**
+ * A lead session's row with what its teammates add: the team chip, the toggle under its dot,
+ * and its teammates under it while you keep them open (only you open them).
+ */
+function LeadRow({
+  session,
+  team,
+  open,
+  onOpenChange,
+  onMate,
+  now,
+  row,
+}: {
+  session: Session;
+  team: Teammate[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onMate: (id?: string) => void;
+  now: number;
+  row: SessionRowProps;
+}) {
+  if (!team.length) return <SessionRow {...row} />;
+  const { active, failed } = teamCounts(team);
+  const { active: live, finished: ended } = arrangeTeam(team);
+  const ordered = [...live, ...ended];
+  const shown = ordered.slice(0, NESTED_SHOWN);
+  const rest = ordered.slice(NESTED_SHOWN);
+  return (
+    <>
+      <SessionRow
+        {...row}
+        team={<TeamChip active={active} total={team.length} failed={failed} />}
+        teammates={{ open, onToggle: () => onOpenChange(!open) }}
+      />
+      {open ? (
+        <SessionTeammates
+          more={rest.length ? { label: moreLine(rest), onClick: () => onMate() } : undefined}
+        >
+          {shown.map((t) => (
+            <SessionTeammate
+              key={t.id}
+              status={t.status}
+              title={t.title}
+              issue={t.issue}
+              time={
+                t.startedAt
+                  ? shortElapsed(
+                      t.startedAt,
+                      t.endedAt ?? (session.state === 'offline' ? t.startedAt : now),
+                    )
+                  : undefined
+              }
+              onSelect={() => onMate(t.id)}
+            />
+          ))}
+        </SessionTeammates>
+      ) : null}
+    </>
+  );
+}
+
 export default function App() {
   const { sessions, connected, deleted } = useSessions();
   const deletes = useDeletes();
@@ -238,8 +325,16 @@ export default function App() {
   const dockRef = useCmdlistMax();
   // What the composer suggests on `/`: the session's own commands, the built-ins until then.
   const slash = selected ? sessionSuggestions(selected, commands) : undefined;
-  const tasks = selected ? backgroundTasks(items, selected.state, selected.background) : [];
+  const tasks = selected
+    ? withoutTeammates(backgroundTasks(items, selected.state, selected.background))
+    : [];
   const running = runningCount(tasks);
+  // The selected session's teammates, from its conversation; the others' as the server said.
+  const team = selected ? sessionTeam(selected, items) : [];
+  const teamOf = (s: Session) => (s.id === selected?.id ? team : (s.team ?? []));
+  const liveMates = teamCounts(team).active;
+  // The teammate the Team tab shows, per session.
+  const [mates, setMates] = useState<Record<string, string>>({});
   const [tab, setTab] = useState('conversation');
   // The Changes tab needs the width, so the session list folds into a rail of state dots.
   const [listOpen, setListOpen] = useState(false);
@@ -251,7 +346,15 @@ export default function App() {
     pinned,
     sessionSort: sort,
     dismissedReviews: dismissed,
+    openTeams = [],
   } = usePrefs();
+  /** Opens a session's teammate in its Team tab. */
+  const openMate = (sessionId: string, mateId?: string) => {
+    setSelectedId(sessionId);
+    if (mateId) setMates((was) => ({ ...was, [sessionId]: mateId }));
+    setTab('team');
+    setListOpen(false);
+  };
   const railed = listFolded || (tab === 'changes' && !listOpen);
   const github = useGitHub();
   const prs = github?.state === 'reported' ? [...github.reviewRequested, ...github.mine] : [];
@@ -532,22 +635,33 @@ export default function App() {
                                 onDismiss={review.done ? () => dismiss([s.id]) : undefined}
                               />
                             ) : (
-                              <SessionRow
-                                state={s.state}
-                                title={s.title ?? UNTITLED}
-                                branch={s.branch}
-                                worktree={s.worktree}
-                                contextLeft={s.contextLeft}
-                                activity={activityOf(s, now)}
-                                time={timeOf(s, sort, now)}
-                                quiet={quietOf(s, now)}
-                                selected={s.id === selected?.id && !gone}
-                                removed={deleted.has(s.id) ? removedLine(s.machine) : undefined}
-                                pinned={g.id === PINNED_GROUP}
-                                onSelect={() => setSelectedId(s.id)}
-                                onPinChange={(on) =>
-                                  updatePrefs({ pinned: toggled(pinned, s.id, on) })
+                              <LeadRow
+                                session={s}
+                                team={teamOf(s)}
+                                open={openTeams.includes(s.id)}
+                                onOpenChange={(on) =>
+                                  updatePrefs({
+                                    openTeams: toggled(openTeams, s.id, on).slice(-MAX_PREF_ITEMS),
+                                  })
                                 }
+                                onMate={(id) => openMate(s.id, id)}
+                                now={now}
+                                row={{
+                                  state: s.state,
+                                  title: s.title ?? UNTITLED,
+                                  branch: s.branch,
+                                  worktree: s.worktree,
+                                  contextLeft: s.contextLeft,
+                                  activity: activityOf(s, now, teamOf(s)),
+                                  time: timeOf(s, sort, now),
+                                  quiet: quietOf(s, now),
+                                  selected: s.id === selected?.id && !gone,
+                                  removed: deleted.has(s.id) ? removedLine(s.machine) : undefined,
+                                  pinned: g.id === PINNED_GROUP,
+                                  onSelect: () => setSelectedId(s.id),
+                                  onPinChange: (on) =>
+                                    updatePrefs({ pinned: toggled(pinned, s.id, on) }),
+                                }}
                               />
                             )}
                           </ListItem>
@@ -626,8 +740,24 @@ export default function App() {
                 machine={selected.machine}
                 model={selected.model}
                 contextLeft={selected.contextLeft}
+                glance={
+                  <TeamGlance
+                    statuses={(() => {
+                      const { active, finished } = arrangeTeam(team);
+                      return [...active, ...finished].map((t) => t.status);
+                    })()}
+                    onClick={() => openMate(selected.id)}
+                  />
+                }
                 tabs={[
                   { id: 'conversation', label: 'Conversation' },
+                  {
+                    // Always there, so the tabs never shift; counted once a teammate is at work.
+                    id: 'team',
+                    label: 'Team',
+                    count: liveMates || undefined,
+                    countLabel: liveMates ? `${liveMates} active` : undefined,
+                  },
                   {
                     id: 'background',
                     label: 'Background',
@@ -657,6 +787,21 @@ export default function App() {
               </SessionHeader>
               {tab === 'background' ? (
                 <BackgroundView key={selected.id} sessionId={selected.id} tasks={tasks} />
+              ) : tab === 'team' ? (
+                <TeamTab
+                  key={selected.id}
+                  sessionId={selected.id}
+                  repo={selected.repo}
+                  team={team}
+                  items={items}
+                  prs={prs}
+                  selected={mates[selected.id]}
+                  onSelect={(id) => setMates((was) => ({ ...was, [selected.id]: id }))}
+                  onDraft={(text) => {
+                    setFill((was) => ({ text, seq: (was?.seq ?? 0) + 1 }));
+                    setTab('conversation');
+                  }}
+                />
               ) : tab === 'changes' ? (
                 <ChangesView
                   key={selected.id}

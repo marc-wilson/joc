@@ -16,6 +16,8 @@ export interface BackgroundTask {
   kind: 'shell' | 'subagent';
   /** The subagent's type, for subagents. */
   label?: string;
+  /** A teammate: a subagent, which the Team tab shows instead. */
+  teammate?: boolean;
   title: string;
   /** The command's first line, for shells. */
   command?: string;
@@ -95,6 +97,9 @@ function withListed(
 
 const AGENT_TYPES = ['subagent', 'teammate', 'agent', 'workflow'];
 
+/** Claude Code's list types that are teammates, for the Team tab. */
+const TEAMMATE_TYPES = ['subagent', 'teammate', 'agent'];
+
 const TYPE_LABELS: Record<string, string> = {
   monitor: 'Monitor',
   workflow: 'Workflow',
@@ -123,6 +128,7 @@ function fromList(t: RunningTask): Omit<BackgroundTask, 'status'> {
     taskId: t.id,
     kind: agent ? 'subagent' : 'shell',
     ...(label ? { label } : {}),
+    ...(TEAMMATE_TYPES.includes(t.type) ? { teammate: true } : {}),
     title,
     ...(command ? { command: firstLine(command) } : {}),
     ...(command?.includes('\n') ? { fullCommand: command } : {}),
@@ -174,7 +180,15 @@ function describe(
   call: Call,
 ): Pick<
   BackgroundTask,
-  'id' | 'kind' | 'label' | 'title' | 'command' | 'fullCommand' | 'prompt' | 'startedAt'
+  | 'id'
+  | 'kind'
+  | 'label'
+  | 'teammate'
+  | 'title'
+  | 'command'
+  | 'fullCommand'
+  | 'prompt'
+  | 'startedAt'
 > {
   const base = { id: call.toolUseId, startedAt: call.at };
   if (call.subagent) {
@@ -182,6 +196,7 @@ function describe(
       ...base,
       kind: 'subagent',
       label: call.subagent,
+      teammate: true,
       title: call.description ?? (call.summary || 'Subagent'),
       ...(call.prompt ? { prompt: call.prompt } : {}),
     };
@@ -238,6 +253,9 @@ export function elapsed(from: string, to: string | number): string {
   if (m < 60) return `${m}m ${s % 60}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
+
+/** The tasks the Background tab shows: everything but teammates, which have the Team tab. */
+export const withoutTeammates = (tasks: BackgroundTask[]) => tasks.filter((t) => !t.teammate);
 
 /** How many tasks run now. The Background tab, the session row and the header all count so. */
 export function runningCount(tasks: BackgroundTask[]): number {
