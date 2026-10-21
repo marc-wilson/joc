@@ -7,6 +7,7 @@ import { closeClient, getDb } from '@joc/db';
 import {
   Alert,
   AnswerRefused,
+  AuthStatus,
   ClaimedAnswer,
   ClaimedDeletes,
   ClaimedLaunch,
@@ -16,6 +17,7 @@ import {
   DeleteRefused,
   Deletion,
   Device,
+  GitHubConnection,
   GitHubSnapshot,
   HistorySession,
   ImageRef,
@@ -37,6 +39,7 @@ import { createApp } from './app.ts';
 import { bus, createBus } from './bus.ts';
 import { claimDeletes, DELETE_WAIT_MS, listDeletes, requestDeletes } from './deletes.ts';
 import type { GitHubAuth } from './github.ts';
+import { noteInstallations } from './github-events.ts';
 import {
   commentEvent,
   delivery,
@@ -133,6 +136,7 @@ test('every API route needs an owner', async () => {
     ['POST', '/api/sessions/s/prompts/p/handoff'],
     ['GET', '/api/history'],
     ['GET', '/api/github'],
+    ['GET', '/api/github/connection'],
     ['POST', '/api/github'],
     ['GET', '/api/problems'],
     ['GET', '/api/version'],
@@ -1782,4 +1786,68 @@ test('a GitHub webhook reaches only the people it concerns, and a forged one nob
   assert.equal((await as(tokens.get('alice'), '/api/github', stale)).status, 202);
   const after = await snapshot(tokens.get('alice'));
   assert.deepEqual(after.state === 'reported' && after.mine.map((p) => p.number), [42]);
+});
+
+test('where each person stands with the GitHub App is their own, and shown only to them', async () => {
+  const webhooks = createWebhooks('isolation-connection-secret', {});
+  const hooked = createApp({
+    github,
+    publicUrl: 'http://joc.test',
+    pluginVersion: '1.0.0',
+    webhooks,
+    appSlug: 'joc-dashboard',
+  });
+  const seen = {
+    id: 88,
+    account: { id: 9100, login: 'harbor-labs-ops', type: 'Organization' },
+    selection: 'all',
+    suspended: false,
+  };
+  // Erin signed in through the App, which is installed on her org; Frank signed in through it
+  // with nothing installed; Gus signed in before the App.
+  const erin = await signInGitHubUser({
+    id: 11,
+    login: 'erin',
+    viaApp: true,
+    installations: [88],
+    seen: [seen],
+  });
+  await noteInstallations([seen]);
+  const frank = await signInGitHubUser({ id: 12, login: 'frank', viaApp: true, installations: [] });
+  const gus = await signInGitHubUser({ id: 13, login: 'gus' });
+  const sessionOf = async (owner: Owner) => `joc_session=${await createWebSession(owner)}`;
+  const as = (cookie: string, path: string) => hooked.request(path, { headers: { cookie } });
+  const [e, f, g] = await Promise.all([sessionOf(erin), sessionOf(frank), sessionOf(gus)]);
+
+  const stateOf = async (cookie: string) =>
+    (await read(await as(cookie, '/api/auth'), AuthStatus)).github;
+  assert.equal(await stateOf(e), 'covered');
+  assert.equal(await stateOf(f), 'install');
+  assert.equal(await stateOf(g), 'reconnect');
+
+  const erinView = await read(await as(e, '/api/github/connection'), GitHubConnection);
+  assert.deepEqual(
+    erinView.accounts.map((a) => [a.login, a.manageUrl]),
+    [
+      [
+        'harbor-labs-ops',
+        'https://github.com/organizations/harbor-labs-ops/settings/installations/88',
+      ],
+    ],
+  );
+  assert.equal(erinView.installUrl, 'https://github.com/apps/joc-dashboard/installations/new');
+  // Nobody else sees the accounts Erin reaches.
+  for (const other of [f, g]) {
+    const view = await read(await as(other, '/api/github/connection'), GitHubConnection);
+    assert.deepEqual(view.accounts, []);
+  }
+  // A machine's token isn't a person.
+  const erinToken = await createDeviceToken(erin, 'erin-laptop');
+  const byMachine = await hooked.request('/api/github/connection', {
+    headers: { authorization: `Bearer ${erinToken}` },
+  });
+  assert.equal(byMachine.status, 403);
+  // Without the App, there's nothing to reconnect.
+  const plain = await read(await app.request('/api/auth', { headers: { cookie: g } }), AuthStatus);
+  assert.equal(plain.github, 'off');
 });

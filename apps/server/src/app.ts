@@ -19,7 +19,10 @@ import {
   DeviceApproveRequest,
   DeviceStartRequest,
   DeviceTokenRequest,
+  type GitHubConnection,
+  type GitHubConnectionState,
   GitHubReport,
+  type GitHubSignInNote,
   ImageId,
   LaunchRequest,
   LaunchResult,
@@ -56,23 +59,35 @@ import {
   safeReturnPath,
   sameOrigin,
   sessionSecret,
+  setInstallReturn,
   setOAuthCookies,
   setSessionCookie,
+  takeInstallReturn,
   takeOAuthCookies,
+  withNote,
 } from './auth.ts';
 import { type Bus, bus as processBus } from './bus.ts';
 import { getChanges, saveChanges } from './changes.ts';
 import { getCommands, saveCommands } from './commands.ts';
 import { claimDeletes, finishDelete, isDeleted, listDeletes, requestDeletes } from './deletes.ts';
 import type { GitHubAuth } from './github.ts';
+import type { GitHubAppAbout } from './github-app.ts';
 import { getGitHub, saveGitHub } from './github-data.ts';
-import { backfillOwner, isCovered } from './github-events.ts';
+import {
+  backfillOwner,
+  forgetOwnerCoverage,
+  installationAccounts,
+  isCovered,
+  noteInstallations,
+} from './github-events.ts';
 import { firstDelivery, verifySignature, type Webhooks } from './github-webhook.ts';
 import {
   approveLink,
   createWebSession,
   endWebSession,
+  type GitHubPerson,
   getUser,
+  githubPerson,
   listDevices,
   pendingLink,
   pollLink,
@@ -135,6 +150,8 @@ export interface AppOptions {
   bus?: Bus;
   /** The JOC GitHub App's webhooks. Without them, GitHub data comes from each machine's plugin. */
   webhooks?: Webhooks;
+  /** The App's slug, when the server can't read it from GitHub (no App id and key). */
+  appSlug?: string;
 }
 
 /** How a request proved who it is: a browser session, a machine's token, or open local dev. */
@@ -154,6 +171,7 @@ export function createApp({
   shutdown = new AbortController().signal,
   bus = processBus,
   webhooks,
+  appSlug,
 }: AppOptions): Hono<Env> {
   const app = new Hono<Env>();
 
@@ -210,21 +228,67 @@ export function createApp({
     return c.redirect(github.authorizeUrl(state));
   });
 
+  /**
+   * Where the person stands with the App: signed in before it (no record of an App sign-in) is
+   * `reconnect`, whatever webhooks may have granted since, as JOC hasn't seen their own
+   * installations.
+   */
+  async function connectionState(
+    owner: Owner,
+    me: GitHubPerson | undefined,
+  ): Promise<GitHubConnectionState> {
+    if (!github || !webhooks) return 'off';
+    if (!me?.appSignInAt) return 'reconnect';
+    return (await isCovered(owner)) ? 'covered' : 'install';
+  }
+
+  /** The App's slug and name: read from GitHub with its JWT (once), or the configured slug. */
+  async function appAbout(): Promise<GitHubAppAbout | undefined> {
+    // GitHub unreachable: fall back to the configured slug below.
+    const read = await webhooks?.context.api?.about().catch(() => undefined);
+    return read ?? (appSlug ? { slug: appSlug, name: appSlug } : undefined);
+  }
+
+  // Off to GitHub to install the App, remembering the page to come back to: GitHub returns to
+  // the callback, without a state of ours, once it's installed (or requested).
+  app.get('/auth/github/install', async (c) => {
+    const about = github && webhooks ? await appAbout() : undefined;
+    const returnTo = safeReturnPath(c.req.query('return'));
+    if (!about) return c.redirect(withNote(returnTo, 'failed'));
+    setInstallReturn(c, returnTo);
+    return c.redirect(`https://github.com/apps/${about.slug}/installations/new`);
+  });
+
   app.get('/auth/github/callback', async (c) => {
     if (!github) return c.redirect('/');
-    const { state, returnTo } = takeOAuthCookies(c);
-    const code = c.req.query('code');
+    const query = (name: string) => c.req.query(name);
     // Back from installing the App, which authorizes without a state of ours: sign in afresh,
-    // which GitHub answers at once for someone who just authorized.
-    if (!state && c.req.query('setup_action')) return c.redirect('/auth/github');
-    // The state ties the callback to a sign-in this browser started: no forged callbacks.
-    if (!code || !state || !secretsEqual(c.req.query('state'), state)) {
-      return c.text('Sign-in expired or was started elsewhere. Try again.', 400);
+    // which GitHub answers at once for someone who just authorized, and which reads the new
+    // installation. Its code is never taken: without our state it could be anyone's.
+    const setup = query('setup_action');
+    if (setup && !query('state')) {
+      const back = takeInstallReturn(c);
+      const target = setup === 'request' ? withNote(back, 'requested') : back;
+      return c.redirect(`/auth/github?return=${encodeURIComponent(target)}`);
     }
+    const { state, returnTo } = takeOAuthCookies(c);
+    const code = query('code');
+    // Anything short of a sign-in goes back to the page it started from, saying why. A session
+    // the browser already has is kept, so a failed reconnect never signs anyone out.
+    const back = (note: GitHubSignInNote) => c.redirect(withNote(returnTo, note));
+    // The state ties the callback to a sign-in this browser started: no forged callbacks.
+    const ours = !!state && secretsEqual(query('state'), state);
+    if (ours && query('error') === 'access_denied') return back('denied');
+    if (!code || !ours) return back('expired');
     const profile = await github.profileFor(code);
-    if (!profile) return c.text('GitHub sign-in failed. Try again.', 400);
+    if (!profile) return back('failed');
     const owner = await signInGitHubUser(profile);
+    if (profile.seen) await noteInstallations(profile.seen);
+    forgetOwnerCoverage(owner);
+    // The new session replaces the one this browser had, if any.
+    const previous = sessionSecret(c);
     setSessionCookie(c, await createWebSession(owner));
+    if (previous) await endWebSession(previous);
     // Their pull requests, read once through the App; webhooks keep them current after.
     if (webhooks) {
       const { context } = webhooks;
@@ -275,7 +339,10 @@ export function createApp({
   app.get('/api/auth', async (c) => {
     const who = await identify(c);
     const user = who && who.via !== 'open' ? await getUser(who.owner) : undefined;
-    return c.json({ required: !!github, signedIn: !!who, user } satisfies AuthStatus);
+    const signedIn = { required: !!github, signedIn: !!who, user };
+    if (!who) return c.json(signedIn satisfies AuthStatus);
+    const state = await connectionState(who.owner, await githubPerson(who.owner));
+    return c.json({ ...signedIn, github: state } satisfies AuthStatus);
   });
 
   app.get('/api/version', (c) => c.json({ plugin: pluginVersion, build } satisfies ServerVersion));
@@ -435,6 +502,32 @@ export function createApp({
   });
 
   app.get('/api/github', async (c) => c.json(await getGitHub(c.get('owner'))));
+
+  // How the person's GitHub reaches JOC, and what's left to do: reconnect, or install the App.
+  app.get('/api/github/connection', async (c) => {
+    if (!person(c)) return c.json({ error: 'Forbidden' }, 403);
+    const owner = c.get('owner');
+    if (!github || !webhooks)
+      return c.json({ state: 'off', accounts: [] } satisfies GitHubConnection);
+    const [me, about] = await Promise.all([githubPerson(owner), appAbout()]);
+    const reached = await installationAccounts(me?.installations ?? []);
+    const state = await connectionState(owner, me);
+    return c.json({
+      state,
+      appName: about?.name,
+      signedInAt: me?.appSignInAt?.toISOString(),
+      accounts: reached.map(({ id, account, suspended }) => ({
+        login: account.login,
+        type: account.type,
+        suspended,
+        manageUrl:
+          account.type === 'Organization'
+            ? `https://github.com/organizations/${encodeURIComponent(account.login)}/settings/installations/${id}`
+            : `https://github.com/settings/installations/${id}`,
+      })),
+      installUrl: about ? `https://github.com/apps/${about.slug}/installations/new` : undefined,
+    } satisfies GitHubConnection);
+  });
 
   // GitHub's notifications inbox is gone (mentions and comments are alerts now). Plugins before
   // 0.13.0 still send it and ask for threads to mark read: answered, and nothing kept.

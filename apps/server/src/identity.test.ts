@@ -78,21 +78,59 @@ test('sign-in rejects a callback this browser did not start', async () => {
       headers: { cookie: `joc_oauth_state=${state}` },
     },
   );
-  assert.equal(forged.status, 400);
+  // Back to the page, saying why, with no session.
+  assert.equal(forged.status, 302);
+  assert.equal(forged.headers.get('location'), '/?github=expired');
   assert.equal(cookie(forged, 'joc_session'), undefined);
   const noCookie = await app.request(
     `http://joc.test/auth/github/callback?code=carol-code&state=${state}`,
   );
-  assert.equal(noCookie.status, 400);
+  assert.equal(noCookie.headers.get('location'), '/?github=expired');
+  assert.equal(cookie(noCookie, 'joc_session'), undefined);
 });
 
 test('sign-in rejects a code GitHub refuses', async () => {
   const start = await app.request('http://joc.test/auth/github');
   const state = cookie(start, 'joc_oauth_state');
   const res = await app.request(`http://joc.test/auth/github/callback?code=bad&state=${state}`, {
-    headers: { cookie: `joc_oauth_state=${state}` },
+    headers: { cookie: `joc_oauth_state=${state}; joc_return=%2Flink%3Fcode%3DAB` },
   });
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), '/link?code=AB&github=failed');
+  assert.equal(cookie(res, 'joc_session'), undefined);
+});
+
+test('a failed sign-in keeps the session the browser had, and a new one replaces it', async () => {
+  const session = await signIn('carol-code');
+  const start = await app.request('http://joc.test/auth/github');
+  const state = cookie(start, 'joc_oauth_state');
+  const failed = await app.request(`http://joc.test/auth/github/callback?code=bad&state=${state}`, {
+    headers: { cookie: `joc_oauth_state=${state}; ${session}` },
+  });
+  assert.equal(failed.headers.get('location'), '/?github=failed');
+  const still = await json(
+    await app.request('/api/auth', { headers: { cookie: session } }),
+    AuthStatus,
+  );
+  assert.equal(still.signedIn, true);
+  const denied = await app.request(
+    `http://joc.test/auth/github/callback?error=access_denied&state=${state}`,
+    { headers: { cookie: `joc_oauth_state=${state}; ${session}` } },
+  );
+  assert.equal(denied.headers.get('location'), '/?github=denied');
+
+  const again = await app.request('http://joc.test/auth/github');
+  const next = cookie(again, 'joc_oauth_state');
+  const replaced = await app.request(
+    `http://joc.test/auth/github/callback?code=carol-code&state=${next}`,
+    { headers: { cookie: `joc_oauth_state=${next}; ${session}` } },
+  );
+  assert.ok(cookie(replaced, 'joc_session'));
+  const old = await json(
+    await app.request('/api/auth', { headers: { cookie: session } }),
+    AuthStatus,
+  );
+  assert.equal(old.signedIn, false);
 });
 
 test('a signed-in browser knows who it is, and an unsafe return path goes home', async () => {

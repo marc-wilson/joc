@@ -4,7 +4,8 @@
 //
 // Two stores here belong to an installation, not to an owner: `github_installations` (who
 // installed the App, on which repos) and `github_pulls` (the pull requests those repos' events
-// describe). No route ever reads them. They exist only to work out whom an event concerns: the
+// describe). The only route that reads them is a person's own connection, and only the accounts
+// of the installations that person reaches. They exist to work out whom an event concerns: the
 // pull request's author, its requested reviewers (people, and the members of requested teams),
 // and the people a comment mentions. Each of them who uses JOC and reaches the installation
 // gets their lists rebuilt from their own pull requests, stored under their owner id, and a
@@ -29,6 +30,7 @@ import {
   peopleOfInstallation,
   peopleOnGitHub,
   revokeInstallation,
+  type SeenInstallation,
 } from './identity.ts';
 import type { Owner } from './owner.ts';
 
@@ -165,6 +167,45 @@ export async function isCovered(owner: Owner): Promise<boolean> {
 }
 
 const forgetCoverage = () => covered.clear();
+
+/** Asks afresh next time: the owner just signed in, so what they reach may have changed. */
+export const forgetOwnerCoverage = (owner: Owner) => covered.delete(owner);
+
+/**
+ * Installations a person's sign-in saw, kept for any JOC hasn't heard of yet: one installed just
+ * before the sign-in, whose webhook may still be on its way, or one from before the webhook was
+ * set up. What a webhook said is never overwritten.
+ */
+export async function noteInstallations(seen: SeenInstallation[]) {
+  if (!seen.length) return;
+  await ensureIndexes();
+  for (const i of seen) {
+    await installations().updateOne(
+      { _id: i.id },
+      {
+        $setOnInsert: {
+          account: i.account,
+          selection: i.selection,
+          repos: [],
+          suspended: i.suspended,
+          updatedAt: new Date(),
+        },
+      },
+      { upsert: true },
+    );
+  }
+  forgetCoverage();
+}
+
+/** The accounts of these installations (the ones a person reaches), for their own eyes only. */
+export async function installationAccounts(ids: number[]) {
+  if (!ids.length) return [];
+  const docs = await installations()
+    .find({ _id: { $in: ids } })
+    .sort({ 'account.login': 1 })
+    .toArray();
+  return docs.map((d) => ({ id: d._id, account: d.account, suspended: d.suspended }));
+}
 
 // ── Turning the stores into each owner's lists ──────────────────────────────
 
@@ -835,7 +876,7 @@ export async function backfill(ctx: Context, person: GitHubPerson, ids = person.
 
 /** After a sign-in: the owner's lists, read once, if the App covers them. */
 export async function backfillOwner(ctx: Context, owner: Owner) {
-  covered.delete(owner);
+  forgetOwnerCoverage(owner);
   if (!(await isCovered(owner))) return;
   const person = await githubPerson(owner);
   if (person) await backfill(ctx, person);
