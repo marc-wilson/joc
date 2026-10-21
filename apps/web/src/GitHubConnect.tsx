@@ -1,7 +1,7 @@
-import type { GitHubSignInNote } from '@joc/protocol';
+import { GitHubConnection, type GitHubSignInNote } from '@joc/protocol';
 import { Banner, Button } from '@joc/ui';
-import { useState } from 'react';
-import { reconnect, signInNote, useAuth } from './auth.ts';
+import { useEffect, useState } from 'react';
+import { apiFetch, installApp, reconnect, signInNote, useAuth } from './auth.ts';
 
 // The app-wide notice that the person's GitHub doesn't reach JOC live yet, and how a GitHub
 // sign-in that didn't finish came back. Dismissing hides it in this tab only: it's back next
@@ -33,12 +33,39 @@ export const NOTE_TEXT: Record<GitHubSignInNote, string> = {
   requested: 'Install requested. An owner of the org needs to approve it on GitHub.',
 };
 
+/** The App's name, for copy; GitHub's own when the server knows it. */
+export const appNameOf = (c: GitHubConnection | undefined) => c?.appName ?? 'the JOC GitHub App';
+
+/** Where the person stands with the App, and the accounts it covers; asked while `ask` holds. */
+export function useGitHubConnection(ask = true): GitHubConnection | undefined {
+  const [connection, setConnection] = useState<GitHubConnection>();
+  useEffect(() => {
+    if (!ask) return;
+    let live = true;
+    void apiFetch('/api/github/connection')
+      .then((res) => res.json())
+      .then((body) => {
+        const parsed = GitHubConnection.safeParse(body);
+        if (live && parsed.success) setConnection(parsed.data);
+      })
+      // Unreachable: nothing more to say until the next page.
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [ask]);
+  return connection;
+}
+
+export const UNTIL_COVERED = 'Until then, JOC reads GitHub from your machine every minute.';
+
 /** Under the nav bar on every page. */
 export function GitHubConnect() {
   const auth = useAuth();
   const [dismissed, setDismissed] = useState(dismissedHere);
   const [noteShown, setNoteShown] = useState(!!signInNote);
   const github = auth.status === 'signedIn' ? auth.github : undefined;
+  const connection = useGitHubConnection(github === 'install');
 
   const dismiss = (what: string) => {
     dismissHere(what);
@@ -72,7 +99,26 @@ export function GitHubConnect() {
           }
           onDismiss={() => dismiss('reconnect')}
         >
-          <span>Until then, JOC reads GitHub from your machine every minute.</span>
+          <span>{UNTIL_COVERED}</span>
+        </Banner>
+      ) : null}
+      {github === 'install' && dismissed !== 'install' ? (
+        <Banner
+          title={`Install ${appNameOf(connection)} on your account or org to get live GitHub updates.`}
+          icon="plug"
+          actions={
+            <>
+              <Button variant="ghost" size="sm" onClick={reconnect}>
+                Check again
+              </Button>
+              <Button variant="secondary" size="sm" onClick={installApp}>
+                Install
+              </Button>
+            </>
+          }
+          onDismiss={() => dismiss('install')}
+        >
+          <span>{UNTIL_COVERED}</span>
         </Banner>
       ) : null}
     </>
