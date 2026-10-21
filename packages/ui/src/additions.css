@@ -956,3 +956,22 @@ ol.joc-pr-progress { margin: 0; padding: 0; list-style: none; }
 :root, [data-theme="dark"] { color-scheme: dark; }
 [data-theme="light"] { color-scheme: light; }
 /* ===== End Theme and narrow layouts (#91) ================================================= */
+
+/* ===== Theme and narrow layouts (#91) ===================================================== */
+/* The browser's own parts (scrollbars, form controls) follow the theme set on the root. */
+:root, [data-theme="dark"] { color-scheme: dark; }
+[data-theme="light"] { color-scheme: light; }
+
+/* Nav bar: one line at every width. Narrower than 720px its links fold into the Pages menu
+   (.joc-nav__pages), which names the page you're on; the right-hand cluster stays. */
+.joc-nav { flex-wrap: nowrap; min-width: 0; flex-shrink: 0; }
+.joc-nav__brand { flex: none; }
+.joc-nav__pages { display: none; }
+.joc-nav__pages .joc-menu__list { left: 0; right: auto; }
+.joc-nav__right { flex: none; }
+@media (max-width: 719px) {
+  .joc-nav { gap: var(--space-3); padding: 0 var(--space-3) 0 var(--space-4); }
+  .joc-nav__links { display: none; }
+  .joc-nav__pages { display: inline-flex; min-width: 0; }
+}
+/* ===== End Theme and narrow layouts (#91) ================================================= */
