@@ -242,7 +242,8 @@ export function SettingsPage() {
   const withApp = auth.status === 'signedIn' && !!auth.github && auth.github !== 'off';
   const sections = withApp ? [...SECTIONS, GITHUB_SECTION] : SECTIONS;
   const [current, setCurrent] = useState(() => location.hash.slice(1) || 'sessions');
-  const [status, setStatus] = useState<SaveStatus>();
+  // What's shown is what's saved, so the mark says so at rest too, as the design has it.
+  const [status, setStatus] = useState<SaveStatus>('saved');
   const track: Track = (saving) => {
     setStatus('saving');
     void saving.then((ok) => setStatus(ok ? 'saved' : 'failed'));
