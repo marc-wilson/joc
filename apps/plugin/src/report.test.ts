@@ -34,6 +34,15 @@ test('tool calls describe what they touch', () => {
     'pnpm test',
   );
   assert.equal(describeTool({ ...base, tool_name: 'TodoWrite' }), 'TodoWrite');
+  // Reading a background shell's output names the shell, by its task id.
+  assert.equal(
+    describeTool({ ...base, tool_name: 'TaskOutput', tool_input: { task_id: 'b2', block: false } }),
+    'TaskOutput b2',
+  );
+  assert.equal(
+    describeTool({ ...base, tool_name: 'BashOutput', tool_input: { bash_id: 'b3' } }),
+    'BashOutput b3',
+  );
 });
 
 test('a permission request needs you', () => {

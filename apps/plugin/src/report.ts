@@ -120,12 +120,19 @@ export function toolLabel(name: string | undefined): string {
   return mcp ? `${mcp[1]} · ${mcp[2]}` : (name ?? 'Tool');
 }
 
+/** Claude Code's tools that read a background shell's output so far. */
+const OUTPUT_READS = new Set(['TaskOutput', 'BashOutput']);
+
 /** What a tool call touches, without the tool's name: "src/auth.ts", "pnpm test". */
 export function toolTarget(input: HookInput): string {
   const args = input.tool_input ?? {};
   const str = (key: string) => (typeof args[key] === 'string' ? (args[key] as string) : undefined);
   const path = str('file_path') ?? str('notebook_path');
   if (input.tool_name === 'Bash') return firstLine(str('command')) ?? '';
+  // Reading a background shell's output so far: which one, so the dashboard can show it there.
+  if (OUTPUT_READS.has(input.tool_name ?? '')) {
+    return str('task_id') ?? str('bash_id') ?? str('shell_id') ?? '';
+  }
   if (path) return relative(input.cwd, path) || path;
   return firstLine(str('pattern') ?? str('url') ?? str('query') ?? str('description'), 100) ?? '';
 }
