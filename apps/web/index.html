@@ -5,6 +5,23 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>JOC</title>
+    <script>
+      // The theme before anything draws: the choice this browser last saw (theme.ts keeps it),
+      // or the system's. The person's pref from the server takes over once it's read.
+      (() => {
+        let choice;
+        try {
+          choice = localStorage.getItem('joc.theme');
+        } catch {
+          // Storage blocked: fall back to the system theme below.
+        }
+        if (choice !== 'light' && choice !== 'dark') {
+          const light = window.matchMedia?.('(prefers-color-scheme: light)').matches;
+          choice = light ? 'light' : 'dark';
+        }
+        document.documentElement.setAttribute('data-theme', choice);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

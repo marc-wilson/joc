@@ -145,16 +145,19 @@ export function usePrefsSync() {
   }, []);
 }
 
-const onChange = (listener: () => void) => {
+/** Calls `listener` on every change to the prefs; returns its unsubscribe. */
+export const onPrefsChange = (listener: () => void) => {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 };
 
 /** The current prefs, outside React. */
 export const currentPrefs = () => prefs;
 
 export function usePrefs(): Prefs {
-  return useSyncExternalStore(onChange, currentPrefs);
+  return useSyncExternalStore(onPrefsChange, currentPrefs);
 }
 
 const NO_SESSION_PREFS: Omit<SessionPrefs, 'id' | 'at'> = {

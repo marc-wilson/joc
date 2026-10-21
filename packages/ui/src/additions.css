@@ -950,3 +950,9 @@ ol.joc-pr-progress { margin: 0; padding: 0; list-style: none; }
 .joc-pr-scroll { flex: 1; min-height: 0; overflow: auto; }
 .joc-verdict-row { padding: var(--space-2) 0; }
 /* ===== End PR review session (#88) ======================================================= */
+
+/* ===== Theme and narrow layouts (#91) ===================================================== */
+/* The browser's own parts (scrollbars, form controls) follow the theme set on the root. */
+:root, [data-theme="dark"] { color-scheme: dark; }
+[data-theme="light"] { color-scheme: light; }
+/* ===== End Theme and narrow layouts (#91) ================================================= */

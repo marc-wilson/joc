@@ -1,4 +1,4 @@
-import { DropAfter, type SessionSettings, STANDARD_REVIEW } from '@joc/protocol';
+import { DropAfter, type SessionSettings, STANDARD_REVIEW, Theme } from '@joc/protocol';
 import {
   Button,
   type SaveStatus,
@@ -17,12 +17,14 @@ import { appNameOf, UNTIL_COVERED, useGitHubConnection } from './GitHubConnect.t
 import { useReviewSettings, useSessionSettings, useSessions } from './hooks.ts';
 import { Nav } from './Nav.tsx';
 import { NotificationSettingsForm, resetNotificationSettings } from './NotificationSettings.tsx';
+import { updatePrefs, usePrefs } from './prefs.ts';
 import { DROP_AFTER_OPTIONS } from './session-list.ts';
 
 const SECTIONS = [
   { id: 'sessions', label: 'Session list' },
   { id: 'review', label: 'Review instructions' },
   { id: 'notifications', label: 'Notifications' },
+  { id: 'appearance', label: 'Appearance' },
 ];
 const GITHUB_SECTION = { id: 'github', label: 'GitHub' };
 
@@ -129,6 +131,30 @@ function SessionList({ track }: { track: Track }) {
       </SettingRow>
       <SettingRow label="Pinned sessions" hint="Stay until you unpin them." />
     </>
+  );
+}
+
+const THEME_OPTIONS = [
+  { id: 'system', label: 'System' },
+  { id: 'light', label: 'Light' },
+  { id: 'dark', label: 'Dark' },
+];
+
+/** Light, dark, or as the system is; the page changes at once. */
+function Appearance() {
+  const { theme } = usePrefs();
+  return (
+    <SettingRow label="Theme" hint="System follows your computer's light or dark appearance.">
+      <SegmentedControl
+        label="Theme"
+        options={THEME_OPTIONS}
+        value={theme}
+        onChange={(id) => {
+          const parsed = Theme.safeParse(id);
+          if (parsed.success) updatePrefs({ theme: parsed.data });
+        }}
+      />
+    </SettingRow>
   );
 }
 
@@ -256,6 +282,13 @@ export function SettingsPage() {
             }
           >
             <NotificationSettingsForm />
+          </SettingsSection>
+          <SettingsSection
+            id="appearance"
+            title="Appearance"
+            description="How JOC looks in every browser you use."
+          >
+            <Appearance />
           </SettingsSection>
           {withApp ? (
             <SettingsSection
