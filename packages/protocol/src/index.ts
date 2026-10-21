@@ -644,6 +644,39 @@ export const ClaimedPrompt = z.object({
 });
 export type ClaimedPrompt = z.infer<typeof ClaimedPrompt>;
 
+/**
+ * Where a prompt sent from the dashboard stands, until the session's transcript has it:
+ * - `waiting`: still in JOC, for the session's plugin to take. It can be cancelled.
+ * - `claimed`: the plugin took it and is handing it to Claude Code.
+ * - `queued`: Claude Code has it; it runs once the session is idle. A plugin before 0.12.1
+ *   never says so, so a prompt it took counts as queued from the claim.
+ * - `failed`: Claude Code didn't take it, `reason` says why.
+ */
+export const PromptPhase = z.enum(['waiting', 'claimed', 'queued', 'failed']);
+export type PromptPhase = z.infer<typeof PromptPhase>;
+
+export const PromptStatus = z.object({
+  id: z.string(),
+  phase: PromptPhase,
+  /** Why it failed, short and lower case: "claude code refused it". */
+  reason: z.string().optional(),
+});
+export type PromptStatus = z.infer<typeof PromptStatus>;
+
+/** `GET /api/sessions/:id/prompts`: the session's recent prompts from the dashboard, oldest first. */
+export const SessionPrompts = z.object({ prompts: z.array(PromptStatus) });
+export type SessionPrompts = z.infer<typeof SessionPrompts>;
+
+/**
+ * `POST /api/sessions/:id/prompts/:prompt/handoff`, from the plugin: whether Claude Code took the
+ * prompt it claimed (queued it, or started its turn).
+ */
+export const PromptHandoff = z.object({
+  ok: z.boolean(),
+  reason: z.string().max(200).optional(),
+});
+export type PromptHandoff = z.infer<typeof PromptHandoff>;
+
 // Starting a new Claude Code session from the dashboard, such as one that reviews a pull
 // request. Nothing reaches into the machine: a session already running on the repo takes the
 // launch on its next poll and starts `claude --bg` in its own folder. The new session is a real
@@ -908,6 +941,8 @@ export type StreamEvent =
   | { type: 'deleted'; sessionId: string }
   /** A resume was asked for or changed; fetch them from `/api/resumes`. */
   | { type: 'resumes' }
+  /** A prompt from the dashboard moved on; fetch them from `/api/sessions/:id/prompts`. */
+  | { type: 'prompts'; sessionId: string }
   /** The person's preferences changed, maybe in another tab. */
   | { type: 'prefs'; prefs: Prefs };
 
