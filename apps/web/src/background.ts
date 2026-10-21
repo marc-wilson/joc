@@ -23,6 +23,10 @@ export interface BackgroundTask {
   command?: string;
   /** The whole command, for shells, when it runs past one line. */
   fullCommand?: string;
+  /** What Claude said a shell is for, when it said: "Run the tests". */
+  purpose?: string;
+  /** A running shell's latest line of output, from the last time Claude read it. */
+  live?: string;
   /** What it was asked, for subagents. */
   prompt?: string;
   /** Its final report, for subagents; or why it failed to start. */
@@ -47,7 +51,16 @@ const firstLine = (text: string) =>
     .map((l) => l.trim())
     .find(Boolean);
 
+const lastLine = (text: string) =>
+  text
+    .split('\n')
+    .map((l) => l.trim())
+    .findLast(Boolean);
+
 const STOPPED = /Successfully stopped task: ([\w-]+)/;
+
+/** Claude Code's tools that read a background shell's output so far; their target is its id. */
+const OUTPUT_READS = ['TaskOutput', 'BashOutput'];
 
 /**
  * The session's background work, in the order it started. A subagent that blocks the turn ends
@@ -133,8 +146,25 @@ function fromList(t: RunningTask): Omit<BackgroundTask, 'status'> {
     ...(command ? { command: firstLine(command) } : {}),
     ...(command?.includes('\n') ? { fullCommand: command } : {}),
     ...(agent && t.description ? { prompt: t.description } : {}),
+    ...(t.type === 'shell' && t.description ? { purpose: firstLine(t.description) } : {}),
   };
 }
+
+/**
+ * What a task's row says: a shell is titled by its command, as the design draws it, and its
+ * second line is the latest output Claude read while it runs (else what it's for), then how it
+ * ended. Others keep their title, and say what they do or how they ended.
+ */
+export function taskRowText(t: BackgroundTask): { title: string; command?: string; line?: string } {
+  const running = t.status === 'running';
+  if (t.kind === 'shell' && t.command) {
+    return { title: t.command, line: running ? (t.live ?? t.purpose) : t.tail };
+  }
+  return { title: t.title, command: t.command, line: running ? undefined : t.tail };
+}
+
+/** How many lines a task printed, as JOC has them. */
+export const lineCount = (text: string) => text.replace(/\n$/, '').split('\n').length;
 
 function fromTranscript(items: ConversationItem[], sessionState: SessionState): BackgroundTask[] {
   const results = new Map<string, Result>();
@@ -162,15 +192,27 @@ function fromTranscript(items: ConversationItem[], sessionState: SessionState): 
     }
   }
 
+  // What Claude last read of each running shell's output (TaskOutput, BashOutput), by task id.
+  const read = new Map<string, string>();
+  for (const i of items) {
+    if (i.kind !== 'tool_call' || !OUTPUT_READS.includes(i.name) || !i.summary) continue;
+    // Its answer may wrap the output in tags (<status>, <output>): only the text counts.
+    const line = lastLine((results.get(i.toolUseId)?.text ?? '').replace(/<\/?[\w-]+>/g, ''));
+    if (line) read.set(i.summary, plain(line));
+  }
+
   const tasks: BackgroundTask[] = [];
   for (const call of items) {
     if (call.kind !== 'tool_call') continue;
     const result = results.get(call.toolUseId);
     if (!call.subagent && !call.background && !result?.taskId) continue;
+    const ended = outcome(call, result, updates, sessionState);
+    const live = ended.status === 'running' && result?.taskId ? read.get(result.taskId) : undefined;
     tasks.push({
       ...describe(call),
       ...(result?.taskId ? { taskId: result.taskId } : {}),
-      ...outcome(call, result, updates, sessionState),
+      ...(live ? { live } : {}),
+      ...ended,
     });
   }
   return tasks;
@@ -187,6 +229,7 @@ function describe(
   | 'title'
   | 'command'
   | 'fullCommand'
+  | 'purpose'
   | 'prompt'
   | 'startedAt'
 > {
@@ -207,6 +250,7 @@ function describe(
     title: call.description ?? 'Background command',
     command: call.summary || undefined,
     ...(call.command ? { fullCommand: call.command } : {}),
+    ...(call.description ? { purpose: call.description } : {}),
   };
 }
 
