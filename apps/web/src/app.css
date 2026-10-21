@@ -682,6 +682,39 @@
   color: var(--text-tertiary);
 }
 
+/* A menu whose button is a picture, such as the account menu's avatar. */
+.joc-menu__face {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+}
+
+.joc-menu__face:hover .joc-avatar,
+.joc-menu__face[aria-expanded="true"] .joc-avatar {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.joc-menu__header {
+  padding: var(--space-2);
+  margin-bottom: var(--space-1);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.joc-menu__login {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
 .joc-cbox {
   position: relative;
   display: inline-flex;
