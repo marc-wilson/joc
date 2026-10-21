@@ -332,8 +332,30 @@ export const PullRequestCheck = z.object({
   status: CIStatus,
   /** How long it ran, once it finished. */
   seconds: z.number().int().nonnegative().optional(),
+  /**
+   * A few words on how it went, as the check says: a check run's output title (else its summary's
+   * first line), a commit status's description. Cut to MAX_CHECK_DETAIL characters.
+   */
+  detail: z.string().max(200).optional(),
 });
 export type PullRequestCheck = z.infer<typeof PullRequestCheck>;
+
+/** The longest check detail a pull request carries. */
+export const MAX_CHECK_DETAIL = 200;
+
+/** A check's detail from what it says, one line and bounded; undefined when it says nothing. */
+export function checkDetail(...said: (string | null | undefined)[]): string | undefined {
+  for (const text of said) {
+    // A summary is Markdown: a heading's or list item's marks aren't words.
+    const line = text
+      ?.split('\n')
+      .map((l) => l.replace(/^[\s#>*-]+/, '').trim())
+      .find(Boolean);
+    if (line)
+      return line.length > MAX_CHECK_DETAIL ? `${line.slice(0, MAX_CHECK_DETAIL - 1)}…` : line;
+  }
+  return undefined;
+}
 
 // What a review needs to know about its pull request, beyond what the lists show. Every field
 // is optional: older plugins, and data kept before they existed, leave them out.

@@ -210,6 +210,27 @@ test('failed CI alerts the author; passing again resolves it', async () => {
   assert.equal((await lists('alice')).mine[0]?.ci, 'pass');
 });
 
+test("a check's detail line comes from its output: the title, else the summary's first line", async () => {
+  const output = (title: string | null, summary: string | null) => ({ title, summary });
+  await send(
+    'check_run',
+    checkRunEvent('e2e', 'in_progress', null, 'a1b2c3', output(null, '## Running\n14 of 38')),
+  );
+  const check = async () =>
+    (await lists('alice')).mine[0]?.checks?.find((c) => c.name === 'e2e')?.detail;
+  assert.equal(await check(), 'Running');
+  const long = 'x'.repeat(300);
+  await send(
+    'check_run',
+    checkRunEvent('e2e', 'completed', 'failure', 'a1b2c3', output(`2 failed ${long}`, 'more')),
+  );
+  assert.equal((await check())?.length, 200);
+  assert.ok((await check())?.startsWith('2 failed x'));
+  // Nothing said: no detail.
+  await send('check_run', checkRunEvent('e2e', 'completed', 'success'));
+  assert.equal(await check(), undefined);
+});
+
 test('an older copy of a pull request than the one kept is dropped', async () => {
   const stale = pullEvent('edited', { title: 'Old title' });
   stale.pull_request.updated_at = '2026-01-01T00:00:00.000Z';
