@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import type { Prefs } from './prefs.ts';
+import { MAX_PR_BODY, MAX_PR_CLOSES } from './pull-details.ts';
 import { SessionReview } from './session-review.ts';
 import { MAX_TEAMMATES, TeamFolder, Teammate } from './team.ts';
 
 export * from './prefs.ts';
+export * from './pull-details.ts';
 export * from './session-review.ts';
 export * from './team.ts';
 
@@ -297,6 +299,83 @@ export const PullRequestCheck = z.object({
 });
 export type PullRequestCheck = z.infer<typeof PullRequestCheck>;
 
+// What a review needs to know about its pull request, beyond what the lists show. Every field
+// is optional: older plugins, and data kept before they existed, leave them out.
+
+/** The most reviews, requested reviewers and labels a pull request lists. */
+export const MAX_PR_REVIEWS = 50;
+export const MAX_PR_REVIEWERS = 50;
+export const MAX_PR_LABELS = 50;
+
+/** A GitHub avatar: only GitHub's own image host, so the dashboard loads nothing else. */
+export const GitHubAvatarUrl = z
+  .url()
+  .max(500)
+  .regex(/^https:\/\/avatars\.githubusercontent\.com\//);
+
+/** Someone on a pull request: its author, a reviewer, or a person asked to review. */
+export const PullRequestPerson = z.object({
+  login: z.string().min(1).max(100),
+  /** Their display name, when GitHub gave it (the App's webhooks don't). */
+  name: z.string().max(200).optional(),
+  avatarUrl: GitHubAvatarUrl.optional(),
+  /** A GitHub App or other bot account, not a person. */
+  bot: z.boolean().optional(),
+});
+export type PullRequestPerson = z.infer<typeof PullRequestPerson>;
+
+/** A team asked to review. */
+export const PullRequestTeam = z.object({
+  slug: z.string().min(1).max(100),
+  name: z.string().max(200).optional(),
+});
+export type PullRequestTeam = z.infer<typeof PullRequestTeam>;
+
+/** One submitted review. */
+export const PullRequestReview = z.object({
+  by: PullRequestPerson,
+  state: z.enum(['approved', 'changes-requested', 'commented', 'dismissed']),
+  submittedAt: z.iso.datetime().optional(),
+});
+export type PullRequestReview = z.infer<typeof PullRequestReview>;
+
+/** A label, with GitHub's colour as six hex digits (no `#`). */
+export const PullRequestLabel = z.object({
+  name: z.string().min(1).max(100),
+  color: z.string().regex(/^[0-9a-fA-F]{6}$/),
+});
+export type PullRequestLabel = z.infer<typeof PullRequestLabel>;
+
+export const PullRequestMilestone = z.object({
+  title: z.string().min(1).max(300),
+  number: z.number().int().positive().optional(),
+  url: z.url().max(500).optional(),
+  dueOn: z.iso.datetime().optional(),
+});
+export type PullRequestMilestone = z.infer<typeof PullRequestMilestone>;
+
+/** An issue the pull request closes when it merges. */
+export const PullRequestIssue = z.object({
+  /** `owner/name`. */
+  repo: z.string().min(1).max(200),
+  number: z.number().int().positive(),
+  title: z.string().max(500).optional(),
+  url: z.url().max(500).optional(),
+});
+export type PullRequestIssue = z.infer<typeof PullRequestIssue>;
+
+/** Whether it can merge, as GitHub's `mergeable_state` says once it has worked it out. */
+export const PullRequestMergeState = z.enum([
+  'clean',
+  'dirty',
+  'blocked',
+  'behind',
+  'unstable',
+  'has_hooks',
+  'draft',
+]);
+export type PullRequestMergeState = z.infer<typeof PullRequestMergeState>;
+
 /** An open pull request, as the GitHub App's webhooks have it, or the plugin reads it with `gh`. */
 export const PullRequest = z.object({
   number: z.number().int().positive(),
@@ -323,8 +402,53 @@ export const PullRequest = z.object({
   files: z.array(PullRequestFile).max(MAX_PR_FILES).optional(),
   /** How many files it changes in all. */
   changedFiles: z.number().int().nonnegative().optional(),
+  // From here on, what a review shows. Plugins before 0.13.1 leave it all out.
+  /** Open in the lists; a reviewed pull request may since have closed or merged. */
+  state: z.enum(['open', 'closed', 'merged']).optional(),
+  /** The author's name, avatar and whether it's a bot; `author` stays their login. */
+  authorProfile: PullRequestPerson.optional(),
+  /**
+   * Its description: GitHub-flavoured markdown as written, to render as markdown and never as
+   * HTML. Only a reviewed pull request carries it; the lists leave it out.
+   */
+  body: z.string().max(MAX_PR_BODY).optional(),
+  /** The description was longer than MAX_PR_BODY, and was cut. */
+  bodyTruncated: z.boolean().optional(),
+  createdAt: z.iso.datetime().optional(),
+  /** The head branch's last commit. */
+  headSha: z
+    .string()
+    .regex(/^[0-9a-f]{7,64}$/)
+    .optional(),
+  /** False when it conflicts with its base; left out while GitHub hasn't worked it out. */
+  mergeable: z.boolean().optional(),
+  /** Left out while GitHub hasn't worked it out, and from the plugin's reads. */
+  mergeState: PullRequestMergeState.optional(),
+  /** How many commits it has. */
+  commits: z.number().int().nonnegative().optional(),
+  /** Its last MAX_PR_REVIEWS submitted reviews, oldest first. */
+  reviews: z.array(PullRequestReview).max(MAX_PR_REVIEWS).optional(),
+  /** People still asked to review: one who reviewed drops off, as on GitHub. */
+  requestedReviewers: z.array(PullRequestPerson).max(MAX_PR_REVIEWERS).optional(),
+  requestedTeams: z.array(PullRequestTeam).max(MAX_PR_REVIEWERS).optional(),
+  labels: z.array(PullRequestLabel).max(MAX_PR_LABELS).optional(),
+  milestone: PullRequestMilestone.optional(),
+  /** Issues it closes on merge: GitHub's closing references, or "Closes #N" in its description. */
+  closes: z.array(PullRequestIssue).max(MAX_PR_CLOSES).optional(),
 });
 export type PullRequest = z.infer<typeof PullRequest>;
+
+/**
+ * `GET /api/sessions/:id/review`: the pull request a review session reviews, as the owner's
+ * GitHub data has it. `pull` is left out while JOC has nothing on it (not one the owner can be
+ * shown, or not read yet); `readAt` is when that copy was last updated.
+ */
+export const ReviewedPullRequest = z.object({
+  review: SessionReview,
+  pull: PullRequest.optional(),
+  readAt: z.iso.datetime().optional(),
+});
+export type ReviewedPullRequest = z.infer<typeof ReviewedPullRequest>;
 
 /**
  * What the plugin reads from GitHub for its person, about once a minute, unless the GitHub App
