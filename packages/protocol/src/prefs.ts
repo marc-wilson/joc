@@ -129,6 +129,8 @@ export const Prefs = z.object({
   pinned: Entries,
   /** Session list groups folded. */
   foldedGroups: Entries,
+  /** Sessions whose teammates show under their row in the session list. */
+  openTeams: Entries.optional(),
   /** The session list folded into its rail. */
   listFolded: z.boolean(),
   /** How the session list orders each group. */
