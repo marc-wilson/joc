@@ -372,7 +372,7 @@ test('news is what arrived since, still needs you, and not the session on screen
   );
 });
 
-test('by default a toast and a chime for needs you and review requests only', () => {
+test('by default a toast for needs you and review requests, a chime for needs you only', () => {
   const notes = notesOf({
     sessions: [session('a')],
     alerts: [
@@ -388,7 +388,7 @@ test('by default a toast and a chime for needs you and review requests only', ()
     ['question', 'review'],
   );
   assert.equal(all.chime, true);
-  assert.equal(attention(byKind('review'), DEFAULT_PREFS).chime, true);
+  assert.equal(attention(byKind('review'), DEFAULT_PREFS).chime, false);
   assert.equal(
     attention([...byKind('mention'), ...byKind('ci-failed')], DEFAULT_PREFS).chime,
     false,

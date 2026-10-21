@@ -915,7 +915,7 @@ test("a session's alerts are raised, read and cleared only for its owner", async
   assert.deepEqual(await alertsOf('bob'), []);
 
   // Answered: Alice's session leaves `needs`, so its alert reads; the end of a turn that ran
-  // past five minutes (counted from before it waited on her) is news.
+  // past ten minutes (counted from before it waited on her) is news.
   await call('alice', '/api/reports', report('alerts-id'));
   clock += LONG_TURN_MS;
   await call('alice', '/api/reports', report('alerts-id', { state: 'idle', activity: 'Done' }));
