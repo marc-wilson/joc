@@ -2,7 +2,7 @@
 // document per owner; the newest report from any of their machines wins.
 import { getDb } from '@joc/db';
 import type { GitHubReport, GitHubSnapshot } from '@joc/protocol';
-import { alertOnReviews } from './alerts.ts';
+import { alertOnGitHub } from './alerts.ts';
 import { publish } from './bus.ts';
 import type { Owner } from './owner.ts';
 
@@ -28,11 +28,8 @@ export async function saveGitHub(owner: Owner, { at, ...report }: GitHubReport):
   }
   // Only a nudge goes out; each dashboard fetches the snapshot.
   publish(owner, { type: 'github' });
-  // Only news against a good earlier read: the first one, or one after `gh` failed, is the
-  // starting point, not a burst of review requests.
-  if (before?.status === 'ok' && report.status === 'ok') {
-    await alertOnReviews(owner, before.reviewRequested, report.reviewRequested);
-  }
+  // News against the read before, and what this read resolves.
+  await alertOnGitHub(owner, before, report);
   return true;
 }
 

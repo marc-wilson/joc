@@ -20,6 +20,7 @@ import {
   HistorySession,
   ImageRef,
   Launch,
+  LONG_TURN_MS,
   MachineProblem,
   NotificationsSnapshot,
   Prefs,
@@ -913,11 +914,13 @@ test("a session's alerts are raised, read and cleared only for its owner", async
   await call('bob', '/api/alerts/clear-all', {});
   assert.deepEqual(await alertsOf('bob'), []);
 
-  // Answered: Alice's session leaves `needs`, so its alert reads; the turn's end is news.
+  // Answered: Alice's session leaves `needs`, so its alert reads; the end of a turn that ran
+  // past five minutes (counted from before it waited on her) is news.
   await call('alice', '/api/reports', report('alerts-id'));
+  clock += LONG_TURN_MS;
   await call('alice', '/api/reports', report('alerts-id', { state: 'idle', activity: 'Done' }));
   assert.deepEqual(await kinds('alice', 'alerts-id'), [
-    ['finished', false],
+    ['long-turn', false],
     ['needs', true],
   ]);
   const [finished] = await alertsOf('alice');
@@ -936,8 +939,65 @@ test("a session's alerts are raised, read and cleared only for its owner", async
     );
     assert.ok(after.every((a) => a.id !== alices.id));
   }
-  assert.deepEqual(await kinds('alice', 'alerts-id'), [['finished', true]]);
+  assert.deepEqual(await kinds('alice', 'alerts-id'), [['long-turn', true]]);
   assert.deepEqual(await alertsOf('bob'), []);
+});
+
+test("a short turn's end isn't news, and old per-turn alerts are dropped", async () => {
+  await call('alice', '/api/reports', report('short-turn'));
+  await call('alice', '/api/reports', report('short-turn', { state: 'idle' }));
+  await call('alice', '/api/reports', report('short-turn', { state: 'background' }));
+  assert.deepEqual(await kinds('alice', 'short-turn'), []);
+});
+
+test('review and CI alerts resolve themselves from the GitHub data', async () => {
+  const send = (who: Who, reviewRequested: unknown[], mine: unknown[] = []) =>
+    call(who, '/api/github', { at: ++clock, status: 'ok', reviewRequested, mine });
+  const open = async (who: Who) =>
+    (await alertsOf(who))
+      .filter((a) => a.kind === 'review' || a.kind === 'ci-failed')
+      .map((a) => [a.kind, a.number, a.read])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  await call('alice', '/api/alerts/clear-all', {});
+  await call('bob', '/api/alerts/clear-all', {});
+  await send('alice', []);
+  await send('bob', []);
+  const review = { ...pr('Review me'), number: 21 };
+  const mine = { ...pr('Mine'), number: 22, author: 'alice' };
+  await send('alice', [review], [{ ...mine, ci: 'fail' }]);
+  await send('bob', [review]);
+  assert.deepEqual(await open('alice'), [
+    ['ci-failed', 22, false],
+    ['review', 21, false],
+  ]);
+  // Still failing, still asked: nothing new, nothing resolved.
+  await send('alice', [review], [{ ...mine, ci: 'fail' }]);
+  assert.equal((await open('alice')).filter(([, , read]) => !read).length, 2);
+  // Alice posts her review and her CI goes green: both read themselves, and Bob's stays.
+  await send('alice', [], [{ ...mine, ci: 'pass' }]);
+  assert.deepEqual(await open('alice'), [
+    ['ci-failed', 22, true],
+    ['review', 21, true],
+  ]);
+  assert.deepEqual(await open('bob'), [['review', 21, false]]);
+  // A failed read resolves nothing.
+  await call('bob', '/api/github', { at: ++clock, status: 'error', reviewRequested: [], mine: [] });
+  assert.deepEqual(await open('bob'), [['review', 21, false]]);
+  await call('bob', '/api/alerts/clear-all', {});
+});
+
+test('alerts of a retired kind are dropped from the list', async () => {
+  await getDb()
+    .collection('alerts')
+    .insertOne({
+      _id: 'retired-finished' as never,
+      owner: owners.get('alice'),
+      kind: 'finished',
+      title: 'Old turn',
+      repo: 'harbor-labs/atlas-web',
+      createdAt: new Date(),
+    });
+  assert.ok((await alertsOf('alice')).every((a) => a.title !== 'Old turn'));
 });
 
 test('review requests raise alerts only for their owner, and only once', async () => {
@@ -1177,6 +1237,7 @@ test("preferences are each owner's own, only a signed-in person's, and heard onl
     prefs: {
       browserNotifications: false,
       desktopWhenAway: true,
+      notificationSound: true,
       notificationKinds: {},
       notificationTab: 'all',
       pinned: [],

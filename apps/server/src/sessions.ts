@@ -50,6 +50,8 @@ interface SessionDoc {
   reportedAt: number;
   /** The state before the last report, so the report's alert (alerts.ts) knows what changed. */
   previousState?: Session['state'];
+  /** `at` of the report that started its current (or last) turn: working after not working. */
+  turnStartedAt?: number;
   /** What it waits on you for, while its plugin takes answers from the dashboard. */
   waiting?: Waiting;
   /** The last wait that ended, and who answered it. */
@@ -71,6 +73,7 @@ function toSession({
   createdAt,
   reportedAt: _r,
   previousState: _p,
+  turnStartedAt: _t,
   device: _d,
   updatedAt,
   reportedAt,
@@ -187,6 +190,18 @@ export async function applyReport(
             sessionId: { $literal: sessionId },
             // Read before this stage sets the new state.
             previousState: '$state',
+            // A turn starts when it goes to work from rest; waiting on you midway is the same turn.
+            ...(fields.state === 'working'
+              ? {
+                  turnStartedAt: {
+                    $cond: [
+                      { $in: ['$state', ['working', 'needs']] },
+                      { $ifNull: ['$turnStartedAt', at] },
+                      at,
+                    ],
+                  },
+                }
+              : {}),
             // A report without a state (a sync) keeps the stored one, `idle` for a new session.
             // It doesn't move `reportedAt` either, so a state report that fired before it but
             // lands after it still applies.
@@ -226,7 +241,13 @@ export async function applyReport(
   }
   const session = toSession(doc);
   publish(owner, { type: 'session', session });
-  if (fields.state) await alertOnSession(owner, doc.previousState, { ...session, sessionId });
+  if (fields.state) {
+    await alertOnSession(owner, doc.previousState, {
+      ...session,
+      sessionId,
+      turnMs: doc.turnStartedAt === undefined ? undefined : at - doc.turnStartedAt,
+    });
+  }
   return session;
 }
 
