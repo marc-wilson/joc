@@ -23,8 +23,6 @@ export interface HookInput {
   background_tasks?: unknown[];
   /** On Stop: the session's scheduled wakeups (CronCreate, ScheduleWakeup, /loop). */
   session_crons?: unknown[];
-  /** On a Sync from register.ts: whether its session can show a native notification. */
-  can_notify?: boolean;
   /** On a Sync: true when register.ts saw no turn of the main loop running. */
   between_turns?: boolean;
   /** On a Sync: when register.ts saw that, in ms since the epoch. */

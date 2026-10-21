@@ -6,7 +6,7 @@
 // Besides Claude Code's own hook events it takes `Sync`, which register.ts sends every 30s:
 // it catches the server up (the conversation backlog, the diff) and refreshes the session. It
 // changes the state only to settle a session whose background work ended between turns
-// (settle.ts). Only a sync prints anything: the GitHub notifications for register.ts to show.
+// (settle.ts).
 import { readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -30,8 +30,8 @@ import {
 } from './folder.ts';
 import { placeOf } from './git.ts';
 import { githubDue, readGitHub } from './github.ts';
+import { githubByApp } from './github-source.ts';
 import { imageType, isImageId } from './images.ts';
-import { syncNotifications } from './notifications.ts';
 import {
   applyOutcomes,
   errorDetail,
@@ -77,6 +77,8 @@ const machine = hostname().replace(/\.local$/, '');
 const outcomes: Outcome[] = [];
 /** Set once a request gets no answer: the rest would only wait out their timeouts too. */
 let unreachable = false;
+/** Set once the server says the JOC GitHub App brings this person's GitHub data. */
+let appCovers = false;
 let ending = false;
 
 async function readStdin(): Promise<string> {
@@ -142,6 +144,7 @@ async function post(path: string, body: unknown, timeoutMs: number): Promise<Res
     const text = response.ok ? '' : await response.text().catch(() => '');
     const answer = { status: response.status, body: text };
     outcomes.push(responseOutcome(answer, path, serverUrl, Date.now()));
+    if (githubByApp(response.headers)) appCovers = true;
     return response;
   } catch (error) {
     unreachable = true;
@@ -292,18 +295,14 @@ async function main() {
     await sendChanges(input, folder);
   }
   // The person's pull requests, from whichever session's sync comes due first. JOC_GITHUB=0
-  // keeps them on this machine.
-  if ((syncing || event === 'SessionStart') && process.env.JOC_GITHUB !== '0' && githubDue()) {
+  // keeps them on this machine; a person the JOC GitHub App covers needs no reads at all.
+  if (
+    (syncing || event === 'SessionStart') &&
+    process.env.JOC_GITHUB !== '0' &&
+    !appCovers &&
+    githubDue()
+  ) {
     await post('/api/github', readGitHub(at), 10_000);
-  }
-  // The notifications feed, only on a sync: register.ts reads this script's output and shows
-  // what it prints as native notifications (a command hook's output would go to Claude).
-  if (syncing && process.env.JOC_GITHUB !== '0') {
-    const alerts = await syncNotifications(post, at, input.can_notify === true);
-    if (alerts.length && process.env.JOC_NOTIFY !== '0') {
-      const line = `${JSON.stringify({ notify: alerts })}\n`;
-      await new Promise((resolve) => process.stdout.write(line, resolve));
-    }
   }
 }
 
