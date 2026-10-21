@@ -43,6 +43,8 @@ export {
 } from './code.tsx';
 export {
   Button,
+  ButtonLink,
+  type ButtonLinkProps,
   type ButtonProps,
   CollapseButton,
   type CollapseButtonProps,
@@ -176,6 +178,29 @@ export {
   ReviewRow,
   type ReviewRowProps,
 } from './pr.tsx';
+export {
+  PR_REVIEWERS_SHOWN,
+  PRBar,
+  type PRBarProps,
+  PRCard,
+  type PRCardProps,
+  PRLabels,
+  PRLoading,
+  PRNotPosted,
+  type PRNotPostedProps,
+  PRPage,
+  type PRPageProps,
+  PRRegion,
+  PRReviewers,
+  PRReviewProgress,
+  type PRReviewStep,
+  type PRTimes,
+  PRUnavailable,
+  type PRUnavailableProps,
+  PRVerdict,
+  type PRVerdictProps,
+  reviewerRows,
+} from './pr-review.tsx';
 export { resumeCommand, shortId, shortPath } from './resume.ts';
 export {
   Divider,

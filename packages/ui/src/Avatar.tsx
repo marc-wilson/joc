@@ -4,9 +4,11 @@ export interface AvatarProps {
   name: string;
   size?: number;
   claude?: boolean;
+  /** Their GitHub avatar (avatars.githubusercontent.com only); initials show until it loads. */
+  src?: string;
 }
 
-export function Avatar({ name, size = 20, claude }: AvatarProps) {
+export function Avatar({ name, size = 20, claude, src }: AvatarProps) {
   const parts = name
     .replace(/[^A-Za-z0-9 _-]/g, '')
     .split(/[\s_-]+/)
@@ -20,7 +22,21 @@ export function Avatar({ name, size = 20, claude }: AvatarProps) {
       aria-label={name}
       role="img"
     >
-      {claude ? <span className="joc-avatar__mark" /> : initials.toUpperCase()}
+      {claude ? (
+        <span className="joc-avatar__mark" />
+      ) : src && /^https:\/\/avatars\.githubusercontent\.com\//.test(src) ? (
+        <img
+          className="joc-avatar__img"
+          src={src}
+          alt=""
+          width={size}
+          height={size}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+        />
+      ) : (
+        initials.toUpperCase()
+      )}
     </span>
   );
 }

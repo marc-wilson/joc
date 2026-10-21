@@ -47,6 +47,39 @@ export function Button({
   );
 }
 
+export interface ButtonLinkProps {
+  href: string;
+  variant?: 'primary' | 'secondary' | 'ghost';
+  size?: 'sm' | 'md';
+  icon?: IconName;
+  /** Opens in a new tab, as links out of the dashboard (GitHub) do. */
+  external?: boolean;
+  children: ReactNode;
+}
+
+/** A link that looks like a Button: for going somewhere, like "Open on GitHub". */
+export function ButtonLink({
+  href,
+  variant = 'secondary',
+  size = 'md',
+  icon,
+  external,
+  children,
+}: ButtonLinkProps) {
+  return (
+    <a
+      className={cx('joc-btn', `joc-btn--${variant}`, `joc-btn--${size}`, 'joc-btn--link')}
+      href={href}
+      {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+    >
+      <span className="joc-btn__content">
+        {icon ? <Icon name={icon} size={size === 'sm' ? 14 : 16} /> : null}
+        <span>{children}</span>
+      </span>
+    </a>
+  );
+}
+
 export interface CollapseButtonProps {
   expanded: boolean;
   /** What it does, e.g. "Fold message" or "Expand src/app.ts". */

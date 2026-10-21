@@ -728,3 +728,225 @@ h4.joc-taskd__label { margin: 0; }
   .joc-hist__status--narrow { display: inline-flex; }
 }
 /* ===== End design gaps (#92) ============================================================== */
+
+/* ===== PR review session (#88) =========================================================== */
+/* Copied from Claude Design's pass "JOC — PR review session" (its pr-review.css): 12 layout
+   tokens, and every colour an existing token. Change the design first, then copy it here. */
+
+:root {
+  --pr-bar: 44px;               /* collapsed PR bar height */
+  --pr-side: 288px;             /* status column inside the PR card */
+  --pr-tab-side: 336px;         /* status column on the PR tab */
+  --pr-desc-lines: 8;           /* description cap, in reading lines */
+  --pr-desc-max: calc(var(--pr-desc-lines) * 22px); /* 176px */
+  --pr-desc-fade: 44px;         /* fade at the cap = two lines */
+  --pr-avatar: 20px;            /* reviewers, bar */
+  --pr-avatar-lg: 24px;         /* author in card */
+  --pr-label: 20px;             /* label chip height */
+  --pr-swatch: 8px;             /* label colour square */
+  --pr-labels-max: 44px;        /* two rows of labels, then "+N" */
+  --pr-step-gap: 12px;          /* between progress steps */
+}
+
+/* Region: pinned between SessionHeader and the Thread; never scrolls away.
+   Not .joc-pr — that is PRRow's class in components.css. */
+.joc-pr-region { display: block; flex: none; width: 100%; box-sizing: border-box; padding: var(--space-3) var(--space-8); background: var(--bg-base); border-bottom: 1px solid var(--border); }
+.joc-pr-region > * { width: 100%; max-width: var(--thread-max); margin-inline: auto; box-sizing: border-box; }
+
+/* Shared pieces */
+.joc-pr-num { font-family: var(--font-mono); font-weight: 450; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.joc-pr-title { font: 600 15px/22px var(--font-sans); color: var(--text-primary); margin: 0; min-width: 0; }
+.joc-pr-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); font: 400 12px/16px var(--font-sans); color: var(--text-secondary); }
+.joc-pr-meta__item { display: inline-flex; align-items: center; gap: var(--space-1\.5); white-space: nowrap; }
+.joc-pr-time { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.joc-pr-branch { font: 450 12px/16px var(--font-mono); color: var(--text-primary); background: var(--bg-sunken); border-radius: var(--radius-sm); padding: 2px var(--space-1\.5); white-space: nowrap; }
+.joc-pr-arrow { color: var(--text-tertiary); font-family: var(--font-mono); }
+.joc-pr-diff { font: 450 12px/16px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.joc-pr-diff__add { color: var(--diff-add-sign); }
+.joc-pr-diff__del { color: var(--diff-del-sign); }
+.joc-pr-sep { width: 1px; height: 16px; background: var(--border); flex: none; }
+
+/* Outlined tags: PR status, review decision, bot. Square-ish, never filled. */
+.joc-pr-tag { display: inline-flex; align-items: center; gap: var(--space-1); height: 20px; padding: 0 var(--space-1\.5); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font: 550 12px/16px var(--font-sans); color: var(--text-secondary); white-space: nowrap; }
+.joc-pr-tag--draft { border-style: dashed; }
+.joc-pr-tag--quiet { border-color: var(--border); }
+.joc-pr-tag--bot { height: 16px; padding: 0 var(--space-1); font: 450 11px/16px var(--font-mono); border-color: var(--border); color: var(--text-tertiary); }
+
+/* GitHub labels, kept calm: neutral outline + an 8px square of the label colour.
+   A square, never a circle: a dot only ever means a session state. */
+.joc-label { display: inline-flex; align-items: center; gap: var(--space-1\.5); height: var(--pr-label); padding: 0 var(--space-2) 0 var(--space-1\.5); border: 1px solid var(--border); border-radius: var(--radius-sm); font: 400 12px/16px var(--font-sans); color: var(--text-secondary); white-space: nowrap; }
+.joc-label__swatch { width: var(--pr-swatch); height: var(--pr-swatch); border-radius: 2px; background: var(--label-color, var(--state-idle)); box-shadow: inset 0 0 0 1px rgba(127, 127, 127, 0.35); flex: none; }
+.joc-labels { display: flex; flex-wrap: wrap; gap: var(--space-1); max-height: var(--pr-labels-max); overflow: hidden; }
+.joc-labels__more { font: 550 12px/20px var(--font-sans); color: var(--accent); background: none; border: 0; padding: 0 var(--space-1); cursor: pointer; }
+
+/* Expanded PR card */
+.joc-pr-card { background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); transition: opacity var(--duration-fade) var(--ease-standard); }
+.joc-pr-card__head { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-4) var(--space-4) var(--space-3); }
+.joc-pr-card__icon { color: var(--text-secondary); padding-top: 3px; flex: none; }
+.joc-pr-card__headline { display: grid; gap: var(--space-2); flex: 1; min-width: 0; }
+.joc-pr-card__actions { display: flex; gap: var(--space-2); flex: none; }
+.joc-pr-card__body { display: grid; grid-template-columns: minmax(0, 1fr) var(--pr-side); gap: var(--space-6); padding: var(--space-3) var(--space-4) var(--space-4); border-top: 1px solid var(--border-subtle); }
+.joc-pr-card__foot { display: flex; align-items: center; gap: var(--space-3); min-height: var(--row); padding: 0 var(--space-4); border-top: 1px solid var(--border-subtle); }
+
+/* Description: rendered markdown (.joc-md), capped at 8 lines */
+.joc-pr-desc { font: 400 14px/22px var(--font-sans); color: var(--text-primary); max-width: var(--reading-measure); max-height: var(--pr-desc-max); overflow: hidden; -webkit-mask-image: linear-gradient(#000 calc(100% - var(--pr-desc-fade)), transparent); mask-image: linear-gradient(#000 calc(100% - var(--pr-desc-fade)), transparent); }
+.joc-pr-desc.is-open, .joc-pr-desc.is-short { max-height: none; -webkit-mask-image: none; mask-image: none; }
+.joc-pr-desc > :first-child { margin-top: 0; }
+.joc-pr-desc p, .joc-pr-desc ul { margin: 0 0 var(--space-2); }
+.joc-pr-desc ul { padding-left: var(--space-5); }
+.joc-pr-desc h3 { font: 600 14px/22px var(--font-sans); margin: var(--space-2) 0 0; }
+.joc-pr-desc code { font: 450 12px/16px var(--font-mono); background: var(--bg-sunken); border-radius: var(--radius-xs); padding: 1px 4px; }
+.joc-pr-desc--empty { color: var(--text-tertiary); max-height: none; -webkit-mask-image: none; mask-image: none; }
+.joc-pr-more { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--control-sm); margin-top: var(--space-1); padding: 0; background: none; border: 0; font: 550 12px/16px var(--font-sans); color: var(--accent); cursor: pointer; }
+.joc-pr-more:hover { color: var(--accent-hover); }
+.joc-pr-more__count { color: var(--text-tertiary); font-weight: 400; }
+
+/* Status list: label column + value column */
+.joc-pr-status { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: var(--space-2) var(--space-3); align-items: start; margin: 0; font: 400 12px/16px var(--font-sans); }
+.joc-pr-status > dt { color: var(--text-tertiary); padding-top: 3px; }
+.joc-pr-status > dd { margin: 0; color: var(--text-secondary); min-width: 0; display: grid; gap: var(--space-1); }
+.joc-pr-check { display: flex; align-items: center; gap: var(--space-1\.5); font: 400 11px/16px var(--font-mono); color: var(--text-secondary); min-width: 0; }
+.joc-pr-check__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.joc-pr-issue { display: flex; gap: var(--space-1\.5); min-width: 0; color: var(--text-secondary); }
+.joc-pr-issue a { color: var(--accent); text-decoration: none; font-family: var(--font-mono); }
+.joc-pr-issue a:hover { text-decoration: underline; }
+.joc-pr-issue__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Reviewers: people round (Avatar), teams square */
+.joc-reviewer { display: grid; grid-template-columns: var(--pr-avatar) minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); min-height: var(--row-dense); }
+.joc-reviewer__who { display: flex; align-items: baseline; gap: var(--space-1\.5); min-width: 0; white-space: nowrap; overflow: hidden; }
+.joc-reviewer__name { font: 550 13px/20px var(--font-sans); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; }
+.joc-reviewer__login { font: 400 11px/16px var(--font-mono); color: var(--text-tertiary); }
+.joc-reviewer__verdict { display: inline-flex; align-items: center; gap: var(--space-1); font: 400 12px/16px var(--font-sans); white-space: nowrap; }
+.joc-reviewer__verdict--approved { color: var(--ci-pass); }
+.joc-reviewer__verdict--changes { color: var(--ci-fail); }
+.joc-reviewer__verdict--commented { color: var(--text-secondary); }
+.joc-reviewer__verdict--requested { color: var(--text-tertiary); }
+.joc-team-avatar { width: var(--pr-avatar); height: var(--pr-avatar); border-radius: var(--radius-sm); background: var(--bg-hover); border: 1px solid var(--border); color: var(--text-secondary); display: grid; place-items: center; font: 600 10px/1 var(--font-sans); }
+.joc-avatars { display: flex; }
+.joc-avatars > * + * { margin-left: -4px; }
+.joc-avatars > * { box-shadow: 0 0 0 2px var(--bg-raised); border-radius: var(--radius-full); }
+
+/* Review progress: done = CIMark pass, now = session StateDot, next = step number */
+.joc-pr-progress { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1) var(--pr-step-gap); font: 400 12px/16px var(--font-sans); color: var(--text-tertiary); min-width: 0; }
+.joc-pr-step { display: inline-flex; align-items: center; gap: var(--space-1\.5); white-space: nowrap; }
+.joc-pr-step__n { font: 400 11px/16px var(--font-mono); width: 14px; text-align: center; }
+.joc-pr-step.is-done { color: var(--text-secondary); }
+.joc-pr-step.is-now { color: var(--text-primary); font-weight: 550; }
+.joc-pr-step + .joc-pr-step::before { content: ""; width: 12px; height: 1px; background: var(--border-strong); margin-right: var(--space-1); opacity: 0.6; }
+.joc-pr-step code { font: 450 12px/16px var(--font-mono); }
+.joc-pr-progress--stack { flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+.joc-pr-progress--stack .joc-pr-step + .joc-pr-step::before { display: none; }
+
+/* PR tab: full-width page inside the session pane */
+.joc-pr-page { max-width: var(--thread-max); margin: 0 auto; padding: var(--space-6) var(--space-8) var(--space-12); display: grid; gap: var(--space-6); }
+.joc-pr-page__head { display: flex; align-items: flex-start; gap: var(--space-3); }
+.joc-pr-page__title { font: 600 20px/28px var(--font-sans); letter-spacing: -0.01em; color: var(--text-primary); margin: 0; }
+.joc-pr-page__cols { display: grid; grid-template-columns: minmax(0, 1fr) var(--pr-tab-side); gap: var(--space-8); align-items: start; }
+.joc-pr-page__main, .joc-pr-page__side { display: grid; gap: var(--space-6); min-width: 0; }
+.joc-pr-list { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-raised); overflow: hidden; }
+.joc-pr-list__row { display: flex; align-items: center; gap: var(--space-3); min-height: var(--row); padding: 0 var(--space-3); border-top: 1px solid var(--border-subtle); font: 400 13px/20px var(--font-sans); color: var(--text-primary); min-width: 0; }
+.joc-pr-list__row:first-child { border-top: 0; }
+.joc-pr-list__mono { font: 400 12px/16px var(--font-mono); color: var(--text-secondary); white-space: nowrap; }
+.joc-pr-list__grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1100px) { .joc-pr-page__cols { grid-template-columns: minmax(0, 1fr); } }
+
+/* Collapsed PR bar: one 44px line, same width as the thread */
+.joc-pr-bar { display: flex; align-items: center; gap: var(--space-3); height: var(--pr-bar); padding: 0 var(--space-2) 0 var(--space-3); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); transition: opacity var(--duration-fade) var(--ease-standard); }
+.joc-pr-bar__title { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); font: 550 13px/20px var(--font-sans); color: var(--text-primary); }
+.joc-pr-bar__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.joc-pr-bar__aside { display: flex; align-items: center; gap: var(--space-3); flex: none; font: 400 12px/16px var(--font-sans); color: var(--text-secondary); }
+
+/* Verdict: posted into the thread at reading measure */
+.joc-verdict { display: grid; gap: var(--space-3); max-width: var(--reading-measure); padding: var(--space-4); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); }
+.joc-verdict--changes { border-color: var(--ci-fail); }
+.joc-verdict__head { display: flex; align-items: center; gap: var(--space-2); }
+.joc-verdict__title { font: 600 15px/22px var(--font-sans); color: var(--text-primary); margin: 0; flex: 1; }
+.joc-verdict__mark--approve { color: var(--ci-pass); }
+.joc-verdict__mark--changes { color: var(--ci-fail); }
+.joc-verdict__mark--comment { color: var(--text-secondary); }
+.joc-verdict__body { font: 400 14px/22px var(--font-sans); color: var(--text-primary); margin: 0; }
+.joc-verdict__counts { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); font: 400 12px/16px var(--font-sans); color: var(--text-secondary); }
+.joc-verdict__link { font: 400 12px/16px var(--font-mono); color: var(--accent); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.joc-verdict__link:hover { text-decoration: underline; }
+.joc-verdict__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* Loading: static blocks, no shimmer (only sessions move) */
+.joc-pr-skel { display: block; height: 12px; border-radius: var(--radius-sm); background: var(--bg-hover); }
+.joc-pr-skel--title { height: 16px; }
+
+/* PR not visible: the card keeps its frame and says why */
+.joc-pr-gone { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-4); }
+.joc-pr-gone__text { display: grid; gap: var(--space-1); flex: 1; min-width: 0; font: 400 13px/20px var(--font-sans); color: var(--text-secondary); }
+.joc-pr-gone__title { font: 550 13px/20px var(--font-sans); color: var(--text-primary); }
+
+/* Focus: every interactive piece gets the system ring */
+.joc-pr-region a:focus-visible, .joc-pr-region button:focus-visible, .joc-verdict a:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-xs); }
+
+@media (max-width: 900px) {
+  .joc-pr-region { padding: var(--space-2) var(--space-4); }
+  .joc-pr-card__body { grid-template-columns: minmax(0, 1fr); }
+  .joc-pr-bar__aside .joc-pr-progress { display: none; }
+}
+
+/* Fitted to JOC's markup: a GitHub avatar image inside Avatar, and a copy filling in place. */
+.joc-avatar { overflow: hidden; }
+.joc-avatar__img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.joc-pr-fill { animation: joc-fade var(--duration-fade) var(--ease-standard) both; }
+.joc-pr-bar__aside .joc-pr-progress { flex-wrap: nowrap; }
+/* The review decision as a tag: only "Changes requested" colours its border, as its verdict does. */
+.joc-pr-tag--changes { border-color: var(--ci-fail); }
+/* Text levels and small layouts the pieces share, so the markup carries no one-off styles. */
+.joc-pr-strong { color: var(--text-primary); }
+.joc-pr-soft { color: var(--text-secondary); }
+.joc-pr-quiet { color: var(--text-tertiary); }
+.joc-pr-person__name { color: var(--text-primary); font-weight: 550; }
+.joc-pr-person__login { color: var(--text-tertiary); }
+.joc-pr-person__login.is-only { color: var(--text-primary); }
+.joc-pr-icon { display: inline-flex; color: var(--text-secondary); }
+.joc-pr-icon--quiet { color: var(--text-tertiary); }
+.joc-pr-section { display: grid; gap: var(--space-2); }
+.joc-pr-empty { margin: 0; color: var(--text-tertiary); }
+.joc-pr-note { margin: var(--space-1) 0 0; color: var(--text-tertiary); }
+.joc-pr-overline { color: var(--text-tertiary); text-transform: uppercase; }
+.joc-labels-row { display: flex; align-items: flex-start; gap: var(--space-1); min-width: 0; }
+.joc-labels-row > .joc-labels { flex: 1 1 0; min-width: 0; }
+.joc-labels.is-open { max-height: none; }
+.joc-reviewers-more { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-dense); }
+.joc-pr-status > dd.joc-pr-status__people { gap: 0; }
+.joc-pr-issue__num { font-family: var(--font-mono); }
+ol.joc-pr-progress { margin: 0; padding: 0; list-style: none; }
+.joc-pr-desc--empty p { margin: 0; }
+.joc-pr-desc--empty .meta { margin-top: var(--space-1); }
+.joc-pr-gone__icon { padding-top: var(--space-0\.5); }
+.joc-pr-gone__actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
+.joc-verdict__mark { display: inline-flex; }
+.joc-verdict__time { font: 400 12px/16px var(--font-sans); }
+.joc-verdict--wide { max-width: none; }
+.joc-pr-region .joc-verdict { margin-top: var(--space-2); }
+.joc-pr-page__icon { padding-top: var(--space-1\.5); }
+.joc-pr-page__headline { flex: 1; min-width: 0; display: grid; gap: var(--space-2); }
+/* Loading blocks: a row of them, a stack of them, and their widths. */
+.joc-pr-skel-row { display: flex; align-items: center; gap: var(--space-2); }
+.joc-pr-skel-row--wide { gap: var(--space-3); }
+.joc-pr-skel-stack { display: grid; gap: var(--space-2); }
+.joc-pr-skel--w15 { width: 15%; }
+.joc-pr-skel--w25 { width: 25%; }
+.joc-pr-skel--w30 { width: 30%; }
+.joc-pr-skel--w40 { width: 40%; }
+.joc-pr-skel--w55 { width: 55%; }
+.joc-pr-skel--w60 { width: 60%; }
+.joc-pr-skel--w70 { width: 70%; }
+.joc-pr-skel--w85 { width: 85%; }
+.joc-pr-skel--w90 { width: 90%; }
+/* The PR tab's "12 passed" row opens the passed checks. */
+.joc-pr-list__toggle { width: 100%; background: none; border-left: 0; border-right: 0; border-bottom: 0; text-align: left; cursor: pointer; font: inherit; color: var(--text-secondary); transition: background-color var(--duration-instant) linear; }
+.joc-pr-list__toggle:hover { background: var(--bg-hover); }
+.joc-pr-list__toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+/* A reviewer's name stays whole; their login gives way first. */
+.joc-reviewer__name { flex: none; max-width: 100%; }
+.joc-reviewer__login { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The PR tab scrolls on its own inside the session pane. */
+.joc-pr-scroll { flex: 1; min-height: 0; overflow: auto; }
+.joc-verdict-row { padding: var(--space-2) 0; }
+/* ===== End PR review session (#88) ======================================================= */
