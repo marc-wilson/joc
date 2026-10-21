@@ -30,6 +30,7 @@ import {
   PluginVersion,
   PrefsPatch,
   ProblemsReport,
+  PromptHandoff,
   PromptRequest,
   type ReadsClaim,
   ResumeClaim,
@@ -38,6 +39,7 @@ import {
   ReviewSettings,
   reviewPrompt,
   type ServerVersion,
+  type SessionPrompts,
   SessionReport,
   SessionSettings,
   type StreamEvent,
@@ -93,7 +95,7 @@ import {
 import { type Owner, ownerFrom } from './owner.ts';
 import { getPrefs, patchPrefs } from './prefs.ts';
 import { listProblems, saveProblems } from './problems.ts';
-import { claimPrompts, queuePrompt } from './prompts.ts';
+import { cancelPrompt, claimPrompts, handOffPrompt, listPrompts, queuePrompt } from './prompts.ts';
 import { RateLimit } from './rate-limit.ts';
 import { cancelResume, claimResumes, finishResume, listResumes, requestResume } from './resumes.ts';
 import { newSecret, secretsEqual } from './secrets.ts';
@@ -114,6 +116,9 @@ import {
   saveSessionSettings,
 } from './settings.ts';
 import { INSTALLED_HEADER, isBehind, LATEST_HEADER, PLUGIN_HEADER } from './version.ts';
+
+/** The first plugin that says when Claude Code took a prompt it claimed. */
+const HANDOFF_FROM = '0.12.1';
 
 export interface AppOptions {
   /** GitHub sign-in. Without it the server is open and everything belongs to `local`: for local
@@ -502,10 +507,44 @@ export function createApp({
     return c.json({ id }, 201);
   });
 
-  // From the session's plugin: take the prompts waiting for it.
-  app.post('/api/sessions/:id/prompts/claim', async (c) =>
-    c.json({ prompts: await claimPrompts(c.get('owner'), c.req.param('id')) }),
+  // Where the session's prompts from the dashboard stand: in JOC, with Claude Code, or failed.
+  app.get('/api/sessions/:id/prompts', async (c) =>
+    c.json({
+      prompts: await listPrompts(c.get('owner'), c.req.param('id')),
+    } satisfies SessionPrompts),
   );
+
+  // From the dashboard: withdraw a prompt the plugin hasn't taken yet.
+  app.delete('/api/sessions/:id/prompts/:prompt', async (c) => {
+    if (c.get('via') === 'device') return c.json({ error: 'Forbidden' }, 403);
+    const done = await cancelPrompt(c.get('owner'), c.req.param('id'), c.req.param('prompt'));
+    if (done === 'missing') return c.json({ error: 'No such prompt' }, 404);
+    if (done === 'taken') return c.json({ error: "Claude Code has it; JOC can't change it" }, 409);
+    return c.body(null, 204);
+  });
+
+  // From the session's plugin: take the prompts waiting for it. A plugin from 0.12.1 on then
+  // says whether Claude Code took each one (the handoff below).
+  app.post('/api/sessions/:id/prompts/claim', async (c) => {
+    const sent = pluginOf(c);
+    const reports = !!sent && !isBehind(sent, HANDOFF_FROM);
+    return c.json({
+      prompts: await claimPrompts(c.get('owner'), c.req.param('id'), { reports }),
+    });
+  });
+
+  app.post('/api/sessions/:id/prompts/:prompt/handoff', async (c) => {
+    if (c.get('via') === 'session') return c.json({ error: 'Forbidden' }, 403);
+    const parsed = PromptHandoff.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    const found = await handOffPrompt(
+      c.get('owner'),
+      c.req.param('id'),
+      c.req.param('prompt'),
+      parsed.data,
+    );
+    return found ? c.json({ ok: true }) : c.json({ error: 'No such prompt' }, 404);
+  });
 
   // ── Answers: a question or permission request answered from the dashboard ──
   // The session's plugin says what it waits on and holds a poll open for the answer, while Claude

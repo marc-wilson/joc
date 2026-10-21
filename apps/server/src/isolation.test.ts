@@ -30,6 +30,7 @@ import {
   ReviewSettings,
   Session,
   SessionCommands,
+  SessionPrompts,
   SessionSettings,
 } from '@joc/protocol';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
@@ -120,6 +121,9 @@ test('every API route needs an owner', async () => {
     ['POST', '/api/commands'],
     ['POST', '/api/sessions/s/prompts'],
     ['POST', '/api/sessions/s/prompts/claim'],
+    ['GET', '/api/sessions/s/prompts'],
+    ['DELETE', '/api/sessions/s/prompts/p'],
+    ['POST', '/api/sessions/s/prompts/p/handoff'],
     ['GET', '/api/history'],
     ['GET', '/api/github'],
     ['POST', '/api/github'],
@@ -327,6 +331,107 @@ test("prompts reach only their owner's plugin", async () => {
     alice.prompts.map((p) => p.text),
     ['For Alice'],
   );
+});
+
+/** A request from the person's browser: their cookie, from the dashboard's own origin. */
+const browserCall = (who: Who, path: string, method: string, body?: unknown) =>
+  app.request(path, {
+    method,
+    headers: {
+      cookie: cookies.get(who) ?? '',
+      host: 'joc.test',
+      origin: 'http://joc.test',
+      'content-type': 'application/json',
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+/** A request from a plugin of `version`. */
+const fromPlugin = (who: Who, path: string, version: string, body: unknown = {}) =>
+  app.request(path, {
+    method: 'POST',
+    headers: { ...auth(who), 'content-type': 'application/json', 'x-joc-plugin': version },
+    body: JSON.stringify(body),
+  });
+
+const promptsOf = async (who: Who, sessionId: string) =>
+  (await read(await call(who, `/api/sessions/${sessionId}/prompts`), SessionPrompts)).prompts;
+
+const Queued = z.object({ id: z.string() });
+
+test("where a prompt stands is its owner's, and only their plugin hands it over", async () => {
+  const session = '/api/sessions/handoff-id/prompts';
+  const first = await read(await call('alice', session, { text: 'First' }), Queued);
+  const second = await read(await call('alice', session, { text: 'Second' }), Queued);
+  await call('bob', session, { text: 'For Bob' });
+  assert.deepEqual(
+    (await promptsOf('alice', 'handoff-id')).map((p) => p.phase),
+    ['waiting', 'waiting'],
+  );
+  assert.equal((await promptsOf('bob', 'handoff-id')).length, 1);
+
+  // A plugin that reports: claimed, until it says Claude Code has it.
+  await fromPlugin('alice', `${session}/claim`, '0.12.1');
+  assert.deepEqual(
+    (await promptsOf('alice', 'handoff-id')).map((p) => p.phase),
+    ['claimed', 'claimed'],
+  );
+  // Bob can't hand over Alice's prompt, and a browser can't at all.
+  const handoff = (id: string) => `${session}/${id}/handoff`;
+  assert.equal((await fromPlugin('bob', handoff(first.id), '0.12.1', { ok: true })).status, 404);
+  assert.equal((await browserCall('alice', handoff(first.id), 'POST', { ok: true })).status, 403);
+  assert.equal((await fromPlugin('alice', handoff(first.id), '0.12.1', { ok: true })).status, 200);
+  const refused = { ok: false, reason: 'a hook dropped it' };
+  assert.equal((await fromPlugin('alice', handoff(second.id), '0.12.1', refused)).status, 200);
+  assert.deepEqual(await promptsOf('alice', 'handoff-id'), [
+    { id: first.id, phase: 'queued' },
+    { id: second.id, phase: 'failed', reason: 'a hook dropped it' },
+  ]);
+  assert.deepEqual(
+    (await promptsOf('bob', 'handoff-id')).map((p) => p.phase),
+    ['waiting'],
+  );
+
+  // A plugin before 0.12.1 never reports: what it took counts as queued.
+  await fromPlugin('bob', `${session}/claim`, '0.12.0');
+  assert.deepEqual(
+    (await promptsOf('bob', 'handoff-id')).map((p) => p.phase),
+    ['queued'],
+  );
+});
+
+test('a prompt is cancelled only by its owner, from a browser, while still in JOC', async () => {
+  const session = '/api/sessions/cancel-id/prompts';
+  const kept = await read(await call('alice', session, { text: 'Keep me' }), Queued);
+  const dropped = await read(await call('alice', session, { text: 'Drop me' }), Queued);
+  assert.equal((await browserCall('bob', `${session}/${dropped.id}`, 'DELETE')).status, 404);
+  assert.equal(
+    (await app.request(`${session}/${dropped.id}`, { method: 'DELETE', headers: auth('alice') }))
+      .status,
+    403,
+  );
+  assert.equal((await browserCall('alice', `${session}/${dropped.id}`, 'DELETE')).status, 204);
+  assert.deepEqual(
+    (await promptsOf('alice', 'cancel-id')).map((p) => p.id),
+    [kept.id],
+  );
+  const claimed = await read(await call('alice', `${session}/claim`, {}), Claimed);
+  assert.deepEqual(
+    claimed.prompts.map((p) => p.text),
+    ['Keep me'],
+  );
+  // Once the plugin has it, JOC can't take it back.
+  assert.equal((await browserCall('alice', `${session}/${kept.id}`, 'DELETE')).status, 409);
+});
+
+test("a live stream hears only its owner's prompts move on", async () => {
+  const heard = await listen('alice', async () => {
+    await call('bob', '/api/sessions/bob-prompts/prompts', { text: 'Bob secret' });
+    await call('bob', '/api/sessions/bob-prompts/prompts/claim', {});
+    await call('alice', '/api/sessions/alice-prompts/prompts', { text: 'Alice prompt' });
+  });
+  assert.equal(events(heard, 'prompts', 'alice-prompts').length, 1);
+  assert.doesNotMatch(heard, /bob-prompts|Bob secret|Alice prompt/);
 });
 
 /** Reads a server-sent event stream for `ms`, while `during` runs. */
