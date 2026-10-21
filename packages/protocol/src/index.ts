@@ -636,6 +636,10 @@ export const PromptRequest = z
   .refine((p) => p.text !== '' || !!p.images?.length, { message: 'A prompt needs text or images' });
 export type PromptRequest = z.infer<typeof PromptRequest>;
 
+/** `POST /api/sessions/:id/prompts`: the server's id for the prompt it now holds. */
+export const PromptQueued = z.object({ id: z.string() });
+export type PromptQueued = z.infer<typeof PromptQueued>;
+
 /** A queued prompt, as `POST /api/sessions/:id/prompts/claim` hands it to the plugin. */
 export const ClaimedPrompt = z.object({
   id: z.string(),
