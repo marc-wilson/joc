@@ -98,6 +98,11 @@ export interface ComposerProps {
   imageLimits?: ComposerImageLimits;
   /** The session ended: the box offers to resume it instead. What you typed is kept, hidden. */
   resume?: ComposerResume;
+  /**
+   * Puts text back in the box, such as a sent message taken back to edit: each new `seq` puts
+   * its `text` in, ahead of anything typed since, with the caret at the end.
+   */
+  fill?: { text: string; seq: number };
   /** Called with the trimmed text and any pasted images on Enter or the send button; the box
    * then clears. A picked command leads the text: `/name args`. */
   onSubmit?: (text: string, images: File[]) => void;
@@ -118,6 +123,7 @@ export function Composer({
   hint,
   imageLimits,
   resume,
+  fill,
   onSubmit,
 }: ComposerProps) {
   // An ended session takes no messages: the box stays, read-only, until it's live again.
@@ -207,6 +213,16 @@ export function Composer({
     selection?.removeAllRanges();
     selection?.addRange(range);
   }
+
+  // A message taken back to edit goes in ahead of what's typed.
+  const filled = useRef(fill?.seq);
+  useEffect(() => {
+    if (!fill || filled.current === fill.seq) return;
+    filled.current = fill.seq;
+    const typed = box.current?.innerText.trim() ?? '';
+    setBox(typed ? `${fill.text}\n${typed}` : fill.text);
+    setClosed(true);
+  });
 
   function pick(row: SuggestionRow) {
     setPicked(row);
@@ -531,7 +547,47 @@ export interface MessageProps extends Partial<ToolCallProps> {
   preview?: string;
   /** Claude's messages: makes the header a toggle that collapses the message. */
   onToggle?: () => void;
+  /**
+   * Your messages: one sent from JOC that the session's transcript doesn't have yet. It looks
+   * unsent (dashed, quieter) until it's a normal message: `sending` on its way, `queued` with
+   * Claude Code for when the turn ends, `failed` not delivered.
+   */
+  pending?: 'sending' | 'queued' | 'failed';
+  /** Your messages: the line under the bubble in place of the time, e.g. where it's queued and
+   * its Cancel. */
+  footer?: ReactNode;
+  /** False: shows at once, as when a pending message became this one in the same place. */
+  fade?: boolean;
   children?: ReactNode;
+}
+
+/** The line under a message of yours: its time, or where a pending one stands. */
+export function MessageStatus({ failed, children }: { failed?: boolean; children?: ReactNode }) {
+  return (
+    <div
+      className={cx(
+        'joc-msg__time',
+        'joc-msg__time--user',
+        'joc-msg__status',
+        failed && 'is-error',
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * One line above the composer while messages wait for the session: "2 messages queued for when
+ * Claude finishes". Quiet: it says where things are, it never asks.
+ */
+export function QueueNote({ children }: { children?: ReactNode }) {
+  return (
+    <output className="joc-queue-note joc-fade-in">
+      <Icon name="clock" size={12} />
+      <span className="joc-queue-note__text">{children}</span>
+    </output>
+  );
 }
 
 export function Message({
@@ -540,6 +596,9 @@ export function Message({
   collapsed,
   preview,
   onToggle,
+  pending,
+  footer,
+  fade = true,
   children,
   ...tool
 }: MessageProps) {
@@ -576,10 +635,19 @@ export function Message({
     );
   }
   return (
-    <div className={cx('joc-msg', `joc-msg--${from}`, 'joc-fade-in')}>
+    <div
+      className={cx(
+        'joc-msg',
+        `joc-msg--${from}`,
+        from === 'user' && pending && `joc-msg--pending joc-msg--${pending}`,
+        fade && 'joc-fade-in',
+      )}
+    >
       {from === 'claude' ? <div className="joc-msg__who">{who}</div> : null}
       <div className="joc-msg__body">{children}</div>
-      {from === 'user' && time ? (
+      {from === 'user' && footer ? (
+        footer
+      ) : from === 'user' && time ? (
         <div className="joc-msg__time joc-msg__time--user">{time}</div>
       ) : null}
     </div>
