@@ -37,6 +37,7 @@ import {
   ResumeClaim,
   ResumeRequest,
   ResumeResult,
+  type ReviewedPullRequest,
   ReviewSettings,
   reviewPrompt,
   type ServerVersion,
@@ -73,13 +74,15 @@ import { getCommands, saveCommands } from './commands.ts';
 import { claimDeletes, finishDelete, isDeleted, listDeletes, requestDeletes } from './deletes.ts';
 import type { GitHubAuth } from './github.ts';
 import type { GitHubAppAbout } from './github-app.ts';
-import { getGitHub, saveGitHub } from './github-data.ts';
+import { getGitHub, pullDetails, saveGitHub } from './github-data.ts';
 import {
   backfillOwner,
   forgetOwnerCoverage,
   installationAccounts,
   isCovered,
   noteInstallations,
+  readReviewedPull,
+  reviewedPull,
 } from './github-events.ts';
 import { firstDelivery, verifySignature, type Webhooks } from './github-webhook.ts';
 import {
@@ -112,6 +115,7 @@ import {
   applyReport,
   endWaiting,
   getLiveSession,
+  getSessionReview,
   listHistory,
   listSessions,
   listStaleSessions,
@@ -595,6 +599,26 @@ export function createApp({
   app.get('/api/sessions/:id/changes', async (c) => {
     const changes = await getChanges(c.get('owner'), c.req.param('id'));
     return changes ? c.json(changes) : c.json({ error: 'No changes reported yet' }, 404);
+  });
+
+  // The pull request a review session reviews: the App's copy when it covers the owner (read
+  // once from GitHub if no event brought it yet), else their plugin's last read of it.
+  app.get('/api/sessions/:id/review', async (c) => {
+    const owner = c.get('owner');
+    const review = await getSessionReview(owner, c.req.param('id'));
+    if (!review) return c.json({ error: 'Not a review session' }, 404);
+    const { repo, number } = review;
+    let found: Omit<ReviewedPullRequest, 'review'> | undefined;
+    if (webhooks && (await isCovered(owner))) {
+      found = await reviewedPull(owner, repo, number);
+      if (!found && webhooks.context.api) {
+        const { context } = webhooks;
+        await webhooks.run('A review read', () => readReviewedPull(context, owner, repo, number));
+        found = await reviewedPull(owner, repo, number);
+      }
+    }
+    found ??= await pullDetails(owner, repo, number);
+    return c.json({ review, ...found } satisfies ReviewedPullRequest);
   });
 
   // The session's slash commands, from its plugin, for the composer's suggestions.

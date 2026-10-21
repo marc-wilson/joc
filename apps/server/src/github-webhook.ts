@@ -52,8 +52,11 @@ export interface Webhooks {
   context: EventContext;
   /** Handles a verified delivery after the answer has gone. */
   enqueue(event: string, payload: unknown): void;
-  /** Runs other work on the same queue (a sign-in's backfill), so it never races an event. */
-  run(what: string, task: () => Promise<void>): void;
+  /**
+   * Runs other work on the same queue (a sign-in's backfill), so it never races an event.
+   * Resolves once it ran, never rejecting: a failure is logged.
+   */
+  run(what: string, task: () => Promise<void>): Promise<void>;
   /** Resolves once every delivery taken so far is handled: for tests and shutdown. */
   idle(): Promise<void>;
 }
@@ -67,6 +70,7 @@ export function createWebhooks(secret: string, context: EventContext): Webhooks 
         console.error(`${what} failed:`, String(error));
       }),
     );
+    return queue;
   };
   return {
     secret,

@@ -32,6 +32,8 @@ export interface PullOptions {
   merged?: boolean;
   sha?: string;
   title?: string;
+  /** More of GitHub's fields, over the defaults: a description, labels, avatars, ... */
+  extra?: Record<string, unknown>;
 }
 
 export function pull({
@@ -43,6 +45,7 @@ export function pull({
   merged = false,
   sha = 'a1b2c3',
   title = 'Fix the auth redirect',
+  extra = {},
 }: PullOptions = {}) {
   return {
     number,
@@ -60,6 +63,7 @@ export function pull({
     changed_files: 2,
     requested_reviewers: reviewers,
     requested_teams: teams.map((slug) => ({ slug })),
+    ...extra,
   };
 }
 
@@ -84,6 +88,7 @@ export const reviewEvent = (
     state,
     body,
     html_url: `https://github.com/${REPO}/pull/${options.number ?? 7}#pullrequestreview-${5000 + by.id}`,
+    submitted_at: later(),
     user: by,
   },
   pull_request: pull(options),

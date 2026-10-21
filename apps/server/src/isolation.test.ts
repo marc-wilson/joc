@@ -27,6 +27,7 @@ import {
   Prefs,
   PrefsSnapshot,
   Resume,
+  ReviewedPullRequest,
   ReviewSettings,
   Session,
   SessionCommands,
@@ -125,6 +126,7 @@ test('every API route needs an owner', async () => {
     ['GET', '/api/sessions/s/tasks/t/messages'],
     ['GET', '/api/sessions/s/changes'],
     ['GET', '/api/sessions/s/commands'],
+    ['GET', '/api/sessions/s/review'],
     ['POST', '/api/reports'],
     ['POST', '/api/messages'],
     ['POST', '/api/changes'],
@@ -612,6 +614,45 @@ test('GitHub data stays with its owner', async () => {
   const bob = await read(await call('bob', '/api/github'), GitHubSnapshot);
   assert.deepEqual(alice.state === 'reported' && alice.mine.map((p) => p.title), ['Alice PR']);
   assert.equal(bob.state, 'none');
+});
+
+test("a review session's pull request is its owner's, from their own plugin's read", async () => {
+  const body = 'Moves the redirect after sign-in.\n\nCloses #12.';
+  const whole = {
+    ...pr('Alice PR'),
+    number: 41,
+    body,
+    labels: [{ name: 'bug', color: 'd73a4a' }],
+    authorProfile: { login: 'alice', avatarUrl: 'https://avatars.githubusercontent.com/u/1?v=4' },
+    closes: [{ repo: 'harbor-labs/atlas-web', number: 12 }],
+  };
+  const github = (reviewRequested: unknown[]) =>
+    call('alice', '/api/github', { at: ++clock, status: 'ok', reviewRequested, mine: [] });
+  assert.equal((await github([whole])).status, 200);
+  await call('alice', '/api/reports', report('cr-41', { title: '/code-review 41' }));
+  await call('bob', '/api/reports', report('bob-cr-41', { title: '/code-review 41' }));
+  // Bob has a session of the same id as Alice's, but his isn't a review.
+  await call('bob', '/api/reports', report('cr-41'));
+  const review = (who: Who, id: string) => call(who, `/api/sessions/${id}/review`);
+
+  const alice = await read(await review('alice', 'cr-41'), ReviewedPullRequest);
+  assert.deepEqual(alice.review, { repo: 'harbor-labs/atlas-web', number: 41 });
+  assert.deepEqual([alice.pull?.body, alice.pull?.labels], [body, whole.labels]);
+  // The lists leave the description out.
+  const lists = await read(await call('alice', '/api/github'), GitHubSnapshot);
+  assert.equal(lists.state === 'reported' && lists.reviewRequested[0]?.body, undefined);
+
+  // Bob's own review of the same PR: his plugin never read it, so nothing of Alice's shows.
+  const bob = await read(await review('bob', 'bob-cr-41'), ReviewedPullRequest);
+  assert.deepEqual([bob.review.number, bob.pull], [41, undefined]);
+  // Bob's session of the same id isn't a review; a session he doesn't have isn't either.
+  assert.equal((await review('bob', 'cr-41')).status, 404);
+  assert.equal((await review('bob', 'nobody')).status, 404);
+
+  // Alice reviewed it, and it left her list: the last copy still shows.
+  assert.equal((await github([])).status, 200);
+  const later = await read(await review('alice', 'cr-41'), ReviewedPullRequest);
+  assert.equal(later.pull?.body, body);
 });
 
 /** Backdates a session's last report, as if it went quiet that long ago. */

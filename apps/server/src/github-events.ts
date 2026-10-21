@@ -13,11 +13,24 @@
 import { getDb } from '@joc/db';
 import {
   type CIStatus,
+  clipBody,
+  closingIssues,
+  GitHubAvatarUrl,
   MAX_PR_CHECKS,
+  MAX_PR_CLOSES,
   MAX_PR_FILES,
+  MAX_PR_LABELS,
+  MAX_PR_REVIEWERS,
+  MAX_PR_REVIEWS,
   PullRequest,
   type PullRequestCheck,
   type PullRequestFile,
+  PullRequestLabel,
+  PullRequestMergeState,
+  PullRequestMilestone,
+  type PullRequestPerson,
+  type PullRequestReview,
+  PullRequestTeam,
 } from '@joc/protocol';
 import { z } from 'zod';
 import { alertOnComment } from './alerts.ts';
@@ -39,8 +52,11 @@ import type { Owner } from './owner.ts';
 const Account = z.object({ id: z.number(), login: z.string() });
 type Account = z.infer<typeof Account>;
 const Installation = z.object({ id: z.number() });
-const Repository = z.object({ full_name: z.string() });
-const Team = z.object({ slug: z.string() });
+const Repository = z.object({ full_name: z.string(), private: z.boolean().optional() });
+const Team = z.object({ slug: z.string(), name: z.string().nullish() });
+/** An account as a pull request names it: with its avatar, and `type` saying `Bot` for a bot. */
+const User = Account.extend({ avatar_url: z.string().nullish(), type: z.string().nullish() });
+type User = z.infer<typeof User>;
 
 const PullPayload = z.object({
   number: z.number().int().positive(),
@@ -49,14 +65,31 @@ const PullPayload = z.object({
   state: z.string(),
   draft: z.boolean().nullish(),
   updated_at: z.string(),
-  user: Account.nullish(),
+  created_at: z.string().nullish(),
+  body: z.string().nullish(),
+  user: User.nullish(),
   head: z.object({ ref: z.string(), sha: z.string() }),
-  base: z.object({ ref: z.string() }),
+  base: z.object({
+    ref: z.string(),
+    repo: Repository.nullish(),
+  }),
+  labels: z.array(z.object({ name: z.string(), color: z.string().nullish() })).optional(),
+  milestone: z
+    .object({
+      title: z.string(),
+      number: z.number().nullish(),
+      html_url: z.string().nullish(),
+      due_on: z.string().nullish(),
+    })
+    .nullish(),
   // A review's or comment's copy of the pull request leaves these out.
   additions: z.number().int().nonnegative().optional(),
   deletions: z.number().int().nonnegative().optional(),
   changed_files: z.number().int().nonnegative().optional(),
-  requested_reviewers: z.array(Account.or(z.object({ slug: z.string() }))).optional(),
+  commits: z.number().int().nonnegative().optional(),
+  mergeable: z.boolean().nullish(),
+  mergeable_state: z.string().nullish(),
+  requested_reviewers: z.array(User.or(Team)).optional(),
   requested_teams: z.array(Team).optional(),
 });
 type PullPayload = z.infer<typeof PullPayload>;
@@ -102,6 +135,17 @@ interface ReviewDoc {
   state: string;
 }
 
+/** One submitted review, as a review view lists them. */
+interface ReviewLogDoc {
+  /** GitHub's review id: a dismissal updates its review. */
+  reviewId: number;
+  /** The reviewer's account id. */
+  byId: number;
+  by: PullRequestPerson;
+  state: PullRequestReview['state'];
+  submittedAt?: string;
+}
+
 export interface PullDoc {
   /** `owner/name#number`. */
   _id: string;
@@ -128,6 +172,26 @@ export interface PullDoc {
   checks: CheckDoc[];
   /** GitHub's `updated_at`: an older copy of the pull request than this one is dropped. */
   updatedAt: string;
+  // What a review shows. Pull requests kept before these existed leave them out.
+  /** Whether its repo is private; unknown counts as private. */
+  private?: boolean;
+  merged?: boolean;
+  authorProfile?: PullRequestPerson;
+  body?: string;
+  bodyTruncated?: boolean;
+  createdAt?: string;
+  mergeable?: boolean;
+  mergeState?: PullRequestMergeState;
+  commits?: number;
+  labels?: PullRequestLabel[];
+  milestone?: PullRequestMilestone;
+  /** The requested people and teams as GitHub names them. */
+  requestedProfiles?: PullRequestPerson[];
+  teamProfiles?: PullRequestTeam[];
+  /** Every submitted review, the last MAX_PR_REVIEWS. */
+  log?: ReviewLogDoc[];
+  /** When JOC last changed its copy. */
+  keptAt?: Date;
 }
 
 const installations = () => getDb().collection<InstallationDoc>('github_installations');
@@ -252,8 +316,123 @@ function decision(pull: PullDoc): PullRequest['review'] {
 const defined = <T extends object>(o: T): T =>
   Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 
-/** A stored pull request as the dashboard shows it, in the shape the plugin's reads have. */
-export function toPullRequest(pull: PullDoc): PullRequest | undefined {
+/** The value if it fits the schema; dropped otherwise, so one odd field never loses the rest. */
+function valid<T>(schema: z.ZodType<T>, value: unknown): T | undefined {
+  const parsed = schema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
+const validAll = <T>(schema: z.ZodType<T>, values: unknown[] | undefined, max: number) =>
+  values?.flatMap((v) => valid(schema, v) ?? []).slice(0, max);
+
+const iso = (at: string | null | undefined) => {
+  const t = at ? Date.parse(at) : Number.NaN;
+  return Number.isFinite(t) ? new Date(t).toISOString() : undefined;
+};
+
+/** An account as a review view shows it. */
+export function profile(user: User): PullRequestPerson {
+  return defined({
+    login: user.login.slice(0, 100),
+    avatarUrl: valid(GitHubAvatarUrl, user.avatar_url),
+    bot: user.type === 'Bot' ? true : undefined,
+  });
+}
+
+const REVIEW_STATE = new Map<string, PullRequestReview['state']>([
+  ['APPROVED', 'approved'],
+  ['CHANGES_REQUESTED', 'changes-requested'],
+  ['COMMENTED', 'commented'],
+  ['DISMISSED', 'dismissed'],
+]);
+
+/** A pull request's details as GitHub sent them, each checked; what's missing stays as it was. */
+function details(pr: PullPayload, before: PullDoc | null, sameHead: boolean) {
+  const people = (pr.requested_reviewers ?? []).flatMap((r) => ('login' in r ? [r] : []));
+  const teams = [
+    ...(pr.requested_teams ?? []),
+    ...(pr.requested_reviewers ?? []).flatMap((r) => ('slug' in r ? [r] : [])),
+  ];
+  const bySlug = new Map(teams.map((t) => [t.slug, t]));
+  const mergeable =
+    pr.mergeable === undefined ? (sameHead ? before?.mergeable : undefined) : pr.mergeable;
+  const mergeState =
+    pr.mergeable_state === undefined
+      ? sameHead
+        ? before?.mergeState
+        : undefined
+      : valid(PullRequestMergeState, pr.mergeable_state);
+  const milestone = pr.milestone
+    ? valid(
+        PullRequestMilestone,
+        defined({
+          title: pr.milestone.title.slice(0, 300),
+          number: pr.milestone.number ?? undefined,
+          url: pr.milestone.html_url ?? undefined,
+          dueOn: iso(pr.milestone.due_on),
+        }),
+      )
+    : undefined;
+  return defined({
+    private: pr.base.repo?.private ?? before?.private,
+    authorProfile: pr.user ? profile(pr.user) : undefined,
+    ...(pr.body === undefined
+      ? { body: before?.body, bodyTruncated: before?.bodyTruncated }
+      : clipBody(pr.body)),
+    createdAt: iso(pr.created_at) ?? before?.createdAt,
+    mergeable: mergeable ?? undefined,
+    mergeState,
+    commits: pr.commits ?? before?.commits,
+    labels: pr.labels
+      ? validAll(
+          PullRequestLabel,
+          pr.labels.map((l) => ({ name: l.name.slice(0, 100), color: l.color })),
+          MAX_PR_LABELS,
+        )
+      : before?.labels,
+    milestone: pr.milestone === undefined ? before?.milestone : milestone,
+    requestedProfiles: people.slice(0, MAX_PR_REVIEWERS).map(profile),
+    teamProfiles: validAll(
+      PullRequestTeam,
+      [...bySlug.values()].map((t) => defined({ slug: t.slug, name: t.name ?? undefined })),
+      MAX_PR_REVIEWERS,
+    ),
+  });
+}
+
+/** Adds (or, for a dismissal, updates) one review in the log, keeping the last MAX_PR_REVIEWS. */
+function logReview(log: ReviewLogDoc[] | undefined, entry: ReviewLogDoc): ReviewLogDoc[] {
+  return [...(log ?? []).filter((r) => r.reviewId !== entry.reviewId), entry].slice(
+    -MAX_PR_REVIEWS,
+  );
+}
+
+/** A review as the log keeps it; undefined for a pending (unsubmitted) one, or one by nobody. */
+function logEntry(
+  id: number,
+  user: User | null | undefined,
+  state: string,
+  submittedAt: string | null | undefined,
+): ReviewLogDoc | undefined {
+  const s = REVIEW_STATE.get(state.toUpperCase());
+  if (!user || !s) return undefined;
+  return defined({
+    reviewId: id,
+    byId: user.id,
+    by: profile(user),
+    state: s,
+    submittedAt: iso(submittedAt),
+  });
+}
+
+/**
+ * A stored pull request as the dashboard shows it, in the shape the plugin's reads have. Its
+ * description is left out of the lists, where it would only weigh them down; a review asks for it.
+ */
+export function toPullRequest(
+  pull: PullDoc,
+  { body = false }: { body?: boolean } = {},
+): PullRequest | undefined {
   const checks = pull.checks.slice(0, MAX_PR_CHECKS).map(({ key: _k, ...c }) => defined(c));
   const ci: CIStatus = !checks.length
     ? 'skipped'
@@ -282,6 +461,22 @@ export function toPullRequest(pull: PullDoc): PullRequest | undefined {
       base: pull.base.slice(0, 300),
       files: pull.files,
       changedFiles: pull.changedFiles,
+      state: pull.open ? 'open' : pull.merged ? 'merged' : 'closed',
+      authorProfile: pull.authorProfile,
+      ...(body ? { body: pull.body, bodyTruncated: pull.bodyTruncated } : {}),
+      createdAt: pull.createdAt,
+      headSha: /^[0-9a-f]{7,64}$/.test(pull.headSha) ? pull.headSha : undefined,
+      mergeable: pull.mergeable,
+      mergeState: pull.mergeState,
+      commits: pull.commits,
+      reviews: pull.log
+        ?.slice(-MAX_PR_REVIEWS)
+        .map(({ by, state, submittedAt }) => defined({ by, state, submittedAt })),
+      requestedReviewers: pull.requestedProfiles ?? pull.requested.map((p) => ({ login: p.login })),
+      requestedTeams: pull.teamProfiles ?? pull.teams.map((slug) => ({ slug })),
+      labels: pull.labels,
+      milestone: pull.milestone,
+      closes: closingIssues(pull.body, pull.repo).slice(0, MAX_PR_CLOSES),
     }),
   );
   return parsed.success ? defined(parsed.data) : undefined;
@@ -395,6 +590,7 @@ async function savePull(
   ).flat();
   const author = pr.user ?? { id: 0, login: 'ghost' };
   const sameHead = before?.headSha === pr.head.sha;
+  const open = pr.state === 'open' && merged !== true;
   const after: PullDoc = {
     _id,
     installationId,
@@ -407,13 +603,18 @@ async function savePull(
     headSha: pr.head.sha,
     author: { id: author.id, login: author.login },
     draft: pr.draft === true,
-    open: pr.state === 'open' && merged !== true,
+    open,
     additions: pr.additions ?? before?.additions ?? 0,
     deletions: pr.deletions ?? before?.deletions ?? 0,
     ...defined({
       changedFiles: pr.changed_files ?? before?.changedFiles,
       files: sameHead ? before?.files : undefined,
+      // A review's copy doesn't say whether it merged: it stays as last heard.
+      merged: open ? undefined : (merged ?? before?.merged),
+      log: before?.log,
     }),
+    ...details(pr, before, sameHead),
+    keptAt: new Date(),
     requested: people.map((p) => ({ id: p.id, login: p.login })),
     teams,
     // The author never reviews their own.
@@ -467,7 +668,8 @@ const ReviewEvent = z.object({
     state: z.string(),
     body: z.string().nullish(),
     html_url: z.url(),
-    user: Account.nullish(),
+    submitted_at: z.string().nullish(),
+    user: User.nullish(),
   }),
   pull_request: PullPayload,
 });
@@ -482,12 +684,16 @@ async function onReview(ctx: Context, payload: unknown) {
   const state = action === 'dismissed' ? 'DISMISSED' : review.state.toUpperCase();
   // A comment-only review leaves the reviewer's decision as it was.
   const by = review.user;
-  if (after && by && state !== 'COMMENTED') {
-    const reviews = [
-      ...after.reviews.filter((r) => r.id !== by.id),
-      { id: by.id, login: by.login, state },
-    ].slice(-100);
-    await pulls().updateOne({ _id: after._id }, { $set: { reviews } });
+  const entry = logEntry(review.id, by, state, review.submitted_at);
+  if (after && entry) {
+    const set: Partial<PullDoc> = { log: logReview(after.log, entry), keptAt: new Date() };
+    if (by && state !== 'COMMENTED') {
+      set.reviews = [
+        ...after.reviews.filter((r) => r.id !== by.id),
+        { id: by.id, login: by.login, state },
+      ].slice(-100);
+    }
+    await pulls().updateOne({ _id: after._id }, { $set: set });
   }
   await tell([...concerned(before), ...concerned(after)]);
   // A review on your pull request by someone else is news, as are the people it mentions.
@@ -607,7 +813,10 @@ async function setCheck(repo: string, sha: string, check: CheckDoc, fallback = f
   for (const pull of found) {
     if (fallback && pull.checks.some((c) => c.key.startsWith('run:'))) continue;
     const checks = [...pull.checks.filter((c) => c.key !== check.key), check].slice(-MAX_PR_CHECKS);
-    await pulls().updateOne({ _id: pull._id, headSha: sha }, { $set: { checks } });
+    await pulls().updateOne(
+      { _id: pull._id, headSha: sha },
+      { $set: { checks, keptAt: new Date() } },
+    );
     ids.push(...concerned(pull));
   }
   await tell(ids);
@@ -798,7 +1007,12 @@ async function onInstallation(ctx: Context, name: string, payload: unknown) {
 const Search = z.object({
   items: z.array(z.object({ number: z.number(), repository_url: z.string() })),
 });
-const ApiReview = z.object({ user: Account.nullish(), state: z.string() });
+const ApiReview = z.object({
+  id: z.number().optional(),
+  user: User.nullish(),
+  state: z.string(),
+  submitted_at: z.string().nullish(),
+});
 const ApiRuns = z.object({
   check_runs: z.array(Check.omit({ head_sha: true, pull_requests: true })),
 });
@@ -814,13 +1028,15 @@ async function readPull(ctx: Context, installationId: number, repo: string, numb
     await api.get(installationId, `/repos/${repo}/pulls/${number}`),
   );
   if (!pr.success) return;
-  const { after } = await savePull(ctx, installationId, repo, pr.data, pr.data.merged === true);
+  // GitHub's own spelling of the repo, whatever case it was asked in.
+  const fullName = pr.data.base.repo?.full_name ?? repo;
+  const { after } = await savePull(ctx, installationId, fullName, pr.data, pr.data.merged === true);
   if (!after) return;
   const sha = after.headSha;
   const [reviews, runs, status] = await Promise.all([
-    api.get(installationId, `/repos/${repo}/pulls/${number}/reviews?per_page=100`),
-    api.get(installationId, `/repos/${repo}/commits/${sha}/check-runs?per_page=100`),
-    api.get(installationId, `/repos/${repo}/commits/${sha}/status`),
+    api.get(installationId, `/repos/${fullName}/pulls/${number}/reviews?per_page=100`),
+    api.get(installationId, `/repos/${fullName}/commits/${sha}/check-runs?per_page=100`),
+    api.get(installationId, `/repos/${fullName}/commits/${sha}/status`),
   ]);
   const r = z.array(ApiReview).safeParse(reviews);
   const c = ApiRuns.safeParse(runs);
@@ -845,6 +1061,10 @@ async function readPull(ctx: Context, installationId: number, repo: string, numb
         reviews: (r.success ? r.data : []).flatMap((x) =>
           x.user ? [{ id: x.user.id, login: x.user.login, state: x.state.toUpperCase() }] : [],
         ),
+        log: (r.success ? r.data : [])
+          .flatMap((x) => (x.id && logEntry(x.id, x.user, x.state, x.submitted_at)) || [])
+          .slice(-MAX_PR_REVIEWS),
+        keptAt: new Date(),
         checks: [...new Map(checks.map((k) => [k.key, k])).values()].slice(0, MAX_PR_CHECKS),
       },
     },
@@ -880,6 +1100,89 @@ export async function backfillOwner(ctx: Context, owner: Owner) {
   if (!(await isCovered(owner))) return;
   const person = await githubPerson(owner);
   if (person) await backfill(ctx, person);
+}
+
+// ── A review's pull request ────────────────────────────────────────────────
+
+/**
+ * Whether the person may be shown this pull request: a public repo's, or one they wrote, were
+ * asked to review or reviewed. Reaching the installation alone isn't enough: an org member may
+ * not see every private repo.
+ */
+function mayShow(pull: PullDoc, person: GitHubPerson) {
+  const id = person.githubId;
+  return (
+    pull.private === false ||
+    pull.author.id === id ||
+    pull.askedIds.includes(id) ||
+    pull.reviews.some((r) => r.id === id) ||
+    !!pull.log?.some((r) => r.byId === id)
+  );
+}
+
+const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+/** The stored pull request, from an installation the person reaches, in any case of its repo. */
+async function findPull(person: GitHubPerson, repo: string, number: number) {
+  if (!person.installations.length) return null;
+  await ensureIndexes();
+  const reach = { installationId: { $in: person.installations } };
+  const exact = await pulls().findOne({ _id: pullKey(repo, number), ...reach });
+  if (exact) return exact;
+  const named = await pulls()
+    .find({ number, ...reach }, { projection: { _id: 1, repo: 1 } })
+    .toArray();
+  const id = named.find((p) => sameName(p.repo, repo))?._id;
+  return id ? pulls().findOne({ _id: id }) : null;
+}
+
+/** The pull request a person's review session reviews, as the App keeps it, for their eyes. */
+export async function reviewedPull(
+  owner: Owner,
+  repo: string,
+  number: number,
+): Promise<{ pull: PullRequest; readAt?: string } | undefined> {
+  const person = await githubPerson(owner);
+  const found = person && (await findPull(person, repo, number));
+  if (!person || !found || !mayShow(found, person)) return undefined;
+  const pull = toPullRequest(found, { body: true });
+  return pull && defined({ pull, readAt: found.keptAt?.toISOString() });
+}
+
+/** Reads tried lately, so a page left open can't send JOC to GitHub again and again. */
+const tried = new Map<string, number>();
+const TRIED_MS = 10 * 60_000;
+
+/**
+ * Reads a reviewed pull request JOC has no copy of (no event on it yet) once, through an
+ * installation the person reaches that has its repo. At most once per TRIED_MS per person.
+ */
+export async function readReviewedPull(
+  ctx: Context,
+  owner: Owner,
+  repo: string,
+  number: number,
+): Promise<void> {
+  const person = await githubPerson(owner);
+  if (!ctx.api || !person?.installations.length) return;
+  if (await findPull(person, repo, number)) return;
+  const key = `${owner}/${repo.toLowerCase()}#${number}`;
+  const now = Date.now();
+  if (now - (tried.get(key) ?? 0) < TRIED_MS) return;
+  for (const [k, at] of tried) if (now - at >= TRIED_MS) tried.delete(k);
+  tried.set(key, now);
+  const org = repo.split('/')[0] ?? '';
+  const reached = await installations()
+    .find({ _id: { $in: person.installations }, suspended: false })
+    .toArray();
+  for (const i of reached) {
+    const has =
+      i.repos.some((r) => sameName(r, repo)) ||
+      (i.selection === 'all' && sameName(i.account.login, org));
+    if (!has) continue;
+    await readPull(ctx, i._id, repo, number);
+    if (await findPull(person, repo, number)) return;
+  }
 }
 
 // ── Dispatch ───────────────────────────────────────────────────────────────
