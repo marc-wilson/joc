@@ -1,4 +1,4 @@
-import { channelsOf, type NotificationsSnapshot, type Session } from '@joc/protocol';
+import { channelsOf, type Session } from '@joc/protocol';
 import {
   type NotificationBellProps,
   NotificationEmpty,
@@ -55,23 +55,21 @@ export function useNotes(records = false): {
   loaded: boolean;
   sessions: Session[];
   connected: boolean;
-  snapshot: NotificationsSnapshot | undefined;
   /** Why the last dismiss didn't take, until the next one. */
   problem?: string;
 } {
   const { sessions, connected } = useSessions();
   const github = useGitHub();
-  const { alerts, snapshot, threads, readThreads, problem } = useNoteData();
+  const { alerts, problem } = useNoteData();
   const notes = useMemo(
-    () => allNotes({ sessions, alerts: alerts ?? [], threads, read: readThreads, github, records }),
-    [sessions, alerts, threads, readThreads, github, records],
+    () => allNotes({ sessions, alerts: alerts ?? [], github, records }),
+    [sessions, alerts, github, records],
   );
   return {
     notes,
-    loaded: connected && alerts !== undefined && snapshot !== undefined,
+    loaded: connected && alerts !== undefined,
     sessions,
     connected,
-    snapshot,
     problem,
   };
 }

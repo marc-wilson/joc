@@ -58,7 +58,7 @@ function useSearchShortcut() {
 }
 
 export function NotificationsPage() {
-  const { notes, loaded, sessions, snapshot, connected, problem } = useNotes(true);
+  const { notes, loaded, sessions, connected, problem } = useNotes(true);
   const now = useNow();
   const [query, setQuery] = useState('');
   const [view, setView] = useState<View>('all');
@@ -76,7 +76,6 @@ export function NotificationsPage() {
   const days = new Map<string, Note[]>();
   for (const n of shown) days.set(dayKey(n.at), [...(days.get(dayKey(n.at)) ?? []), n]);
   const clear = clearable(notes);
-  const more = snapshot?.state === 'reported' && snapshot.more;
 
   return (
     <div className="joc-app app app-notif-page">
@@ -178,15 +177,8 @@ export function NotificationsPage() {
                 body={
                   notes.length
                     ? 'Try another search, view or repository.'
-                    : 'Questions from sessions, review requests and CI on your PRs show up here.'
+                    : 'Questions from sessions, review requests, mentions and CI on your PRs show up here.'
                 }
-              />
-            ) : null}
-            {more ? (
-              <EmptyState
-                compact
-                title="Showing your newest GitHub notifications"
-                body="Older unread ones are on GitHub."
               />
             ) : null}
           </div>

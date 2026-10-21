@@ -4,7 +4,6 @@ import {
   type Alert,
   applyPrefsPatch,
   DEFAULT_PREFS,
-  type GitHubNotification,
   type GitHubSnapshot,
   type PullRequest,
   type Session,
@@ -45,17 +44,18 @@ const alert = (id: string, extra: Partial<Alert> = {}): Alert => ({
   ...extra,
 });
 
-const thread = (id: string, extra: Partial<GitHubNotification> = {}): GitHubNotification => ({
-  id,
-  reason: 'comment',
-  title: 'Fix the auth redirect',
-  type: 'PullRequest',
-  repo: 'harbor-labs/atlas-web',
-  url: `https://github.com/harbor-labs/atlas-web/pull/${id}`,
-  updatedAt: '2026-10-18T09:00:00.000Z',
-  number: Number(id),
-  ...extra,
-});
+/** A comment from GitHub's webhooks: a mention, or one on your pull request. */
+const comment = (id: string, extra: Partial<Alert> = {}): Alert =>
+  alert(id, {
+    kind: 'mention',
+    sessionId: undefined,
+    title: 'Fix the auth redirect',
+    detail: 'mira',
+    number: Number(id),
+    url: `https://github.com/harbor-labs/atlas-web/pull/${id}#issuecomment-${id}01`,
+    at: '2026-10-18T09:00:00.000Z',
+    ...extra,
+  });
 
 const pr = (number: number, extra: Partial<PullRequest> = {}): PullRequest => ({
   number,
@@ -78,8 +78,7 @@ const github = (
   mine: PullRequest[] = [],
 ): GitHubSnapshot => ({ state: 'reported', status: 'ok', reviewRequested, mine, updatedAt });
 
-const notesOf = (src: Partial<NoteSources>) =>
-  allNotes({ sessions: [], alerts: [], threads: [], ...src });
+const notesOf = (src: Partial<NoteSources>) => allNotes({ sessions: [], alerts: [], ...src });
 
 const LATER = '2026-10-18T11:00:00.000Z';
 const EARLIER = '2026-10-18T08:30:00.000Z';
@@ -132,30 +131,25 @@ test('what notifies: needs you, reviews, mentions, failed CI; a long turn only w
       alert('2', { kind: 'needs', sessionId: 'gone', read: true }),
       alert('3', { kind: 'review', sessionId: undefined, number: 7 }),
       alert('4', { kind: 'ci-failed', sessionId: undefined, number: 9, branch: 'fix/9' }),
-    ],
-    threads: [
-      thread('8', { reason: 'mention' }),
-      thread('10', { reason: 'author' }),
-      thread('11', { reason: 'subscribed' }),
-      thread('12', { reason: 'assign', type: 'Issue' }),
+      comment('8'),
+      comment('10', { kind: 'comment' }),
     ],
     records: true,
   });
   assert.deepEqual(
-    panelNotes(notes, DEFAULT_PREFS).map((n) => [n.kind, n.title]),
+    panelNotes(notes, DEFAULT_PREFS).map((n) => [n.kind, n.title, n.meta]),
     [
-      ['question', 'Session a has a question'],
-      ['review', 'Review requested on #7'],
-      ['ci-failed', 'CI failed on #9'],
-      ['mention', 'You were mentioned on #8'],
-      ['mention', 'New activity on your #10'],
+      ['question', 'Session a has a question', 'atlas-web · answer in Claude Code'],
+      ['review', 'Review requested on #7', 'Session 3 · atlas-web'],
+      ['ci-failed', 'CI failed on #9', 'Session 4 · atlas-web'],
+      ['mention', 'You were mentioned on #8', 'mira · Fix the auth redirect · atlas-web'],
+      ['mention', 'New comment on #10', 'mira · Fix the auth redirect · atlas-web'],
     ],
   );
-  // The rest is kept to look back on: a long turn (off by default), a session that waited,
-  // other GitHub activity.
+  // The rest is kept to look back on: a long turn (off by default), a session that waited.
   assert.deepEqual(
     notes.filter((n) => !panelNotes(notes, DEFAULT_PREFS).includes(n)).map((n) => n.id),
-    ['alert:1', 'alert:2', 'github:11', 'github:12'],
+    ['alert:1', 'alert:2'],
   );
   assert.ok(panelNotes(notes, LONG_ON).some((n) => n.id === 'alert:1'));
 });
@@ -165,8 +159,8 @@ test('opening a review or failed CI goes to the pull request in JOC, a mention t
     alerts: [
       alert('3', { kind: 'review', sessionId: undefined, number: 7, at: LATER }),
       alert('4', { kind: 'ci-failed', sessionId: undefined, number: 9 }),
+      comment('8'),
     ],
-    threads: [thread('8', { reason: 'mention' })],
   });
   assert.deepEqual(
     [review?.href, review?.external],
@@ -175,7 +169,7 @@ test('opening a review or failed CI goes to the pull request in JOC, a mention t
   assert.deepEqual([ci?.href, ci?.external], ['/pr?repo=harbor-labs%2Fatlas-web&number=9', false]);
   assert.deepEqual(
     [mention?.href, mention?.external],
-    ['https://github.com/harbor-labs/atlas-web/pull/8', true],
+    ['https://github.com/harbor-labs/atlas-web/pull/8#issuecomment-801', true],
   );
 });
 
@@ -202,58 +196,30 @@ test('a needs alert is a record for the history only, once the session stopped w
   );
 });
 
-test('a review requested both ways is one note that reads both', () => {
+test('reviews and comments are activity, under needs you', () => {
   const notes = notesOf({
-    alerts: [alert('1', { kind: 'review', sessionId: undefined, number: 7, read: true })],
-    threads: [thread('7', { reason: 'review_requested' }), thread('8', { reason: 'mention' })],
+    alerts: [alert('1', { kind: 'review', sessionId: undefined, number: 7 }), comment('8')],
   });
-  assert.deepEqual(
-    notes.map((n) => [n.kind, n.title, n.threadIds, n.unread]),
-    [
-      ['review', 'Review requested on #7', ['7'], true],
-      ['mention', 'You were mentioned on #8', ['8'], true],
-    ],
-  );
   assert.deepEqual(
     groupNotes(notes).map(([g, list]) => [g, list.length]),
     [['activity', 2]],
   );
 });
 
-test('threads read here leave the panel, a review asked both ways too', () => {
-  const notes = notesOf({
-    alerts: [alert('1', { kind: 'review', sessionId: undefined, number: 7, read: true })],
-    threads: [thread('7', { reason: 'review_requested' }), thread('8', { reason: 'mention' })],
-    read: new Set(['7', '8']),
-  });
-  assert.deepEqual(
-    notes.map((n) => [n.threadIds, n.unread]),
-    [
-      [['7'], false],
-      [['8'], false],
-    ],
-  );
-  assert.deepEqual(panelNotes(notes, DEFAULT_PREFS), []);
-});
-
 test('a review request resolves once the pull request leaves your review-requested list', () => {
   const review = alert('1', { kind: 'review', sessionId: undefined, number: 7, at: EARLIER });
-  const asked = thread('7', { reason: 'review_requested', updatedAt: LATER });
   const still = github(LATER, [pr(7)]);
   const reviewed = github(LATER, []);
   // Still asked, or no good read yet: it stays.
   for (const gh of [still, undefined, { ...reviewed, status: 'error' as const }]) {
-    const [note] = notesOf({ alerts: [review], threads: [asked], github: gh });
+    const [note] = notesOf({ alerts: [review], github: gh });
     assert.equal(note?.unread, true);
   }
   // You posted your review (or the request was withdrawn, or it closed): gone from the panel,
   // kept in the history.
-  const [done] = notesOf({ alerts: [review], threads: [asked], github: reviewed });
+  const [done] = notesOf({ alerts: [review], github: reviewed });
   assert.deepEqual([done?.resolved, done?.unread], [true, false]);
   assert.deepEqual(panelNotes([done as Note], DEFAULT_PREFS), []);
-  // A thread alone resolves on the list, however late GitHub touched it.
-  const [lone] = notesOf({ threads: [asked], github: github(EARLIER, []) });
-  assert.equal(lone?.resolved, true);
   // An alert raised after the read: the read can't have seen it yet.
   const [fresh] = notesOf({ alerts: [{ ...review, at: LATER }], github: github(EARLIER, []) });
   assert.equal(fresh?.unread, true);
@@ -267,35 +233,13 @@ test('failed CI resolves once a later read finds it passing, or the pull request
     branch: 'fix/9',
     at: EARLIER,
   });
-  const run = thread('20', {
-    reason: 'ci_activity',
-    alert: 'ci-failed',
-    type: 'CheckSuite',
-    number: undefined,
-    branch: 'fix/9',
-    updatedAt: EARLIER,
-  });
-  const at = (gh?: GitHubSnapshot) => notesOf({ alerts: [failed], threads: [run], github: gh });
-  // The run's thread twins with the alert: one note.
-  assert.deepEqual(
-    at().map((n) => [n.id, n.threadIds]),
-    [['alert:4', ['20']]],
-  );
+  const at = (gh?: GitHubSnapshot) => notesOf({ alerts: [failed], github: gh });
   assert.equal(at(github(LATER, [], [pr(9, { ci: 'fail' })]))[0]?.unread, true);
   assert.equal(at(github(LATER, [], [pr(9, { ci: 'pass' })]))[0]?.resolved, true);
   assert.equal(at(github(LATER, [], [pr(9, { ci: 'pending' })]))[0]?.resolved, true);
   assert.equal(at(github(LATER, [], []))[0]?.resolved, true);
   // A read from before it failed says nothing about it.
   assert.equal(at(github('2026-10-18T08:00:00.000Z', [], [pr(9)]))[0]?.unread, true);
-  // A run on a branch with no pull request waits to be opened.
-  const [branchOnly] = notesOf({
-    threads: [{ ...run, branch: 'spike/x' }],
-    github: github(LATER, [], [pr(9)]),
-  });
-  assert.deepEqual(
-    [branchOnly?.title, branchOnly?.meta, branchOnly?.unread],
-    ['CI failed on spike/x', 'Fix the auth redirect · atlas-web', true],
-  );
 });
 
 test('the panel leaves out kinds the person turned off there, but never a waiting session', () => {
@@ -307,7 +251,7 @@ test('the panel leaves out kinds the person turned off there, but never a waitin
   );
   const notes = notesOf({
     sessions: [session('a')],
-    threads: [thread('8', { reason: 'mention' })],
+    alerts: [comment('8')],
   });
   assert.deepEqual(
     panelNotes(notes, prefs).map((n) => n.kind),
@@ -318,12 +262,11 @@ test('the panel leaves out kinds the person turned off there, but never a waitin
 test('Clear all takes everything but the sessions waiting on you', () => {
   const notes = notesOf({
     sessions: [session('a')],
-    threads: [thread('8', { reason: 'mention' }), thread('9', { reason: 'mention' })],
-    read: new Set(['9']),
+    alerts: [comment('8'), comment('9', { read: true })],
   });
   assert.deepEqual(
     clearable(notes).map((n) => n.id),
-    ['github:8'],
+    ['alert:8'],
   );
 });
 
@@ -340,7 +283,6 @@ const note = (id: string, at: string, group: Note['group'] = 'activity'): Note =
   href: '/',
   external: false,
   repo: 'harbor-labs/atlas-web',
-  threadIds: [],
 });
 
 test('while you read, arrivals wait; a row that went leaves at once', () => {
@@ -370,7 +312,6 @@ test('news is what arrived since, still needs you, and not the session on screen
   const notes = notesOf({
     sessions: [session('a'), session('b')],
     alerts: [alert('1', { read: true })],
-    threads: [thread('11', { reason: 'subscribed' })],
   });
   assert.deepEqual(
     arrived(new Set(['session:b']), notes, 'x').map((n) => n.id),
@@ -388,8 +329,8 @@ test('by default a toast for needs you and review requests, a chime for needs yo
     alerts: [
       alert('3', { kind: 'review', sessionId: undefined, number: 7 }),
       alert('4', { kind: 'ci-failed', sessionId: undefined, number: 9 }),
+      comment('8'),
     ],
-    threads: [thread('8', { reason: 'mention' })],
   });
   const byKind = (kind: string) => notes.filter((n) => n.kind === kind);
   const all = attention(notes, DEFAULT_PREFS);
