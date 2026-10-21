@@ -727,6 +727,10 @@ h4.joc-taskd__label { margin: 0; }
   .joc-hist__meta--wide { display: none; }
   .joc-hist__status--narrow { display: inline-flex; }
 }
+/* ---------- Folded rail: groups labelled by the repo's short name ---------- */
+/* As the session list pass draws the rail: "joc", "refused", not two-letter codes. A longer
+   name is cut off with an ellipsis inside the rail; the group's tooltip has it whole. */
+.joc-rail__repo { display: block; max-width: 100%; padding: 0 var(--space-0\.5); box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
 /* ===== End design gaps (#92) ============================================================== */
 
 /* ===== PR review session (#88) =========================================================== */

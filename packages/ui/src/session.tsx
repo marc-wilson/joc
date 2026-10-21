@@ -350,14 +350,9 @@ export function SessionLink({ title, state = 'idle', href = '#' }: SessionLinkPr
   );
 }
 
-// Two-letter repo mark for the collapsed rail: "atlas-web" → "aw".
-function shortRepo(repo: string): string {
-  const name = repo.split('/').pop() ?? '';
-  const parts = name.split(/[-_.]+/).filter(Boolean);
-  return (
-    parts.length > 1 ? `${parts[0]?.charAt(0)}${parts[1]?.charAt(0)}` : name.slice(0, 2)
-  ).toLowerCase();
-}
+// The collapsed rail's group label: the repo's short name, "harbor-labs/atlas-web" → "atlas-web",
+// cut off with an ellipsis where the rail is too narrow for it (the full name is its tooltip).
+const shortRepo = (repo: string) => repo.split('/').pop() || repo;
 
 export interface SessionRailGroup {
   repo: string;
@@ -419,7 +414,7 @@ export function SessionRail({
             aria-label="Reviews"
           >
             <span className="joc-rail__repo" title="Reviews" aria-hidden="true">
-              rv
+              reviews
             </span>
             {reviews.map((r) => (
               <button
