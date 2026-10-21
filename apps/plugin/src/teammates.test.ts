@@ -49,6 +49,34 @@ test('a teammate message becomes an agent_message, and its hand-back its report'
   assert.equal(agentMessage('<task-notification></task-notification>'), undefined);
 });
 
+test("a hand-back to a session that waits is a meta entry, and it's still the report", () => {
+  const { items } = parseLines(
+    [
+      JSON.stringify({
+        type: 'user',
+        uuid: 'h1',
+        timestamp: at,
+        isMeta: true,
+        message: {
+          content:
+            'Another Claude session sent a message: <agent-message from="a98">\n[Subagent hand-back] The report follows:\n  2 files.\n</agent-message>',
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        uuid: 'h2',
+        timestamp: at,
+        isMeta: true,
+        message: { content: 'Caveat' },
+      }),
+    ],
+    '/work',
+  );
+  assert.deepEqual(items, [
+    { id: 'h1', at, kind: 'agent_message', from: 'a98', text: '2 files.', report: true },
+  ]);
+});
+
 test('a SendMessage call names who it writes to and what it says', () => {
   const { items } = parseLines(
     [
