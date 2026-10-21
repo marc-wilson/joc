@@ -66,6 +66,11 @@ const CLAIM_PATH = '/api/sessions/{id}/prompts/claim';
 const HANDOFF_PATH = '/api/sessions/{id}/prompts/{prompt}/handoff';
 /** How long telling the server about a handoff may take before the next prompt goes on. */
 const HANDOFF_TIMEOUT_MS = 5_000;
+/** How long a submitted prompt has to be refused; past that, Claude Code has queued it. */
+const SUBMIT_SETTLE_MS = 500;
+
+/** A prompt Claude Code didn't take, and why, as the dashboard says it. */
+const refusal = (reason: string): PromptHandoff => ({ ok: false, reason: reason.slice(0, 200) });
 /** The launch poll's: new sessions, such as a PR review, to start beside this one. */
 const LAUNCH_PATH = '/api/sessions/{id}/launches/claim';
 const LAUNCH_POLL_MS = 5000;
@@ -1012,17 +1017,22 @@ export const register: Register = (on) => {
           if (id) await handOff(sessionId, id, { ok: true });
           await running;
         } else if (promptText) {
-          const entered = await $.prompt
+          // `submit` resolves only once the prompt's turn starts, so while a turn runs it waits.
+          // A refusal comes at once; past that, Claude Code has it queued. A later drop still
+          // goes to the dashboard. Not awaited, so the prompts after it queue behind it.
+          const entering: Promise<PromptHandoff> = $.prompt
             .submit({ text: promptText, asUser: true })
-            .catch((error: unknown) => ({ drop: errorDetail(error) }));
+            .then((r) => (r.drop === undefined ? { ok: true } : refusal(r.drop)))
+            .catch((error: unknown) => refusal(errorDetail(error)));
+          const early = await Promise.race([
+            entering,
+            $.clock.sleep(SUBMIT_SETTLE_MS).then(() => undefined),
+          ]);
           if (id) {
-            await handOff(
-              sessionId,
-              id,
-              entered.drop === undefined
-                ? { ok: true }
-                : { ok: false, reason: entered.drop.slice(0, 200) },
-            );
+            await handOff(sessionId, id, early ?? { ok: true });
+            if (!early) {
+              void entering.then((late) => (late.ok ? undefined : handOff(sessionId, id, late)));
+            }
           }
         } else if (id) {
           await handOff(sessionId, id, { ok: false, reason: 'it had nothing to send' });
