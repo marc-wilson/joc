@@ -1,13 +1,14 @@
 import { Button, cx, EmptyState, NotificationGroup, SectionHeader, TextInput } from '@joc/ui';
 import { useEffect, useState } from 'react';
-import { useGitHub, useNow } from './hooks.ts';
+import { useNow } from './hooks.ts';
 import { Nav } from './Nav.tsx';
 import { NoteRow, useNotes } from './Notifications.tsx';
-import { clearNotes, markRead } from './note-data.ts';
-import type { Note, NoteGroup } from './notes.ts';
+import { dismiss } from './note-data.ts';
+import { clearable, type Note, type NoteGroup } from './notes.ts';
 
-// /notifications: everything to look back on, in day groups with clock times. JOC keeps its own
-// alerts for 30 days; GitHub's are the unread ones your plugin last read.
+// /notifications: everything to look back on, in day groups with clock times, the resolved and
+// dismissed ones too. JOC keeps its own alerts for 30 days; GitHub's are the unread ones your
+// plugin last read.
 
 type View = 'all' | NoteGroup;
 
@@ -59,8 +60,6 @@ function useSearchShortcut() {
 
 export function NotificationsPage() {
   const { notes, loaded, sessions, snapshot, connected, problem } = useNotes(true);
-  const github = useGitHub();
-  const prs = github?.state === 'reported' ? [...github.reviewRequested, ...github.mine] : [];
   const now = useNow();
   const [query, setQuery] = useState('');
   const [view, setView] = useState<View>('all');
@@ -77,8 +76,7 @@ export function NotificationsPage() {
     .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
   const days = new Map<string, Note[]>();
   for (const n of shown) days.set(dayKey(n.at), [...(days.get(dayKey(n.at)) ?? []), n]);
-  const unread = notes.filter((n) => n.unread && !n.live);
-  const read = notes.filter((n) => !n.unread && !n.live);
+  const clear = clearable(notes);
   const more = snapshot?.state === 'reported' && snapshot.more;
 
   return (
@@ -151,16 +149,8 @@ export function NotificationsPage() {
                 "JOC's alerts from the last 30 days and your unread GitHub notifications, newest first."
               }
             >
-              <Button
-                variant="secondary"
-                icon="check"
-                disabled={!unread.length}
-                onClick={() => markRead(unread)}
-              >
-                Mark all read
-              </Button>
-              <Button variant="ghost" disabled={!read.length} onClick={() => clearNotes(read)}>
-                Clear read
+              <Button variant="secondary" disabled={!clear.length} onClick={() => dismiss(clear)}>
+                Clear all
               </Button>
             </SectionHeader>
             {shown.length ? (
@@ -177,7 +167,6 @@ export function NotificationsPage() {
                         note={n}
                         now={now}
                         sessions={sessions}
-                        prs={prs}
                         time={clock(n.at)}
                       />
                     ))}

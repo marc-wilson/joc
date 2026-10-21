@@ -2,13 +2,11 @@ import {
   channelsOf,
   type NotificationsSnapshot,
   NotificationTab,
-  type PullRequest,
   type Session,
 } from '@joc/protocol';
 import {
   ArrivalsPill,
   EmptyState,
-  type NotificationAction,
   type NotificationBellProps,
   NotificationGroup,
   NotificationPanel,
@@ -16,19 +14,18 @@ import {
   Toast,
   ToastStack,
 } from '@joc/ui';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type MouseEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { NoteAnswers } from './Answering.tsx';
 import { droppedAnswers, useSent } from './answers.ts';
-import { apiFetch } from './auth.ts';
 import { useGitHub, useNow, useSessions } from './hooks.ts';
-import { sessionForThread } from './links.ts';
 import { NotificationSettingsDialog } from './NotificationSettings.tsx';
-import { clearNotes, markRead, useNoteData } from './note-data.ts';
+import { dismiss, openNote, useNoteData } from './note-data.ts';
 import {
   allNotes,
   arrived,
+  attention,
   bellCounts,
-  ciPrompt,
+  clearable,
   GROUP_LABEL,
   groupNotes,
   type Held,
@@ -37,17 +34,21 @@ import {
   type Note,
   pageTitle,
   panelNotes,
+  withLeaving,
 } from './notes.ts';
 import { supported } from './notify.ts';
 import { currentPrefs, updatePrefs, usePrefs } from './prefs.ts';
+import { chime } from './sound.ts';
 import { age, ago } from './time.ts';
 
-// The notification center: the bell's panel over the page, the toasts, desktop notifications
-// and the tab's title. Sessions waiting on you come first everywhere and stay until they stop
-// waiting.
+// The notification center: the bell's panel over the page, the toasts, the chime, desktop
+// notifications and the tab's title. Sessions waiting on you come first everywhere and stay
+// until they stop waiting. Every action shows in the same frame; the server hears after.
 
 const PANEL_ID = 'joc-notifications';
 const MAX_TOASTS = 3;
+/** = --duration-fast: how long a leaving row takes to fade out before it goes. */
+const LEAVE_MS = 140;
 
 /**
  * Every note, from the one note store (note-data.ts) with what was done here applied, and
@@ -59,13 +60,18 @@ export function useNotes(records = false): {
   sessions: Session[];
   connected: boolean;
   snapshot: NotificationsSnapshot | undefined;
-  /** Why the last mark read or clear didn't take, until the next one. */
+  /** Why the last dismiss didn't take, until the next one. */
   problem?: string;
 } {
   const { sessions, connected } = useSessions();
+  const github = useGitHub();
   const { alerts, snapshot, threads, readThreads, problem } = useNoteData();
+  const notes = useMemo(
+    () => allNotes({ sessions, alerts: alerts ?? [], threads, read: readThreads, github, records }),
+    [sessions, alerts, threads, readThreads, github, records],
+  );
   return {
-    notes: allNotes(sessions, alerts ?? [], threads, records, readThreads),
+    notes,
     loaded: connected && alerts !== undefined && snapshot !== undefined,
     sessions,
     connected,
@@ -74,94 +80,20 @@ export function useNotes(records = false): {
   };
 }
 
-async function sendPrompt(sessionId: string, text: string): Promise<boolean> {
-  const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text, images: [] }),
-  }).catch(() => undefined);
-  return res?.ok === true;
-}
-
-/** Prompts sent from a note this page, so its button says so. */
-const sent = new Map<string, 'sending' | 'sent' | 'failed'>();
-
-/**
- * A note's one action: open the session it's about, review the PR in JOC, send a failed CI run
- * to the session on its branch, or open it on GitHub. Acting on a note marks it read.
- */
-function useAction(
-  note: Note,
-  sessions: Session[],
-  prs: PullRequest[],
-): NotificationAction & { run: () => void } {
-  const [, rerender] = useState(0);
-  const read = () => markRead([note]);
-  const open = (label = 'Open'): NotificationAction & { run: () => void } => ({
-    label,
-    href: note.href,
-    external: note.external,
-    onClick: read,
-    run: () => {
-      read();
-      if (note.external) window.open(note.href, '_blank', 'noopener,noreferrer');
-      else location.assign(note.href);
-    },
-  });
-  if (note.live) return open();
-  if (note.kind === 'review' && note.number) {
-    const href = `/pr?${new URLSearchParams({ repo: note.repo, number: String(note.number) })}`;
-    return {
-      label: 'Review',
-      variant: 'secondary',
-      href,
-      onClick: read,
-      run: () => {
-        read();
-        location.assign(href);
-      },
-    };
-  }
-  if (note.kind === 'ci-failed') {
-    const session = sessionForThread(note, prs, sessions);
-    if (session) {
-      const state = sent.get(note.id);
-      const send = async () => {
-        if (state === 'sending' || state === 'sent') return;
-        sent.set(note.id, 'sending');
-        rerender((n) => n + 1);
-        const ok = await sendPrompt(session.id, ciPrompt(note));
-        sent.set(note.id, ok ? 'sent' : 'failed');
-        rerender((n) => n + 1);
-        if (ok) read();
-      };
-      return {
-        label: state === 'sent' ? 'Sent' : state === 'failed' ? 'Try again' : 'Send to Claude',
-        variant: 'secondary',
-        disabled: state === 'sending' || state === 'sent',
-        onClick: () => void send(),
-        run: () => void send(),
-      };
-    }
-  }
-  return open();
-}
-
 const mono = (note: Note): ReactNode =>
   note.mono && note.text ? <code>{note.text}</code> : note.text;
 
 interface NoteRowProps {
   note: Note;
-  gone?: boolean;
   now: number;
   sessions: Session[];
-  prs: PullRequest[];
   /** The history's clock time instead of an age. */
   time?: string;
+  leaving?: boolean;
 }
 
-export function NoteRow({ note, gone, now, sessions, prs, time }: NoteRowProps) {
-  const action = useAction(note, sessions, prs);
+/** One note's row: opening it reads it; the ✕ dismisses it. */
+export function NoteRow({ note, now, sessions, time, leaving }: NoteRowProps) {
   return (
     <NotificationRow
       lead={note.lead}
@@ -172,10 +104,11 @@ export function NoteRow({ note, gone, now, sessions, prs, time }: NoteRowProps) 
       unread={note.unread}
       needs={note.live}
       answers={note.live ? <NoteAnswers note={note} sessions={sessions} /> : undefined}
-      action={action}
-      onMarkRead={note.live ? undefined : () => markRead([note])}
-      onClear={note.live ? undefined : () => clearNotes([note])}
-      gone={gone}
+      href={note.href}
+      external={note.external}
+      onOpen={(e: MouseEvent<HTMLAnchorElement>) => openNote(note, e)}
+      onDismiss={note.live || !note.unread ? undefined : () => dismiss([note])}
+      leaving={leaving}
       label={`${note.title}, ${ago(note.at, now)}`}
     />
   );
@@ -218,12 +151,54 @@ function PanelEmpty({ tab, snapshot }: { tab: NotificationTab; snapshot?: Notifi
     empty = (
       <EmptyState
         compact
-        title="No notifications"
-        body="Questions from sessions, review requests and CI on your PRs show up here."
+        title="Nothing needs you"
+        body="Questions from sessions, review requests, mentions and failed CI on your PRs show up here."
       />
     );
   }
   return <div className="jn-panel__empty">{empty}</div>;
+}
+
+/**
+ * Rows that just left, kept a moment so they fade out where they were, then dropped. The list's
+ * counts never wait on them.
+ */
+function useLeaving(ids: string[], byId: Map<string, Note>) {
+  const shown = useRef<{ ids: string[]; notes: Map<string, Note> }>({ ids: [], notes: new Map() });
+  const leaving = useRef(new Map<string, Note>());
+  const [, rerender] = useState(0);
+  const present = new Set(ids);
+  for (const id of shown.current.ids) {
+    const was = shown.current.notes.get(id);
+    if (!present.has(id) && was && !leaving.current.has(id)) leaving.current.set(id, was);
+  }
+  // One that came back isn't leaving.
+  for (const id of ids) leaving.current.delete(id);
+  const order = withLeaving(shown.current.ids, ids, new Set(leaving.current.keys()));
+  const notes = new Map([...leaving.current, ...byId]);
+  const key = [...leaving.current.keys()].join(' ');
+  useEffect(() => {
+    shown.current = { ids: order, notes };
+  });
+  // A timer per set of leaving rows.
+  useEffect(() => {
+    if (!key) return;
+    const gone = key.split(' ');
+    const timer = setTimeout(() => {
+      for (const id of gone) leaving.current.delete(id);
+      // Faded out: no longer among the rows drawn, so it isn't taken for leaving again.
+      shown.current = {
+        ids: shown.current.ids.filter((id) => !gone.includes(id)),
+        notes: shown.current.notes,
+      };
+      rerender((n) => n + 1);
+    }, LEAVE_MS);
+    return () => clearTimeout(timer);
+  }, [key]);
+  return order.flatMap((id) => {
+    const note = notes.get(id);
+    return note ? [{ note, leaving: !present.has(id) }] : [];
+  });
 }
 
 interface PanelProps {
@@ -235,47 +210,34 @@ interface PanelProps {
   onClose: () => void;
 }
 
-/** The open panel: the notes by group, held still while you read them. */
+/** The open panel: what needs you, by group. Arrivals wait while you read. */
 function Panel({ notes, sessions, snapshot, problem, anchor, onClose }: PanelProps) {
   const prefs = usePrefs();
   const now = useNow();
-  const github = useGitHub();
-  const prs = github?.state === 'reported' ? [...github.reviewRequested, ...github.mine] : [];
   const tab = prefs.notificationTab;
   const [settings, setSettings] = useState(false);
   const [inList, setInList] = useState(false);
-  const [inPanel, setInPanel] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const body = useRef<HTMLDivElement>(null);
   const [held, setHeld] = useState<Held>();
-  // The last version of each note seen, so a cleared one's slot keeps its height.
-  const cache = useRef(new Map<string, Note>());
 
   const inThisTab = notes.filter((n) => inTab(n, tab));
-  const latestKey = inThisTab.map((n) => n.id).join(' ');
-  const arrivals = inList || scrolled;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: recomputed when the ids or holds change
-  useEffect(() => {
-    setHeld((h) => hold(h, inThisTab, { arrivals, slots: inPanel }));
-  }, [latestKey, arrivals, inPanel]);
-
   const byId = new Map(inThisTab.map((n) => [n.id, n]));
-  for (const n of inThisTab) cache.current.set(n.id, n);
-  const shown = (held?.ids ?? inThisTab.map((n) => n.id)).flatMap((id) => {
-    const live = byId.get(id);
-    if (live) return [{ note: live, gone: false }];
-    const last = cache.current.get(id);
-    return last ? [{ note: last, gone: true }] : [];
-  });
-  const waiting = (held?.waiting ?? []).flatMap((id) => byId.get(id) ?? []);
+  // In the same render as the change: a note that went is off the list now, not after an effect.
+  const current = hold(held, inThisTab, inList || scrolled);
+  const latestKey = `${current.ids.join(' ')}|${current.waiting.join(' ')}`;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: kept when the list changes
+  useEffect(() => setHeld(current), [latestKey]);
+  const rows = useLeaving(current.ids, byId);
+  const waiting = current.waiting.flatMap((id) => byId.get(id) ?? []);
   const unread = notes.filter((n) => n.unread);
-  const read = notes.filter((n) => !n.unread && !n.live);
   // Unread, as the bell counts them, so the bell, the tabs and the summary always agree.
   const count = (t: NotificationTab) =>
     notes.filter((n) => n.unread && inTab(n, t)).length || undefined;
+  const clear = clearable(inThisTab);
 
   function showArrivals() {
-    setHeld(hold(held, inThisTab, { arrivals: false, slots: false }));
+    setHeld(hold(undefined, inThisTab, false));
     body.current?.scrollTo({ top: 0 });
   }
 
@@ -297,8 +259,7 @@ function Panel({ notes, sessions, snapshot, problem, anchor, onClose }: PanelPro
             setHeld(undefined);
           }
         }}
-        onMarkAllRead={unread.some((n) => !n.live) ? () => markRead(unread) : undefined}
-        onClearRead={read.length ? () => clearNotes(read) : undefined}
+        onClearAll={clear.length ? () => dismiss(clear) : undefined}
         onSettings={() => setSettings(true)}
         historyHref="/notifications"
         onClose={() => {
@@ -306,11 +267,7 @@ function Panel({ notes, sessions, snapshot, problem, anchor, onClose }: PanelPro
         }}
         anchor={anchor}
         bodyRef={body}
-        onPointerEnter={() => setInPanel(true)}
-        onPointerLeave={() => {
-          setInPanel(false);
-          setInList(false);
-        }}
+        onPointerLeave={() => setInList(false)}
         onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
         arrivals={
           <ArrivalsPill
@@ -320,23 +277,22 @@ function Panel({ notes, sessions, snapshot, problem, anchor, onClose }: PanelPro
           />
         }
       >
-        {shown.length ? (
+        {rows.length ? (
           <div onPointerEnter={() => setInList(true)} onPointerLeave={() => setInList(false)}>
-            {groupNotes(shown.map((s) => ({ ...s, group: s.note.group }))).map(([group, list]) => (
+            {groupNotes(rows.map((r) => ({ ...r, group: r.note.group }))).map(([group, list]) => (
               <NotificationGroup
                 key={group}
                 label={GROUP_LABEL[group]}
-                count={list.filter((s) => !s.gone).length}
+                count={list.filter((r) => !r.leaving).length || undefined}
                 hint={group === 'needs' ? 'Stays until answered' : undefined}
               >
-                {list.map(({ note, gone }) => (
+                {list.map(({ note, leaving }) => (
                   <NoteRow
                     key={note.id}
                     note={note}
-                    gone={gone}
+                    leaving={leaving}
                     now={now}
                     sessions={sessions}
-                    prs={prs}
                   />
                 ))}
               </NotificationGroup>
@@ -351,6 +307,13 @@ function Panel({ notes, sessions, snapshot, problem, anchor, onClose }: PanelPro
   );
 }
 
+/** Goes where a note points, from a toast or a desktop notification. */
+function follow(note: Note) {
+  if (openNote(note)) return;
+  if (note.external) window.open(note.href, '_blank', 'noopener,noreferrer');
+  else location.assign(note.href);
+}
+
 function showDesktop(note: Note) {
   const prefs = currentPrefs();
   if (!prefs.browserNotifications || !channelsOf(prefs, note.kind).desktop) return;
@@ -359,20 +322,42 @@ function showDesktop(note: Note) {
   const n = new Notification(note.title, { body: note.text ?? note.source, tag: note.id });
   n.onclick = () => {
     window.focus();
-    markRead([note]);
-    if (note.external) window.open(note.href, '_blank', 'noopener,noreferrer');
-    else location.assign(note.href);
+    follow(note);
     n.close();
   };
 }
 
+/** "Send a test" in the settings: the chime, a toast, and a desktop notification if allowed. */
+const testListeners = new Set<() => void>();
+export function sendTestNotification() {
+  chime.test();
+  for (const listener of testListeners) listener();
+  const prefs = currentPrefs();
+  if (prefs.browserNotifications && supported() && Notification.permission === 'granted') {
+    const n = new Notification('Notifications are on', {
+      body: 'This is how JOC tells you something needs you.',
+      tag: 'joc-test',
+    });
+    n.onclick = () => {
+      window.focus();
+      n.close();
+    };
+  }
+}
+
 /**
- * News since the page opened, as toasts and desktop notifications, by the person's choices. What
- * was there when everything loaded isn't news, so a reload never repeats one.
+ * News since the page opened, as toasts, the chime, the bell's pulse and desktop notifications,
+ * by the person's choices. What was there when everything loaded isn't news, so a reload never
+ * repeats one, and never chimes.
  */
-function useArrivals(notes: Note[], loaded: boolean, viewing: string | undefined): Note[] {
+function useArrivals(
+  notes: Note[],
+  loaded: boolean,
+  viewing: string | undefined,
+): { toasts: Note[]; arrivals: number } {
   const seen = useRef<Set<string>>(undefined);
   const [toasts, setToasts] = useState<string[]>([]);
+  const [arrivals, setArrivals] = useState(0);
   const ids = notes.map((n) => n.id).join(' ');
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the set of notes changes
   useEffect(() => {
@@ -381,17 +366,23 @@ function useArrivals(notes: Note[], loaded: boolean, viewing: string | undefined
     seen.current = new Set(notes.map((n) => n.id));
     if (!before) return;
     const news = arrived(before, notes, viewing);
+    if (!news.length) return;
     const prefs = currentPrefs();
-    const toast = news.filter((n) => channelsOf(prefs, n.kind).toast).map((n) => n.id);
-    if (toast.length) setToasts((list) => [...list, ...toast]);
+    const { toasts: toast, chime: ring } = attention(news, prefs);
+    if (toast.length) setToasts((list) => [...list, ...toast.map((n) => n.id)]);
+    if (ring) chime.play();
+    if (panelNotes(news, prefs).length) setArrivals((n) => n + 1);
     for (const n of news) showDesktop(n);
   }, [ids, loaded]);
   const byId = new Map(notes.map((n) => [n.id, n]));
-  // A toast leaves once its note is read, resolved or cleared, wherever that happened.
-  return toasts.flatMap((id) => {
-    const n = byId.get(id);
-    return n?.unread && n.sessionId !== (viewing ?? '\0') ? [n] : [];
-  });
+  // A toast leaves once its note is read, resolved or dismissed, wherever that happened.
+  return {
+    toasts: toasts.flatMap((id) => {
+      const n = byId.get(id);
+      return n?.unread && n.sessionId !== (viewing ?? '\0') ? [n] : [];
+    }),
+    arrivals,
+  };
 }
 
 const TONE = (n: Note) => (n.live ? 'needs' : n.kind === 'ci-failed' ? 'error' : 'neutral');
@@ -405,16 +396,15 @@ function NoteToast({
   sessions: Session[];
   onDismiss: () => void;
 }) {
-  const action = useAction(note, sessions, []);
   return (
     <Toast
       tone={TONE(note)}
       title={note.title}
       body={mono(note)}
       answers={note.live ? <NoteAnswers note={note} sessions={sessions} /> : undefined}
-      action={note.live ? 'Open' : action.label}
+      action="Open"
       onAction={() => {
-        action.run();
+        follow(note);
         onDismiss();
       }}
       onDismiss={onDismiss}
@@ -437,12 +427,21 @@ export function useNotificationCenter(viewing: string | undefined): {
   const counts = bellCounts(panel);
   const [open, setOpen] = useState(false);
   const bell = useRef<HTMLButtonElement>(null);
-  const toasts = useArrivals(notes, loaded, viewing);
+  const { toasts, arrivals } = useArrivals(notes, loaded, viewing);
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
+  const [tests, setTests] = useState(0);
 
   useEffect(() => {
     document.title = pageTitle(counts.needs);
   }, [counts.needs]);
+
+  useEffect(() => {
+    const onTest = () => setTests((n) => n + 1);
+    testListeners.add(onTest);
+    return () => {
+      testListeners.delete(onTest);
+    };
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -469,12 +468,14 @@ export function useNotificationCenter(viewing: string | undefined): {
   // Oldest stay put; newer ones wait behind the "more" bar. Newest of those shown on top. While
   // the panel is open it has them all, so the stack steps aside.
   const visible = stack.slice(0, MAX_TOASTS).reverse();
-  const dismiss = (id: string) => setDismissed((s) => new Set([...s, id]));
+  const hide = (id: string) => setDismissed((s) => new Set([...s, id]));
+  const test = tests > 0 && !dismissed.has(`test:${tests}`);
 
   return {
     bell: {
       unread: counts.unread,
       needs: counts.needs,
+      arrivals,
       open,
       onToggle: () => setOpen((o) => !o),
       controls: open ? PANEL_ID : undefined,
@@ -492,17 +493,25 @@ export function useNotificationCenter(viewing: string | undefined): {
             onClose={() => setOpen(false)}
           />
         ) : null}
-        {(visible.length || dropped.length) && !open ? (
+        {(visible.length || dropped.length || test) && !open ? (
           <ToastStack more={stack.length - visible.length} onOpenMore={() => setOpen(true)}>
+            {test ? (
+              <Toast
+                key={`test:${tests}`}
+                title="Notifications are on"
+                body="This is how JOC tells you something needs you."
+                onDismiss={() => hide(`test:${tests}`)}
+              />
+            ) : null}
             {visible.map((n) => (
-              <NoteToast key={n.id} note={n} sessions={sessions} onDismiss={() => dismiss(n.id)} />
+              <NoteToast key={n.id} note={n} sessions={sessions} onDismiss={() => hide(n.id)} />
             ))}
             {dropped.map((d) => (
               <Toast
                 key={d.waitingId}
                 title="Answered in Claude Code"
                 body={`${d.title ?? 'The session'} was answered there first, so your answer from JOC wasn’t used.`}
-                onDismiss={() => dismiss(`answer:${d.waitingId}`)}
+                onDismiss={() => hide(`answer:${d.waitingId}`)}
               />
             ))}
           </ToastStack>

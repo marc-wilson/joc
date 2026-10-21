@@ -20,7 +20,7 @@ function deferred<T>() {
 
 const alert = (id: string, read = false): Alert => ({
   id,
-  kind: 'finished',
+  kind: 'long-turn',
   title: `Session ${id}`,
   repo: 'harbor-labs/atlas-web',
   sessionId: `s${id}`,
@@ -252,4 +252,40 @@ test('reads are one at a time: a burst of events reads once more, not once each'
   assert.equal(s.gets.alerts.length, 1);
   await s.answer('alerts', [alert('a')]);
   assert.equal(s.gets.alerts.length, 0);
+});
+
+test('Clear all on ninety-odd shows in the same frame, in one call each, and stays cleared', async () => {
+  const alerts = Array.from({ length: 90 }, (_, i) => alert(`a${i}`));
+  const threads = [thread('1'), thread('2'), thread('3')];
+  const s = await loaded(alerts, threads);
+  let heard = 0;
+  s.store.subscribe(() => heard++);
+  void s.store.markRead(
+    alerts.map((a) => a.id),
+    threads.map((t) => t.id),
+  );
+  // Synchronously: no await between the click and what the panel draws.
+  assert.deepEqual(unreadAlerts(s), []);
+  assert.deepEqual([...s.store.get().readThreads].sort(), ['1', '2', '3']);
+  assert.ok(heard > 0);
+  assert.deepEqual(
+    s.posts.map((p) => [p.kind, p.ids.length]),
+    [
+      ['read', 90],
+      ['threads', 3],
+    ],
+  );
+  // Refetches that started before the server took it, answered with the old state: still gone.
+  s.event(undefined);
+  await s.answer('alerts', alerts);
+  await s.answer('notifications', snap(...threads));
+  assert.deepEqual(unreadAlerts(s), []);
+  assert.deepEqual([...s.store.get().readThreads].sort(), ['1', '2', '3']);
+  await s.post(
+    'read',
+    alerts.map((a) => ({ ...a, read: true })),
+  );
+  await s.post('threads', snap());
+  assert.deepEqual(unreadAlerts(s), []);
+  assert.deepEqual([...s.store.get().readThreads].sort(), ['1', '2', '3']);
 });

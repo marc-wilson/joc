@@ -8,10 +8,12 @@ import {
   type NotificationMatrixKind,
 } from '@joc/ui';
 import { useEffect, useState } from 'react';
+import { sendTestNotification } from './Notifications.tsx';
 import { supported } from './notify.ts';
 import { updatePrefs, usePrefs } from './prefs.ts';
 
-// Where each kind of notification shows up: Panel, Toast, Desktop, kept with the person's prefs.
+// Where each kind of notification shows up: Panel, Toast, Sound, Desktop, kept with the person's
+// prefs.
 // Whether this browser may show desktop notifications is the browser's own, asked for here.
 
 const GROUPS: { label: string; kinds: { id: NotificationKind; label: string; note?: string }[] }[] =
@@ -21,20 +23,19 @@ const GROUPS: { label: string; kinds: { id: NotificationKind; label: string; not
       kinds: [
         { id: 'question', label: 'Asks a question' },
         { id: 'permission', label: 'Wants permission' },
-        { id: 'finished', label: 'Finished a turn', note: 'Not while you’re viewing that session' },
+        {
+          id: 'long-turn',
+          label: 'Finished a long turn',
+          note: 'Over five minutes; not while you’re viewing that session',
+        },
       ],
     },
     {
       label: 'GitHub',
       kinds: [
-        { id: 'review', label: 'Review requested' },
-        { id: 'mention', label: 'Comment or mention' },
-        { id: 'ci-failed', label: 'CI failed on your PR' },
-        {
-          id: 'github',
-          label: 'Other GitHub activity',
-          note: 'Assignments, state changes, threads you watch',
-        },
+        { id: 'review', label: 'Review requested', note: 'Until you post your review' },
+        { id: 'mention', label: 'Mention or comment on your PR' },
+        { id: 'ci-failed', label: 'CI failed on your PR', note: 'Until CI passes again' },
       ],
     },
   ];
@@ -75,17 +76,6 @@ function DesktopStatus() {
         : allowed
           ? 'Desktop notifications are allowed in this browser'
           : 'Desktop notifications aren’t allowed in this browser yet';
-
-  function test() {
-    const n = new Notification('Notifications are on', {
-      body: 'This is how JOC tells you when a session needs you.',
-      tag: 'joc-test',
-    });
-    n.onclick = () => {
-      window.focus();
-      n.close();
-    };
-  }
 
   return (
     <div className="app-notif-desktop">
@@ -136,16 +126,38 @@ function DesktopStatus() {
         <Button variant="secondary" size="sm" onClick={() => void ask()}>
           Allow in this browser
         </Button>
-      ) : allowed ? (
-        <Button variant="ghost" size="sm" onClick={test}>
-          Send a test
-        </Button>
       ) : null}
     </div>
   );
 }
 
-/** The desktop status and the Panel / Toast / Desktop matrix. */
+/** The chime's master switch, and a test of how a notification arrives. */
+function SoundStatus() {
+  const prefs = usePrefs();
+  return (
+    <div className="app-notif-desktop">
+      <span className="app-notif-desktop__lead">
+        <Icon name="bell" size={14} />
+      </span>
+      <div className="app-notif-desktop__text">
+        <label className="app-notif-desktop__check">
+          <input
+            type="checkbox"
+            className="jn-check"
+            checked={prefs.notificationSound}
+            onChange={(e) => updatePrefs({ notificationSound: e.target.checked })}
+          />
+          Sound: a short chime for the kinds set to Sound
+        </label>
+      </div>
+      <Button variant="ghost" size="sm" onClick={sendTestNotification}>
+        Send a test
+      </Button>
+    </div>
+  );
+}
+
+/** The sound and desktop switches and the Panel / Toast / Sound / Desktop matrix. */
 export function NotificationSettingsForm() {
   const prefs = usePrefs();
   const groups = GROUPS.map((g) => ({
@@ -160,9 +172,11 @@ export function NotificationSettingsForm() {
   }));
   return (
     <div className="app-notif-settings">
+      <SoundStatus />
       <DesktopStatus />
       <NotificationMatrix
         groups={groups}
+        soundOff={!prefs.notificationSound}
         onChange={(kind, channel, on) => {
           const id = kind as NotificationKind;
           updatePrefs({
@@ -178,7 +192,7 @@ export function NotificationSettingsForm() {
 }
 
 export const resetNotificationSettings = () =>
-  updatePrefs({ notificationKinds: {}, desktopWhenAway: true });
+  updatePrefs({ notificationKinds: {}, desktopWhenAway: true, notificationSound: true });
 
 /** The settings as a dialog, from the panel's settings button. */
 export function NotificationSettingsDialog({ onClose }: { onClose: () => void }) {

@@ -1,5 +1,5 @@
 import { Alert, NotificationsSnapshot } from '@joc/protocol';
-import { useSyncExternalStore } from 'react';
+import { type MouseEvent, useSyncExternalStore } from 'react';
 import { z } from 'zod';
 import { apiFetch } from './auth.ts';
 import { createNoteStore, type NoteData } from './note-store.ts';
@@ -22,6 +22,8 @@ async function call<T>(path: string, schema: z.ZodType<T>, body?: unknown): Prom
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify(body),
+            // Opening a note can leave the page: the read still goes out.
+            keepalive: true,
           },
     );
     if (!res.ok) return undefined;
@@ -53,19 +55,37 @@ export const useNoteData = (): NoteData => useSyncExternalStore(noteStore.subscr
 const alertIds = (notes: Note[]) => notes.flatMap((n) => (n.alertId ? [n.alertId] : []));
 const threadIds = (notes: Note[]) => notes.flatMap((n) => n.threadIds);
 
-/** Marks the notes read: their alerts here, their threads on GitHub. Shows at once. */
-export function markRead(notes: Note[]): void {
+/**
+ * Dismisses the notes, as opening them does: their alerts read here, their threads on GitHub.
+ * They leave the panel in the same frame; the server hears after. A session waiting on you
+ * isn't dismissed: it goes when it's answered.
+ */
+export function dismiss(notes: Note[]): void {
   const list = notes.filter((n) => !n.live && n.unread);
   if (list.length) void noteStore.markRead(alertIds(list), threadIds(list));
-}
-
-/** Clears the notes. Their rows leave at once. */
-export function clearNotes(notes: Note[]): void {
-  const list = notes.filter((n) => !n.live);
-  if (list.length) void noteStore.clear(alertIds(list), threadIds(list));
 }
 
 /** Marks these alerts read, as looking at their session does. */
 export function readAlerts(ids: string[]): void {
   if (ids.length) void noteStore.markRead(ids, [], true);
+}
+
+/** The event App follows to open a session without a page load. */
+export const OPEN_SESSION = 'popstate';
+
+/**
+ * Opening a note reads it. A session on the dashboard you're on opens in place, with no page
+ * load: true when that's done (and the click's own navigation prevented). Otherwise the link
+ * goes where it points.
+ */
+export function openNote(note: Note, e?: MouseEvent): boolean {
+  dismiss([note]);
+  if (e && (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return false;
+  if (note.external || !note.href.startsWith('/?session=') || location.pathname !== '/') {
+    return false;
+  }
+  e?.preventDefault();
+  history.pushState(null, '', note.href);
+  window.dispatchEvent(new PopStateEvent(OPEN_SESSION));
+  return true;
 }

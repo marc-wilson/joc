@@ -48,7 +48,7 @@ interface AlertOp {
 const newer = (a: string, b: string) => Date.parse(a) > Date.parse(b);
 
 export const PROBLEM = {
-  read: 'Couldn’t mark read. Try again.',
+  read: 'Couldn’t dismiss. Try again.',
   clear: 'Couldn’t clear. Try again.',
 } as const;
 
