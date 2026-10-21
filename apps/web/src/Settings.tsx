@@ -175,7 +175,7 @@ export function SettingsPage() {
           <SettingsSection
             id="notifications"
             title="Notifications"
-            description="Choose where each kind shows up. Everything is kept in history for 30 days."
+            description="Each notification clears itself once it’s handled. History keeps them for 30 days."
             actions={
               <Button variant="ghost" size="sm" onClick={resetNotificationSettings}>
                 Reset to defaults

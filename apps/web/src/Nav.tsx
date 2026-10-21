@@ -27,7 +27,7 @@ export function Nav({ page, connected, viewing }: Props) {
     <>
       <NavBar
         items={[
-          { id: 'sessions', label: 'Sessions', href: '/', needs },
+          { id: 'sessions', label: 'Sessions', href: '/', needs, pulse: center.needsArrivals },
           { id: 'github', label: 'GitHub', href: '/github' },
           { id: 'history', label: 'History', href: '/history' },
           { id: 'machines', label: 'Machines', href: '/link' },

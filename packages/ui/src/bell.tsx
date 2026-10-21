@@ -2,38 +2,58 @@ import type { Ref } from 'react';
 import { cx } from './cx.ts';
 import { Icon } from './Icon.tsx';
 
+export interface CountPillProps {
+  count: number;
+  /** Something here needs you: the pill is needs orange. Otherwise it's neutral. */
+  needs?: boolean;
+  /**
+   * Counts arrivals: each time it goes up, the pill pulses once (a ring whose colour fades over
+   * --duration-arrive; nothing under reduced motion). 0 or left out for none yet.
+   */
+  pulse?: number;
+}
+
+const capped = (n: number) => (n > 99 ? '99+' : String(n));
+
+/** The count pill the bell and the nav bar's Sessions item share. Hidden at 0. */
+export function CountPill({ count, needs, pulse = 0 }: CountPillProps) {
+  if (!count) return null;
+  return (
+    // Keyed by the arrivals, so each one plays the pulse once.
+    <span
+      key={pulse}
+      className={cx('joc-count', needs && 'is-needs', pulse > 0 && 'joc-arriving')}
+      aria-hidden="true"
+    >
+      {capped(count)}
+    </span>
+  );
+}
+
 export interface NotificationBellProps {
-  /** Unread notifications, needs included. */
+  /** Every notification still needing you: the sessions waiting on you and unread activity. */
   unread: number;
-  /** Sessions that need you: when above 0 the chip counts only these, in needs orange. */
+  /** Of those, sessions waiting on you: above 0, the count is needs orange. */
   needs: number;
   open: boolean;
   onToggle: () => void;
-  /**
-   * Counts arrivals: each time it goes up, the chip pulses once (opacity only, and not at all
-   * under reduced motion). 0 or left out for none yet.
-   */
+  /** Counts arrivals, for the pill's one pulse (CountPill). */
   arrivals?: number;
   /** The panel it opens, for aria-controls. */
   controls?: string;
   buttonRef?: Ref<HTMLButtonElement>;
 }
 
-const capped = (n: number) => (n > 99 ? '99+' : String(n));
-
 function label(unread: number, needs: number): string {
+  const rest = unread - needs;
   const parts = [
     needs ? `${needs} ${needs === 1 ? 'needs' : 'need'} you` : '',
-    unread ? `${unread} unread` : '',
+    rest ? `${rest} unread` : '',
   ].filter(Boolean);
-  return parts.length ? `Notifications: ${parts.join(', ')}` : 'Notifications';
+  return parts.length ? `Notifications, ${parts.join(', ')}` : 'Notifications';
 }
 
-/**
- * The bell in the nav bar that opens the notifications panel. Its chip is outlined and neutral
- * for unread notifications, and filled needs orange with a diamond, counting only those, while a
- * session needs you: form tells them apart before colour does.
- */
+/** The bell in the nav bar that opens the notification panel, with its count pill. */
 export function NotificationBell({
   unread,
   needs,
@@ -43,12 +63,11 @@ export function NotificationBell({
   controls,
   buttonRef,
 }: NotificationBellProps) {
-  const count = needs || unread;
   return (
     <button
       ref={buttonRef}
       type="button"
-      className={cx('jn-bell', open && 'is-open')}
+      className="joc-bell"
       aria-label={label(unread, needs)}
       aria-haspopup="dialog"
       aria-expanded={open}
@@ -57,21 +76,7 @@ export function NotificationBell({
       onClick={onToggle}
     >
       <Icon name="bell" />
-      {count ? (
-        // Keyed by its text and the arrivals, so a new count fades in where the old one was, and
-        // an arrival pulses it once.
-        <span
-          key={`${needs ? 'n' : 'u'}${count}:${arrivals}`}
-          className={cx(
-            'jn-chip',
-            needs > 0 && 'jn-chip--needs',
-            arrivals > 0 ? 'jn-chip--arrived' : 'joc-fade-in',
-          )}
-          aria-hidden="true"
-        >
-          {capped(count)}
-        </span>
-      ) : null}
+      <CountPill count={unread} needs={needs > 0} pulse={arrivals} />
     </button>
   );
 }

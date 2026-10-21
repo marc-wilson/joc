@@ -17,7 +17,6 @@ import {
   clearable,
   groupNotes,
   hold,
-  inTab,
   type Note,
   type NoteSources,
   pageTitle,
@@ -102,12 +101,23 @@ test('a session waiting on you is a question or a permission, pinned first and a
     alerts: [alert('1')],
   });
   assert.deepEqual(
-    notes.map((n) => [n.kind, n.title, n.text, n.live]),
+    notes.map((n) => [n.kind, n.title, n.meta, n.code, n.live]),
     [
-      ['permission', 'Session a wants permission', 'pnpm prisma migrate reset', true],
-      ['question', 'Session b needs you', 'Which sender domain should I use?', true],
-      ['long-turn', 'Session 1 finished', undefined, undefined],
+      ['permission', 'Session a needs permission', 'atlas-web', 'pnpm prisma migrate reset', true],
+      [
+        'question',
+        'Session b has a question',
+        'atlas-web · answer in Claude Code',
+        undefined,
+        true,
+      ],
+      ['long-turn', 'Session 1 finished', 'atlas-web', undefined, undefined],
     ],
+  );
+  // A plugin from before answers from JOC: nothing to answer inline.
+  assert.deepEqual(
+    notes.map((n) => n.answer),
+    [undefined, undefined, undefined],
   );
   assert.deepEqual(bellCounts(panelNotes(notes, LONG_ON)), { needs: 2, unread: 3 });
   assert.equal(pageTitle(2), '(2) JOC');
@@ -134,7 +144,7 @@ test('what notifies: needs you, reviews, mentions, failed CI; a long turn only w
   assert.deepEqual(
     panelNotes(notes, DEFAULT_PREFS).map((n) => [n.kind, n.title]),
     [
-      ['question', 'Session a needs you'],
+      ['question', 'Session a has a question'],
       ['review', 'Review requested on #7'],
       ['ci-failed', 'CI failed on #9'],
       ['mention', 'You were mentioned on #8'],
@@ -187,7 +197,7 @@ test('a needs alert is a record for the history only, once the session stopped w
   );
   const [record] = notesOf({ alerts: [needs], records: true });
   assert.deepEqual(
-    [record?.title, record?.text, record?.unread, record?.historyOnly],
+    [record?.title, record?.code, record?.unread, record?.historyOnly],
     ['Session 1 wanted permission', 'Edit src/app.ts', false, true],
   );
 });
@@ -206,7 +216,7 @@ test('a review requested both ways is one note that reads both', () => {
   );
   assert.deepEqual(
     groupNotes(notes).map(([g, list]) => [g, list.length]),
-    [['reviews', 2]],
+    [['activity', 2]],
   );
 });
 
@@ -283,8 +293,8 @@ test('failed CI resolves once a later read finds it passing, or the pull request
     github: github(LATER, [], [pr(9)]),
   });
   assert.deepEqual(
-    [branchOnly?.title, branchOnly?.unread, inTab(branchOnly as Note, 'github')],
-    ['CI failed on spike/x', true, true],
+    [branchOnly?.title, branchOnly?.meta, branchOnly?.unread],
+    ['CI failed on spike/x', 'Fix the auth redirect · atlas-web', true],
   );
 });
 
@@ -321,9 +331,9 @@ const note = (id: string, at: string, group: Note['group'] = 'activity'): Note =
   id,
   kind: 'mention',
   group,
-  github: false,
   lead: { state: 'idle' },
   title: id,
+  meta: 'atlas-web',
   source: 'atlas-web',
   at,
   unread: true,
@@ -341,11 +351,11 @@ test('while you read, arrivals wait; a row that went leaves at once', () => {
   const first = hold(undefined, [a, b, n], false);
   assert.deepEqual(first.ids, ['n', 'b', 'a']);
 
-  // Pointer in the list: c waits behind the pill, and b, dismissed, is gone at once.
+  // The panel open: c waits behind the new-items bar, and b, dismissed, is gone at once.
   const reading = hold(first, [a, c, n], true);
   assert.deepEqual(reading, { ids: ['n', 'a'], waiting: ['c'] });
 
-  // Pointer gone: everything takes its place, newest first in its group.
+  // Shown: everything takes its place, newest first in its group.
   assert.deepEqual(hold(reading, [a, c, n], false), { ids: ['n', 'c', 'a'], waiting: [] });
 });
 

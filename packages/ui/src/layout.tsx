@@ -1,20 +1,23 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Avatar } from './Avatar.tsx';
-import { NotificationBell, type NotificationBellProps } from './bell.tsx';
+import { CountPill, NotificationBell, type NotificationBellProps } from './bell.tsx';
 import { CIMark } from './ci.tsx';
 import { CopyCommand } from './code.tsx';
 import { Button } from './controls.tsx';
 import { cx } from './cx.ts';
 import { Icon, type IconName } from './Icon.tsx';
 import { LogoMark } from './Logo.tsx';
-import { StateBadge, StateDot } from './state.tsx';
+import { StateDot } from './state.tsx';
 
 export interface NavItem {
   id: string;
   label: string;
   href?: string;
   count?: number;
+  /** Sessions needing you: a needs-orange count pill. */
   needs?: number;
+  /** Counts arrivals among `needs`, for the pill's one pulse (CountPill). */
+  pulse?: number;
 }
 
 export interface NavBarProps {
@@ -52,8 +55,11 @@ export function NavBar({
               aria-current={on ? 'page' : undefined}
             >
               {it.label}
-              {it.needs ? <StateBadge state="needs" label={String(it.needs)} /> : null}
-              {it.count != null ? <span className="joc-nav__count">{it.count}</span> : null}
+              {it.needs ? (
+                <CountPill count={it.needs} needs pulse={it.pulse} />
+              ) : it.count ? (
+                <CountPill count={it.count} />
+              ) : null}
             </a>
           );
         })}
@@ -136,8 +142,6 @@ export interface ToastProps {
   action?: string;
   onAction?: () => void;
   onDismiss?: () => void;
-  /** A needs toast's answers (NeedsAnswers), under its body. */
-  answers?: ReactNode;
   /**
    * Stays until acted on or dismissed. Defaults to true for `needs`; otherwise the toast calls
    * `onDismiss` after TOAST_MS, paused while the pointer or focus is on it.
@@ -152,7 +156,6 @@ export function Toast({
   action,
   onAction,
   onDismiss,
-  answers,
   persist = tone === 'needs',
 }: ToastProps) {
   const [held, setHeld] = useState(false);
@@ -190,7 +193,6 @@ export function Toast({
       <div className="joc-toast__text">
         <div className="joc-toast__title">{title}</div>
         {body ? <div className="joc-toast__body">{body}</div> : null}
-        {answers ? <div className="jn-answers">{answers}</div> : null}
       </div>
       {action ? (
         <Button variant={tone === 'needs' ? 'primary' : 'ghost'} size="sm" onClick={onAction}>

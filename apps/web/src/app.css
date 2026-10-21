@@ -886,50 +886,28 @@
 .app-notif-settings {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-4);
 }
 
 .app-notif-dialog .app-notif-settings {
   padding: var(--space-4);
+  gap: var(--space-4);
 }
 
-.app-notif-desktop {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--bg-raised);
-}
-
-.app-notif-desktop__lead {
-  flex: none;
-  height: 20px;
+.app-notif-foot {
   display: flex;
   align-items: center;
-  color: var(--text-secondary);
+  gap: var(--space-3);
 }
 
-.app-notif-desktop__text {
+.app-notif-foot p {
   flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.app-notif-desktop__title {
-  font-weight: 550;
-}
-
-.app-notif-desktop__hint {
+  margin: 0;
   font-size: 12px;
   line-height: 16px;
   color: var(--text-secondary);
 }
 
-.app-notif-desktop__check,
 .app-notif-filters__check,
 .app-notif-filters__repo {
   display: flex;
@@ -1011,7 +989,7 @@
 
 .app-notif-history__inner {
   width: 100%;
-  max-width: calc(var(--notif-row) * 15);
+  max-width: calc(var(--row-notif) * 16);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);

@@ -4,6 +4,7 @@ import type { Session, Waiting } from '@joc/protocol';
 import {
   answerStatus,
   droppedAnswers,
+  inlineQuestion,
   quickQuestion,
   type Sent,
   sendAnswer,
@@ -123,10 +124,62 @@ test('an answer from JOC that Claude Code beat is said once', () => {
   );
 });
 
-test('a needs note carries the wait, and a command reads as one', () => {
-  const [note] = needsNotes([session({ waiting: permission, activity: 'Permission: x' })]);
+test('a needs note carries the wait: a permission answers inline beside its command', () => {
+  const [note] = needsNotes([
+    session({ waiting: permission, activity: 'Permission: x', branch: 'feat/resend' }),
+  ]);
   assert.equal(note?.waiting?.id, 'wait-p1');
-  assert.equal(note?.title, 'Migrate mailer to Resend wants to run a command');
-  assert.equal(note?.text, 'pnpm prisma migrate reset');
-  assert.equal(note?.mono, true);
+  assert.deepEqual(
+    [note?.title, note?.meta, note?.answer, note?.command],
+    [
+      'Migrate mailer to Resend needs permission',
+      'atlas-web · feat/resend',
+      'permission',
+      'pnpm prisma migrate reset',
+    ],
+  );
+  assert.deepEqual(
+    [note?.toastTitle, note?.text],
+    ['Migrate mailer to Resend needs you', 'Claude wants to run pnpm prisma migrate reset'],
+  );
+});
+
+test('a short single-choice question answers inline; anything else opens the session', () => {
+  assert.equal(inlineQuestion(question)?.question, 'Which sender domain should I use?');
+  const [quick] = needsNotes([session({ waiting: question })]);
+  assert.deepEqual(
+    [quick?.title, quick?.answer],
+    ['Migrate mailer to Resend: Which sender domain should I use?', 'options'],
+  );
+  const three: Waiting = {
+    ...question,
+    questions: [
+      {
+        question: 'Which cache?',
+        options: [{ label: 'Redis' }, { label: 'In-memory' }, { label: 'None' }],
+        multiSelect: false,
+      },
+    ],
+  };
+  assert.equal(inlineQuestion(three), undefined);
+  const long: Waiting = {
+    ...question,
+    questions: [
+      {
+        question: 'Which cache?',
+        options: [{ label: 'Redis, behind the session store' }, { label: 'No' }],
+        multiSelect: false,
+      },
+    ],
+  };
+  assert.equal(inlineQuestion(long), undefined);
+  const [open] = needsNotes([session({ waiting: three })]);
+  assert.deepEqual(
+    [open?.title, open?.meta, open?.answer],
+    [
+      'Migrate mailer to Resend has a question',
+      'atlas-web · 3 options · open to answer',
+      undefined,
+    ],
+  );
 });

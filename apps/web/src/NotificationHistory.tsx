@@ -15,7 +15,6 @@ type View = 'all' | NoteGroup;
 const VIEWS: { id: View; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'needs', label: 'Needs you' },
-  { id: 'reviews', label: 'Reviews' },
   { id: 'activity', label: 'Activity' },
 ];
 
@@ -38,7 +37,7 @@ const clock = (iso: string) =>
 
 const matches = (n: Note, query: string) => {
   const q = query.trim().toLowerCase();
-  return !q || [n.title, n.source, n.text ?? '', n.repo].some((s) => s.toLowerCase().includes(q));
+  return !q || [n.title, n.meta, n.code ?? '', n.repo].some((s) => s.toLowerCase().includes(q));
 };
 
 /** `/` jumps to the search, unless the person is already typing somewhere. */
@@ -109,12 +108,12 @@ export function NotificationsPage() {
           </nav>
           {repos.length ? (
             <fieldset className="app-notif-filters__repos">
-              <legend className="jn-label">Repositories</legend>
+              <legend className="joc-notif-label">Repositories</legend>
               {repos.map((repo) => (
                 <label key={repo} className="app-notif-filters__repo">
                   <input
                     type="checkbox"
-                    className="jn-check"
+                    className="joc-notif-check"
                     checked={!hidden.has(repo)}
                     onChange={(e) => {
                       const next = new Set(hidden);
@@ -131,7 +130,7 @@ export function NotificationsPage() {
           <label className="app-notif-filters__check">
             <input
               type="checkbox"
-              className="jn-check"
+              className="joc-notif-check"
               checked={unreadOnly}
               onChange={(e) => setUnreadOnly(e.target.checked)}
             />

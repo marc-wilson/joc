@@ -1,143 +1,253 @@
-/* @joc/ui — notification center. New pieces only; everything else is the JOC bundle. Prefix: jn- */
-/* Copied from the Claude Design pass for issue #38. Not in the JOC design system yet: move it into
-   styles/ when the design system has it, and delete this file. */
+/* @joc/ui — notification center v2 (issue #74). Prefix: joc-notif-, joc-bell, joc-count.
+   The first part is the Claude Design pass "JOC Notification Center v2" (notifications.css), as it
+   came, less its is-resolved rows (a handled row leaves at once here, see below). Not in the
+   JOC design system yet: move it into styles/ when the design system has it.
+   JOC's own additions follow it, tokens only.
+   Motion: opacity and colour only. A dot (StateDot) only ever means a session state:
+   unread is weight + colour, never a dot. */
 
 :root {
-  --notif-bell: 30px;              /* = control-md */
-  --notif-chip: 16px;
-  --notif-panel-w: 440px;
-  --notif-panel-max-h: min(760px, calc(100vh - 72px));
-  --notif-panel-offset: 8px;       /* gap below the 48px NavBar */
-  --notif-head: 48px;
-  --notif-group-head: 28px;        /* = row-dense */
-  --notif-row: 64px;
-  --notif-row-answer: 100px;
-  --notif-newpill: 28px;
-  --toast-w: 380px;
-  --toast-gap: 8px;
-  --toast-max: 3;
-  --notif-history-filters: 260px;  /* = tree */
+  --notif-panel-w: 400px;      /* NEW */
+  --notif-panel-max-h: 560px;  /* NEW */
+  --notif-header: 44px;        /* NEW */
+  --row-notif: 60px;           /* NEW  two-line row */
+  --row-notif-action: 92px;    /* NEW  row + inline answer */
+  --count-pill: 16px;          /* NEW */
+  --duration-arrive: 900ms;    /* NEW  one soft pulse */
 }
 
-/* ---------- Bell ---------- */
-.jn-bell { position: relative; display: inline-flex; align-items: center; justify-content: center; width: var(--notif-bell); height: var(--notif-bell); padding: 0; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-secondary); cursor: pointer; transition: background-color var(--duration-instant) linear, color var(--duration-instant) linear; }
-.jn-bell:hover { background: var(--bg-hover); color: var(--text-primary); }
-.jn-bell.is-open { background: var(--bg-selected); color: var(--text-primary); }
-.jn-bell:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.jn-chip { position: absolute; top: 0; left: 15px; min-width: var(--notif-chip); height: var(--notif-chip); padding: 0 4px; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 3px; border-radius: var(--radius-full); font-family: var(--font-mono); font-size: 10.5px; line-height: 16px; font-weight: 500; font-variant-numeric: tabular-nums; background: var(--bg-base); color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--border-strong), 0 0 0 2px var(--bg-base); }
-.jn-chip--needs { background: var(--state-needs); color: var(--on-state-needs); font-weight: 600; box-shadow: 0 0 0 2px var(--bg-base); }
-.jn-chip--needs::before { content: ""; width: 5px; height: 5px; border-radius: 1px; background: var(--on-state-needs); transform: rotate(45deg); }
+/* ---------- Bell + count ---------- */
+.joc-bell {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--control-md); height: var(--control-md);
+  padding: 0; border: 0; border-radius: var(--radius-md);
+  background: transparent; color: var(--text-secondary); cursor: pointer;
+  transition: background-color var(--duration-instant) var(--ease-standard),
+              color var(--duration-instant) var(--ease-standard);
+}
+.joc-bell:hover { background: var(--bg-hover); color: var(--text-primary); }
+.joc-bell[aria-expanded="true"] { background: var(--bg-selected); color: var(--text-primary); }
+.joc-bell:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.joc-bell .joc-count { position: absolute; top: -3px; right: -3px; }
+
+/* Count pill — shared by the bell and the NavBar "Sessions" chip */
+.joc-count {
+  --arrive: var(--text-secondary);
+  box-sizing: border-box;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: var(--count-pill); height: var(--count-pill);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-full);
+  background: var(--bg-selected); color: var(--text-primary);
+  font: 600 11px/16px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 2px var(--bg-base); /* cut-out from the bar */
+}
+.joc-count.is-needs { --arrive: var(--state-needs); background: var(--state-needs); color: var(--on-state-needs); }
+
+/* New arrival: ONE soft pulse. The ring never grows — only its colour fades. */
+.joc-arriving { animation: joc-arrive var(--duration-arrive) var(--ease-standard) 1; }
+@keyframes joc-arrive {
+  0%   { opacity: .4; box-shadow: 0 0 0 2px var(--bg-base), 0 0 0 5px color-mix(in srgb, var(--arrive) 55%, transparent); }
+  30%  { opacity: 1; }
+  100% { opacity: 1; box-shadow: 0 0 0 2px var(--bg-base), 0 0 0 5px transparent; }
+}
+/* preview hook: the pulse's first frame, for static comps */
+.joc-arrive-frame { box-shadow: 0 0 0 2px var(--bg-base), 0 0 0 5px color-mix(in srgb, var(--arrive) 55%, transparent); }
+@media (prefers-reduced-motion: reduce) { .joc-arriving { animation: none; } }
 
 /* ---------- Panel ---------- */
-.jn-panel { width: var(--notif-panel-w); max-width: calc(100vw - 16px); max-height: var(--notif-panel-max-h); display: flex; flex-direction: column; background: var(--bg-overlay); border-radius: var(--radius-lg); box-shadow: var(--shadow-2); color: var(--text-primary); font-family: var(--font-sans); font-size: 13px; line-height: 20px; overflow: hidden; z-index: var(--z-popover); }
-.jn-panel.is-anchored { position: absolute; top: calc(48px + var(--notif-panel-offset)); right: var(--space-4); }
-.jn-panel__head { flex: none; height: var(--notif-head); display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-2) 0 var(--space-4); }
-.jn-panel__title { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; }
-.jn-panel__sub { font-size: 12px; line-height: 16px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
-.jn-spacer { flex: 1; }
-.jn-panel__tabs { flex: none; padding: 0 var(--space-2); }
-.jn-panel__body { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.jn-panel__foot { flex: none; height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-2); border-top: 1px solid var(--border); }
+.joc-notif-panel {
+  box-sizing: border-box;
+  display: flex; flex-direction: column;
+  width: var(--notif-panel-w); max-height: var(--notif-panel-max-h);
+  background: var(--bg-overlay); color: var(--text-primary);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-2);
+  overflow: hidden; font-family: var(--font-sans);
+  z-index: var(--z-popover);
+}
+.joc-notif-panel__header {
+  flex: none; box-sizing: border-box;
+  display: flex; align-items: center; gap: var(--space-1);
+  height: var(--notif-header);
+  padding: 0 var(--space-2) 0 var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.joc-notif-panel__title { flex: 1; font-size: 13px; line-height: 20px; font-weight: 550; }
+.joc-notif-panel__list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 
-/* ---------- Group header ---------- */
-.jn-group__head { position: sticky; top: 0; z-index: var(--z-sticky); height: var(--notif-group-head); display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-4); background: var(--bg-overlay); border-bottom: 1px solid var(--border-subtle); font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-secondary); }
-.jn-group__count { font-family: var(--font-mono); font-weight: 400; letter-spacing: 0; color: var(--text-tertiary); }
-.jn-group__hint { margin-left: auto; font-weight: 400; letter-spacing: 0; text-transform: none; font-size: 12px; color: var(--text-tertiary); }
+.joc-notif-group {
+  position: sticky; top: 0; z-index: 2;
+  box-sizing: border-box;
+  display: flex; align-items: center; gap: var(--space-2);
+  height: var(--row-dense); padding: 0 var(--space-4);
+  background: var(--bg-overlay);
+  font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+/* Arrivals while the panel is open wait here — nothing pushes rows under the cursor */
+.joc-notif-newbar {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: var(--row-dense);
+  border: 0; border-bottom: 1px solid var(--border-subtle);
+  background: var(--accent-soft); color: var(--accent);
+  font: 550 12px/16px var(--font-sans); cursor: pointer;
+  transition: background-color var(--duration-instant) var(--ease-standard);
+}
+.joc-notif-newbar:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 
 /* ---------- Row ---------- */
-.jn-row { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 10px; height: var(--notif-row); box-sizing: border-box; padding: 10px var(--space-3) 9px var(--space-4); border-bottom: 1px solid var(--border-subtle); transition: background-color var(--duration-instant) linear; }
-.jn-row:hover, .jn-row.is-hover, .jn-row:focus-within { background: var(--bg-hover); }
-.jn-row__lead { height: 20px; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); }
-.jn-row__main { min-width: 0; display: flex; flex-direction: column; }
-.jn-row__title { font-size: 13px; line-height: 20px; font-weight: 400; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.jn-row.is-unread .jn-row__title { font-weight: 550; color: var(--text-primary); }
-.jn-row__detail { height: 24px; display: flex; align-items: center; gap: var(--space-1\.5, 6px); min-width: 0; font-size: 12px; line-height: 16px; color: var(--text-secondary); }
-.jn-src { flex: none; font-family: var(--font-mono); font-size: 12px; line-height: 16px; font-weight: 450; color: var(--text-tertiary); }
-.jn-row__text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.jn-row__text code, .jn-code { font-family: var(--font-mono); font-size: 12px; font-weight: 450; color: var(--text-primary); }
-.jn-row__side { display: flex; flex-direction: column; align-items: flex-end; }
-.jn-time { height: 20px; display: flex; align-items: center; font-family: var(--font-mono); font-size: 11px; line-height: 16px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.jn-row.is-unread .jn-time { color: var(--text-secondary); }
-.jn-row__act { height: 24px; display: flex; align-items: center; }
-.jn-row__hover { position: absolute; top: 7px; right: var(--space-2); display: flex; gap: 2px; padding-left: var(--space-2); background: inherit; opacity: 0; transition: opacity var(--duration-instant) linear; }
-.jn-row:hover .jn-row__hover, .jn-row.is-hover .jn-row__hover, .jn-row:focus-within .jn-row__hover { opacity: 1; background: var(--bg-hover); }
+.joc-notif-row {
+  position: relative; box-sizing: border-box;
+  display: grid; grid-template-columns: 16px minmax(0, 1fr) 48px;
+  column-gap: var(--space-3); align-content: start;
+  height: var(--row-notif);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  transition: background-color var(--duration-instant) var(--ease-standard),
+              opacity var(--duration-fade) var(--ease-standard);
+}
+.joc-notif-row:hover, .joc-notif-row.is-hover { background: var(--bg-hover); }
+.joc-notif-row--action { height: var(--row-notif-action); }
 
-/* Needs you: the session-row accent, reused — 4px solid rail + soft tint */
-.jn-row--needs { height: var(--notif-row-answer); background: var(--state-needs-soft); }
-.jn-row--needs:hover, .jn-row--needs.is-hover, .jn-row--needs:focus-within { background: var(--state-needs-soft); }
-.jn-row--needs .jn-row__hover { background: var(--state-needs-soft) !important; }
-.jn-row--needs::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--state-needs); }
-.jn-row--needs .jn-row__title { font-weight: 550; color: var(--text-primary); }
-.jn-answers { grid-column: 2 / 4; display: flex; align-items: center; gap: var(--space-1\.5, 6px); margin-top: var(--space-2); min-width: 0; }
-.jn-opt { display: inline-flex; align-items: center; gap: 6px; height: var(--control-sm); max-width: 160px; padding: 0 var(--space-2) 0 4px; box-sizing: border-box; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--bg-overlay); color: var(--text-primary); font-family: var(--font-sans); font-size: 12px; line-height: 16px; cursor: pointer; transition: background-color var(--duration-instant) linear; }
-.jn-opt:hover { background: var(--bg-hover); }
-.jn-opt:focus-visible, .jn-bar:focus-visible, .jn-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.jn-opt__n { font-family: var(--font-mono); font-size: 11px; line-height: 14px; padding: 0 4px; border-radius: var(--radius-xs); border: 1px solid var(--border); color: var(--text-tertiary); }
-.jn-opt__label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.jn-opt.is-mono .jn-opt__label { font-family: var(--font-mono); }
+.joc-notif-row__glyph { display: flex; align-items: center; justify-content: center; height: 20px; color: var(--text-secondary); }
+.joc-notif-row__body { min-width: 0; }
+.joc-notif-row__title {
+  display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 13px; line-height: 20px; font-weight: 550;
+  color: var(--text-primary); text-decoration: none;
+}
+.joc-notif-row__title::after { content: ""; position: absolute; inset: 0; } /* the whole row opens it */
+.joc-notif-row__title:focus-visible { outline: none; }
+.joc-notif-row:has(.joc-notif-row__title:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.joc-notif-row__meta {
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 12px; line-height: 16px; color: var(--text-secondary);
+}
+.joc-notif-row__meta code, .joc-notif-row__actions code { font: 450 12px/16px var(--font-mono); color: var(--text-primary); }
 
-/* ---------- Live arrivals: a pill over the list, never an insert above the cursor ---------- */
-.jn-newpill { position: sticky; top: 36px; height: 0; overflow: visible; z-index: calc(var(--z-sticky) + 1); display: flex; justify-content: center; align-items: flex-start; pointer-events: none; }
-.jn-newpill .jn-bar { pointer-events: auto; }
-.jn-bar { display: inline-flex; align-items: center; gap: var(--space-1\.5, 6px); height: var(--notif-newpill); padding: 0 var(--space-3); border: 0; border-radius: var(--radius-full); background: var(--bg-overlay); box-shadow: var(--shadow-2); color: var(--text-primary); font-family: var(--font-sans); font-size: 12px; line-height: 16px; font-weight: 550; cursor: pointer; animation: jn-fade var(--duration-fade) var(--ease-standard) both; }
-.jn-bar__go { color: var(--accent); }
-@keyframes jn-fade { from { opacity: 0; } to { opacity: 1; } }
+/* time and dismiss share one slot: they swap by opacity, nothing moves */
+.joc-notif-row__aside { position: relative; height: 20px; }
+.joc-notif-row__time {
+  position: absolute; top: 0; right: 0;
+  font-size: 12px; line-height: 20px; color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  transition: opacity var(--duration-instant) var(--ease-standard);
+}
+.joc-notif-row__dismiss {
+  position: absolute; top: -2px; right: -2px; z-index: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--control-sm); height: var(--control-sm);
+  padding: 0; border: 0; border-radius: var(--radius-md);
+  background: transparent; color: var(--text-secondary); cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--duration-instant) var(--ease-standard),
+              background-color var(--duration-instant) var(--ease-standard);
+}
+.joc-notif-row__dismiss:hover { background: var(--bg-selected); color: var(--text-primary); }
+.joc-notif-row__dismiss:focus-visible { opacity: 1; outline: 2px solid var(--focus-ring); outline-offset: 0; }
+.joc-notif-row.is-dismissable:is(:hover, :focus-within, .is-hover) .joc-notif-row__dismiss { opacity: 1; }
+.joc-notif-row.is-dismissable:is(:hover, :focus-within, .is-hover) .joc-notif-row__time { opacity: 0; }
 
-/* ---------- Links ---------- */
-.jn-link { display: inline-flex; align-items: center; gap: 4px; height: var(--control-sm); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-md); background: none; color: var(--accent); font-family: var(--font-sans); font-size: 12px; font-weight: 500; text-decoration: none; cursor: pointer; }
-.jn-link:hover { background: var(--bg-hover); color: var(--accent-hover); }
+/* inline answer — sits above the row link */
+.joc-notif-row__actions {
+  position: relative; z-index: 1;
+  grid-column: 2 / 4;
+  display: flex; align-items: center; gap: var(--space-2);
+  min-width: 0; height: var(--control-sm); margin-top: var(--space-2);
+}
+.joc-notif-row__actions code { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.joc-notif-row__spacer { flex: 1; }
 
-/* ---------- Toast stack ---------- */
-.jn-toasts { display: flex; flex-direction: column; gap: var(--toast-gap); width: var(--toast-w); }
-.jn-toasts.is-fixed { position: fixed; right: var(--space-4); bottom: var(--space-4); z-index: var(--z-toast); }
-.jn-toasts__more { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 var(--space-2) 0 var(--space-3); border-radius: var(--radius-lg); background: var(--bg-overlay); box-shadow: var(--shadow-2); font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+/* needs you — the only loud row */
+.joc-notif-row.is-needs { background: var(--state-needs-soft); box-shadow: inset 4px 0 0 var(--state-needs); }
+.joc-notif-row.is-needs:hover { background: color-mix(in srgb, var(--state-needs-soft) 70%, var(--bg-hover)); }
 
-/* ---------- Settings matrix ---------- */
-.jn-matrix { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 20px; }
-.jn-matrix th { height: 28px; padding: 0 var(--space-3); text-align: center; font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
-.jn-matrix th:first-child, .jn-matrix td:first-child { text-align: left; padding-left: 0; }
-.jn-matrix td { height: 40px; padding: 0 var(--space-3); text-align: center; border-bottom: 1px solid var(--border-subtle); color: var(--text-primary); }
-.jn-matrix tr.jn-matrix__group td { height: 32px; font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-tertiary); border-bottom: 1px solid var(--border); vertical-align: bottom; padding-bottom: 6px; }
-.jn-matrix__note { display: block; font-size: 12px; line-height: 16px; color: var(--text-tertiary); }
-.jn-check { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
-.jn-check:disabled { cursor: not-allowed; }
-.jn-check:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* read: weight and colour drop. No dot. */
+.joc-notif-row.is-read .joc-notif-row__title { font-weight: 400; color: var(--text-secondary); }
 
-.jn-mx__row { display: grid; grid-template-columns: minmax(0, 1fr) 88px 88px 88px; align-items: center; min-height: 40px; border-bottom: 1px solid var(--border-subtle); }
-.jn-mx__row > span { display: flex; justify-content: center; }
-.jn-mx__row > .jn-mx__kind { flex-direction: column; justify-content: center; padding: 4px 0; }
-.jn-mx__head { min-height: 28px; border-bottom: 1px solid var(--border); font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-secondary); }
-.jn-mx__head > span:first-child { justify-content: flex-start; }
-.jn-mx__group { height: 32px; display: flex; align-items: flex-end; padding-bottom: 6px; box-sizing: border-box; border-bottom: 1px solid var(--border); font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-tertiary); }
+/* empty */
+.joc-notif-empty { display: flex; align-items: center; justify-content: center; min-height: 200px; padding: var(--space-6) var(--space-4); }
 
-/* ---------- Spec sheet helpers ---------- */
-.jn-label { font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-tertiary); }
+/* ---------- Settings ---------- */
+.joc-notif-settings { font-family: var(--font-sans); color: var(--text-primary); }
+.joc-notif-settings__grid {
+  display: grid; grid-template-columns: minmax(0, 1fr) repeat(4, 64px);
+  align-items: center;
+}
+.joc-notif-settings__head {
+  height: var(--row-dense); border-bottom: 1px solid var(--border);
+  font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.joc-notif-settings__row { min-height: 56px; border-bottom: 1px solid var(--border-subtle); }
+.joc-notif-settings__cell { display: flex; align-items: center; justify-content: center; }
+.joc-notif-settings__kind { display: flex; flex-direction: column; padding: var(--space-2) 0; min-width: 0; }
+.joc-notif-settings__name { font-size: 13px; line-height: 20px; font-weight: 550; }
+.joc-notif-settings__sub { font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+.joc-notif-settings input[type="checkbox"] {
+  width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer;
+}
+.joc-notif-settings input[type="checkbox"]:disabled { cursor: not-allowed; opacity: .55; }
+.joc-notif-settings input[type="checkbox"]:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 /* ---------- JOC additions, not in the design yet. Tokens only. ---------- */
 
-/* A dismissed or resolved row fades out, then goes: no blank slot is held. */
-.jn-row { transition: background-color var(--duration-instant) linear, opacity var(--duration-fast) linear; }
-.jn-row.is-leaving { opacity: 0; pointer-events: none; }
-/* One action: the title's link covers the row; the ✕ and a needs row's answers sit above it. */
-.jn-row { cursor: pointer; }
-.jn-row__open { color: inherit; text-decoration: none; }
-.jn-row__open::after { content: ""; position: absolute; inset: 0; }
-.jn-row__hover, .jn-answers { position: relative; z-index: 1; }
-.jn-row__hover { position: absolute; }
-/* A new arrival: the bell's chip fades in, and pulses once. */
-.jn-chip--arrived { animation: jn-arrive calc(var(--duration-fade) * 3) var(--ease-standard) both; }
-@keyframes jn-arrive { 0% { opacity: 0; } 25% { opacity: 1; } 50% { opacity: .35; } 100% { opacity: 1; } }
-.jn-mx__row { grid-template-columns: minmax(0, 1fr) 72px 72px 72px 72px; }
+:root {
+  --notif-panel-offset: 8px;       /* = space-2: the gap below the bell */
+  --toast-w: 400px;
+  --toast-gap: 8px;
+  --notif-history-filters: 260px;  /* = tree */
+}
+
+/* The panel under its bell, right edges aligned (NotificationPanel places it). */
+.joc-notif-panel.is-anchored { position: fixed; max-width: calc(100vw - 2 * var(--space-2)); max-height: min(var(--notif-panel-max-h), calc(100vh - 72px)); }
+.joc-notif-panel:focus { outline: none; }
+.joc-notif-panel__note { font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+.joc-notif-panel__foot { flex: none; display: flex; align-items: center; justify-content: flex-end; height: var(--row-dense); padding: 0 var(--space-2); border-top: 1px solid var(--border-subtle); }
+
+/* A handled or dismissed row fades out over duration-fast, then goes at once: nothing dims in
+   place or holds a blank slot until the panel closes. */
+.joc-notif-row { cursor: pointer; transition: background-color var(--duration-instant) var(--ease-standard), opacity var(--duration-fast) var(--ease-standard); }
+.joc-notif-row.is-leaving { opacity: 0; pointer-events: none; }
+.joc-notif-row__meta code + span::before { content: " · "; }
+/* A needs row's answer line once it's sent, or while it can't be answered here. */
+.joc-notif-row__status { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; line-height: 16px; color: var(--text-secondary); animation: joc-notif-fade var(--duration-fade) var(--ease-standard) both; }
+@keyframes joc-notif-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* Settings: the grid sits on a raised card, the sound switch on top. */
+.joc-notif-settings { box-sizing: border-box; display: flex; flex-direction: column; padding: var(--space-1) var(--space-4) var(--space-2); background: var(--bg-raised); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); }
+.joc-notif-settings__sound { display: flex; align-items: center; gap: var(--space-3); min-height: 56px; border-bottom: 1px solid var(--border); }
+.joc-notif-settings__sound .joc-notif-settings__kind { flex: 1; }
+.joc-notif-settings__row:last-child { border-bottom: 0; }
+.joc-notif-check { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.joc-notif-check:disabled { cursor: not-allowed; }
+.joc-notif-check:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.joc-notif-label { font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-tertiary); }
+.joc-notif-link { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--control-sm); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-md); background: none; color: var(--accent); font-family: var(--font-sans); font-size: 12px; font-weight: 500; text-decoration: none; cursor: pointer; }
+.joc-notif-link:hover { background: var(--bg-hover); color: var(--accent-hover); }
+.joc-notif-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* The nav bar's Sessions count: the same pill, inline, on the bar's own surface. */
+.joc-nav__link .joc-count { box-shadow: none; }
+.joc-nav__link .joc-count.joc-arriving { animation-name: joc-arrive-inline; }
+@keyframes joc-arrive-inline {
+  0%   { opacity: .4; box-shadow: 0 0 0 3px color-mix(in srgb, var(--arrive) 55%, transparent); }
+  30%  { opacity: 1; }
+  100% { opacity: 1; box-shadow: 0 0 0 3px transparent; }
+}
+
+/* Toasts: bottom right, newest on top. */
+.joc-notif-toasts { display: flex; flex-direction: column; gap: var(--toast-gap); width: var(--toast-w); max-width: calc(100vw - 2 * var(--space-4)); }
+.joc-notif-toasts.is-fixed { position: fixed; right: var(--space-4); bottom: var(--space-4); z-index: var(--z-toast); }
+.joc-notif-toasts .joc-toast { width: auto; max-width: 100%; box-sizing: border-box; }
+.joc-notif-toasts__more { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 var(--space-2) 0 var(--space-3); border-radius: var(--radius-lg); background: var(--bg-overlay); box-shadow: var(--shadow-2); font-size: 12px; line-height: 16px; color: var(--text-secondary); }
 a.joc-btn { text-decoration: none; }
-/* The panel takes focus when it opens so its keys work; its rows show the ring. */
-.jn-panel:focus { outline: none; }
-@media (max-width: 480px) { .jn-panel.is-anchored { right: var(--space-2); } }
-.jn-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
-/* A needs row's lower line, while JOC can't answer it from here: where it waits. */
-.jn-answers__note { font-size: 12px; line-height: 16px; color: var(--text-secondary); }
-.jn-panel__empty { display: flex; align-items: center; justify-content: center; min-height: 240px; height: 100%; }
-.jn-toasts { max-width: calc(100vw - 2 * var(--space-4)); }
-.jn-toasts .joc-toast { width: auto; max-width: 100%; box-sizing: border-box; }
+
 @media (prefers-reduced-motion: reduce) {
-  .jn-bar, .jn-row, .jn-chip--arrived { animation: none; transition: none; }
+  .joc-notif-row, .joc-notif-row__status { animation: none; transition: none; }
+  .joc-nav__link .joc-count.joc-arriving { animation: none; }
 }
