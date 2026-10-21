@@ -30,7 +30,7 @@ import { launched, launchFrom, launchStatus } from './launches.ts';
 import { sessionFor } from './links.ts';
 import { Nav } from './Nav.tsx';
 import { type PRReviewRow, prReviewRows } from './review-rows.ts';
-import { findPR, prFromSearch } from './reviews.ts';
+import { checksBadge, findPR, prFromSearch } from './reviews.ts';
 import { ago } from './time.ts';
 
 const UNTITLED = 'New session';
@@ -185,12 +185,25 @@ export function PullRequestPage() {
           <Card
             title="Checks"
             count={pr.checks?.length}
-            aside={pr.ci === 'skipped' ? null : <CIBadge status={pr.ci} detail={pr.ciDetail} />}
+            aside={
+              pr.ci === 'skipped' ? null : pr.checks?.length ? (
+                // Counted from the checks listed: "1 failing" + "4 passed · 1 running".
+                <CIBadge {...checksBadge(pr.checks)} />
+              ) : (
+                <CIBadge status={pr.ci} detail={pr.ciDetail} />
+              )
+            }
           >
             {pr.checks?.length ? (
               pr.checks.map((c, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: two checks can share a name
-                <CIRow key={i} status={c.status} name={c.name} time={ran(c.seconds)} />
+                <CIRow
+                  // biome-ignore lint/suspicious/noArrayIndexKey: two checks can share a name
+                  key={i}
+                  status={c.status}
+                  name={c.name}
+                  detail={c.detail}
+                  time={ran(c.seconds)}
+                />
               ))
             ) : pr.ci === 'skipped' ? (
               <CardNote>No checks ran on the last commit.</CardNote>

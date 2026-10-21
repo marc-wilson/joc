@@ -1,4 +1,37 @@
-import type { PullRequest } from '@joc/protocol';
+import type { CIStatus, PullRequest, PullRequestCheck } from '@joc/protocol';
+
+/**
+ * The Checks card's badge, from the checks it lists: what most needs you first, then the rest,
+ * "1 failing" + "4 passed · 1 running". A skipped check counts as passed, as the counts GitHub
+ * and JOC's CI line give do; skipped is the badge only when nothing else ran.
+ */
+export function checksBadge(checks: PullRequestCheck[]): {
+  status: CIStatus;
+  label: string;
+  detail?: string;
+} {
+  const count = (s: CIStatus) => checks.filter((c) => c.status === s).length;
+  const failing = count('fail');
+  const running = count('pending');
+  const passed = count('pass') + count('skipped');
+  if (!failing && !running && !count('pass')) {
+    return { status: 'skipped', label: `${count('skipped')} skipped` };
+  }
+  const parts = [
+    passed ? `${passed} passed` : undefined,
+    running ? `${running} running` : undefined,
+  ].filter(Boolean);
+  if (failing)
+    return { status: 'fail', label: `${failing} failing`, detail: parts.join(' · ') || undefined };
+  if (running) {
+    return {
+      status: 'pending',
+      label: `${running} running`,
+      detail: passed ? `${passed} passed` : undefined,
+    };
+  }
+  return { status: 'pass', label: `${passed} passed` };
+}
 
 /** The PR's page in JOC. */
 export const prHref = (pr: Pick<PullRequest, 'repo' | 'number'>) =>
