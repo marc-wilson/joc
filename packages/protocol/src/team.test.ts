@@ -134,7 +134,7 @@ test('a teammate whose permission request waits on you needs you', () => {
     },
   });
   assert.equal(needs?.status, 'needs');
-  assert.equal(needs?.tail, 'Asks to run Bash');
+  assert.equal(needs?.tail, 'Allow pnpm e2e?');
 });
 
 test('a message to a finished teammate resumes it', () => {

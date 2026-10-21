@@ -193,7 +193,7 @@ export function settleTeam(drafts: TeamDraft[], context: TeamContext): Teammate[
       t.status = 'needs';
       t.tail =
         waiting.kind === 'permission'
-          ? `Asks to run ${waiting.tool}`
+          ? `Allow ${waiting.summary || waiting.tool}?`
           : firstLine(waiting.questions[0]?.question);
     } else if (t.mateAt && t.mateAsks && (!t.leadAt || t.leadAt < t.mateAt)) {
       t.status = 'waiting';
