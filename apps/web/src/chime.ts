@@ -1,4 +1,4 @@
-// The arrival chime: two soft notes, about 150ms in all, made with the Web Audio API so there's
+// The arrival chime: two soft sine notes rising a fourth, about 300ms in all, made with the Web Audio API so there's
 // no audio file to load. Browsers only let a page make sound after the person has interacted
 // with it, so the chime stays silent until then; and it sounds at most once every THROTTLE_MS,
 // however many notifications arrive together.
@@ -26,15 +26,18 @@ export interface ChimeAudio {
   };
 }
 
-export const THROTTLE_MS = 3_000;
+export const THROTTLE_MS = 2_000;
 
-/** Two notes, a fifth apart, rising: E5 then B5. Each `[hz, starts, lasts]` in seconds. */
-const NOTES: [number, number, number][] = [
-  [659.25, 0, 0.07],
-  [987.77, 0.075, 0.075],
+/** Two notes, a fourth apart, rising: E5 then A5. Each `[hz, starts]` in seconds. */
+const NOTES: [number, number][] = [
+  [659.25, 0],
+  [880, 0.09],
 ];
-/** Soft: well under full volume. */
-const PEAK = 0.06;
+/** Each note's attack, then its exponential decay. */
+const ATTACK = 0.006;
+const DECAY = 0.2;
+/** Soft: about −18 dBFS at its peak. No click, no tail. */
+const PEAK = 0.12;
 
 export interface ChimeOptions {
   /** Makes the audio context, once, on the first chime after an interaction. */
@@ -57,18 +60,18 @@ export function createChime({ audio, now = Date.now }: ChimeOptions) {
     // A resume the browser refuses only means this chime is silent; the next one tries again.
     if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
     const t0 = ctx.currentTime + 0.01;
-    for (const [hz, starts, lasts] of NOTES) {
+    for (const [hz, starts] of NOTES) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
       osc.frequency.setValueAtTime(hz, t0 + starts);
       gain.gain.setValueAtTime(0.0001, t0 + starts);
-      gain.gain.linearRampToValueAtTime(PEAK, t0 + starts + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + starts + lasts);
+      gain.gain.exponentialRampToValueAtTime(PEAK, t0 + starts + ATTACK);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + starts + ATTACK + DECAY);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(t0 + starts);
-      osc.stop(t0 + starts + lasts + 0.02);
+      osc.stop(t0 + starts + ATTACK + DECAY + 0.02);
     }
     return true;
   }
