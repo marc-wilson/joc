@@ -36,6 +36,10 @@ export interface SessionRowProps {
   onPinChange?: (pinned: boolean) => void;
   /** It's gone: the row fades to this line and keeps its place, so nothing below it moves. */
   removed?: string;
+  /** Its team chip (a `TeamChip`), on the second line before the meter. */
+  team?: ReactNode;
+  /** The toggle under the state dot that shows its teammates under the row. */
+  teammates?: { open: boolean; onToggle: () => void };
 }
 
 export function SessionRow({
@@ -53,6 +57,8 @@ export function SessionRow({
   onSelect,
   onPinChange,
   removed,
+  team,
+  teammates,
 }: SessionRowProps) {
   return (
     <div
@@ -107,6 +113,7 @@ export function SessionRow({
             {branch ? <Branch>{branch}</Branch> : null}
             {worktree ? <WorktreeTag name={worktree} /> : null}
           </span>
+          {team}
           <span className="joc-srow__meter">
             {/* No meter until the context is known: an empty one would read as 100%. */}
             {contextLeft != null ? <ContextMeter left={contextLeft} /> : null}
@@ -120,6 +127,23 @@ export function SessionRow({
           {activity}
         </span>
       </span>
+      {teammates ? (
+        <button
+          type="button"
+          className="joc-srow__expand"
+          aria-expanded={teammates.open}
+          aria-label={teammates.open ? `Hide teammates of ${title}` : `Show teammates of ${title}`}
+          title={teammates.open ? 'Hide teammates' : 'Show teammates'}
+          onClick={(e) => {
+            e.stopPropagation();
+            teammates.onToggle();
+          }}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          {/* Swapped, never rotated. */}
+          <Icon name={teammates.open ? 'chevronDown' : 'chevronRight'} size={16} />
+        </button>
+      ) : null}
       {onPinChange ? (
         <button
           type="button"
@@ -250,6 +274,8 @@ export interface SessionHeaderProps {
   contextLeft?: number;
   /** A last meta item, such as "Ended 2h ago". */
   when?: string;
+  /** After the state badge, e.g. a `TeamGlance`. */
+  glance?: ReactNode;
   tabs?: TabItem[];
   tab?: string;
   onTabChange?: (id: string) => void;
@@ -268,6 +294,7 @@ export function SessionHeader({
   model,
   contextLeft,
   when,
+  glance,
   tabs,
   tab,
   onTabChange,
@@ -279,6 +306,7 @@ export function SessionHeader({
         <div className="joc-shead__id">
           <h1 className="joc-shead__title">{title}</h1>
           {ended ? <EndedTag label={ended} /> : <StateBadge state={state} label={stateLabel} />}
+          {glance}
         </div>
         <div className="joc-shead__actions">{children}</div>
       </div>

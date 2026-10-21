@@ -34,6 +34,8 @@ const PATHS = {
   update: 'M14 8A6 6 0 112 8a6 6 0 0112 0zM8 5v6M5.5 8.5L8 11l2.5-2.5',
   more: 'M3.5 8h.5M7.75 8h.5M12 8h.5',
   trash: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 8.5h6l.5-8.5',
+  team: 'M8 5.5a2 2 0 11-4 0 2 2 0 014 0zM2.5 13c0-2 1.6-3.5 3.5-3.5s3.5 1.5 3.5 3.5M12.5 6a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM10.5 9.6c1.7 0 3 1.3 3 3.1',
+  image: 'M2.5 3h11v10h-11zM7 6.5a1 1 0 11-2 0 1 1 0 012 0zM13.5 11L10 7.5 4 13',
 } as const;
 
 export type IconName = keyof typeof PATHS;
