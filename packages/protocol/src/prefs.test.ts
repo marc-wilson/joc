@@ -110,9 +110,9 @@ test('only the defined kinds notify, and the long-turn kind is off until chosen'
   });
 });
 
-test('sound is on for needs-you and review requests, under the master switch', () => {
+test('sound is on for needs you only, under the master switch', () => {
   const on = NOTIFYING_KINDS.filter((k) => chimes(DEFAULT_PREFS, k));
-  assert.deepEqual(on, ['question', 'permission', 'review']);
+  assert.deepEqual(on, ['question', 'permission']);
   const quiet = applyPrefsPatch(DEFAULT_PREFS, { notificationSound: false }, 1);
   assert.deepEqual(
     NOTIFYING_KINDS.filter((k) => chimes(quiet, k)),
@@ -123,9 +123,9 @@ test('sound is on for needs-you and review requests, under the master switch', (
 test('a kind stored before sound existed keeps its sound default', () => {
   const stored = Prefs.parse({
     ...DEFAULT_PREFS,
-    notificationKinds: { review: { panel: true, toast: false, desktop: false } },
+    notificationKinds: { question: { panel: true, toast: false, desktop: false } },
   });
-  assert.deepEqual(channelsOf(stored, 'review'), {
+  assert.deepEqual(channelsOf(stored, 'question'), {
     panel: true,
     toast: false,
     desktop: false,
@@ -133,8 +133,10 @@ test('a kind stored before sound existed keeps its sound default', () => {
   });
   const muted = applyPrefsPatch(
     stored,
-    { notificationKinds: { review: { panel: true, toast: false, desktop: false, sound: false } } },
+    {
+      notificationKinds: { question: { panel: true, toast: false, desktop: false, sound: false } },
+    },
     2,
   );
-  assert.equal(chimes(muted, 'review'), false);
+  assert.equal(chimes(muted, 'question'), false);
 });

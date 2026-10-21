@@ -67,7 +67,7 @@ export const NOTIFYING_KINDS: readonly NotificationKind[] = [
 ];
 
 /** A turn longer than this raises a `long-turn` notification when it ends. */
-export const LONG_TURN_MS = 5 * 60_000;
+export const LONG_TURN_MS = 10 * 60_000;
 
 /**
  * Where one kind shows up, and whether its arrival chimes. All off keeps it in the history only.
@@ -92,9 +92,9 @@ const OFF: Channels = { panel: false, toast: false, desktop: false, sound: false
 export const DEFAULT_NOTIFICATION_CHANNELS: Record<NotificationKind, Channels> = {
   question: { panel: true, toast: true, desktop: true, sound: true },
   permission: { panel: true, toast: true, desktop: true, sound: true },
-  review: { panel: true, toast: true, desktop: false, sound: true },
+  review: { panel: true, toast: true, desktop: true, sound: false },
   mention: { panel: true, toast: false, desktop: false, sound: false },
-  'ci-failed': { panel: true, toast: false, desktop: true, sound: false },
+  'ci-failed': { panel: true, toast: false, desktop: false, sound: false },
   'long-turn': OFF,
   finished: OFF,
   github: OFF,
