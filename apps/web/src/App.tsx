@@ -191,6 +191,15 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(
     () => new URLSearchParams(location.search).get('session') ?? undefined,
   );
+  // A notification opened here changes the address instead of loading the page again.
+  useEffect(() => {
+    const follow = () => {
+      const id = new URLSearchParams(location.search).get('session');
+      if (id) setSelectedId(id);
+    };
+    window.addEventListener('popstate', follow);
+    return () => window.removeEventListener('popstate', follow);
+  }, []);
   const [filter, setFilter] = useState('');
   const filtering = filter.trim() !== '';
   useFilterShortcut();
