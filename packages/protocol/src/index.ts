@@ -161,6 +161,11 @@ export const Session = z.object({
   state: SessionState,
   /** What Claude is doing right now, one line. */
   activity: z.string().optional(),
+  /**
+   * The first line of what Claude last said when a turn finished: kept after the session ends,
+   * when `activity` only says it ended. Unset until a turn finished with something said.
+   */
+  lastWords: z.string().max(500).optional(),
   /** Percent of the context window left, 0–100. */
   contextLeft: z.number().min(0).max(100).optional(),
   machine: z.string().optional(),

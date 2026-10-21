@@ -645,6 +645,21 @@ test('history is per owner, and a silent session leaves the live list but stays 
   );
 });
 
+test("Claude's last words outlast the session's end, in its owner's history only", async () => {
+  // The same id on both: each owner's session is their own.
+  const id = 'shared-words';
+  await call('alice', '/api/reports', report(id, { state: 'idle', activity: 'Fixed the loop.' }));
+  // Not Claude's words: they don't replace the ones it said.
+  await call('alice', '/api/reports', report(id, { state: 'idle', activity: 'Done' }));
+  await call('alice', '/api/reports', report(id, { state: 'offline', activity: 'Session ended' }));
+  await call('bob', '/api/reports', report(id, { state: 'idle', activity: 'Bob said this.' }));
+  const lastWords = async (who: Who) =>
+    (await read(await call(who, '/api/history'), z.array(HistorySession))).find((s) => s.id === id)
+      ?.lastWords;
+  assert.equal(await lastWords('alice'), 'Fixed the loop.');
+  assert.equal(await lastWords('bob'), 'Bob said this.');
+});
+
 test("how long sessions stay is each owner's own setting, and only a signed-in person's", async () => {
   const asPerson = (who: Who, body?: unknown) =>
     app.request('/api/settings/sessions', {
