@@ -181,8 +181,12 @@ export function TaskReport({
   );
 }
 
-/** What a shell printed: capped in height, it scrolls inside; long lines wrap. */
-export function TaskOutput({ children }: { children?: string }) {
+/**
+ * What a shell printed: capped in height (--output-max), it scrolls inside; long lines wrap.
+ * `full` drops the cap and the frame, for the whole output in a dialog that scrolls it.
+ */
+export function TaskOutput({ children, full }: { children?: string; full?: boolean }) {
+  if (full) return <pre className="joc-taskd__output joc-taskd__output--full">{children}</pre>;
   return (
     // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling region must take focus to scroll by keyboard
     <pre className="joc-taskd__output" tabIndex={0}>
