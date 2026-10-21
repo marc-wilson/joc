@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import type { Prefs } from './prefs.ts';
 import { SessionReview } from './session-review.ts';
+import { MAX_TEAMMATES, TeamFolder, Teammate } from './team.ts';
 
 export * from './prefs.ts';
 export * from './session-review.ts';
+export * from './team.ts';
 
 export const SessionState = z.enum(['working', 'background', 'needs', 'idle', 'offline']);
 export type SessionState = z.infer<typeof SessionState>;
@@ -42,6 +44,8 @@ export const Waiting = z.discriminatedUnion('kind', [
     kind: z.literal('question'),
     id: WaitingId,
     questions: z.array(WaitingQuestion).min(1).max(4),
+    /** The teammate (subagent) that asks, by its agent id; unset when the session itself asks. */
+    agent: z.string().max(200).optional(),
   }),
   z.object({
     kind: z.literal('permission'),
@@ -52,6 +56,8 @@ export const Waiting = z.discriminatedUnion('kind', [
     summary: z.string().max(500),
     /** What Claude said the call is for, when it said. */
     description: z.string().max(500).optional(),
+    /** The teammate (subagent) that asks, by its agent id; unset when the session itself asks. */
+    agent: z.string().max(200).optional(),
   }),
 ]);
 export type Waiting = z.infer<typeof Waiting>;
@@ -179,6 +185,11 @@ export const Session = z.object({
     .optional(),
   /** The pull request it reviews: started from JOC's Review button, or a review command on one. */
   review: SessionReview.optional(),
+  /**
+   * The teammates (subagents) it handed work to, oldest first, as the server last worked them out
+   * from its conversation (see `teamOf`). Unset until it starts one.
+   */
+  team: z.array(Teammate).max(MAX_TEAMMATES).optional(),
   startedAt: z.iso.datetime(),
   /** When it last reported, the periodic sync included. */
   updatedAt: z.iso.datetime(),
@@ -482,6 +493,10 @@ export const ConversationItem = z.discriminatedUnion('kind', [
     prompt: z.string().max(20_000).optional(),
     /** A background shell's whole command, when it runs past the one line in `summary`. */
     command: z.string().max(5_000).optional(),
+    /** A `SendMessage` call's recipient: a teammate's agent id (or name). */
+    to: z.string().max(200).optional(),
+    /** A `SendMessage` call's message, as sent. */
+    message: z.string().max(20_000).optional(),
   }),
   z.object({
     ...itemBase,
@@ -507,6 +522,17 @@ export const ConversationItem = z.discriminatedUnion('kind', [
     /** The end of what a background shell printed. */
     output: z.string().max(20_000).optional(),
   }),
+  /**
+   * A teammate's message to the session while it works (its final report comes as a
+   * `task_update`). Plugins before 0.14.0 leave these out.
+   */
+  z.object({
+    ...itemBase,
+    kind: z.literal('agent_message'),
+    /** The teammate's agent id. */
+    from: z.string().min(1).max(200),
+    text: z.string().max(20_000),
+  }),
 ]);
 export type ConversationItem = z.infer<typeof ConversationItem>;
 
@@ -514,6 +540,8 @@ export type ConversationItem = z.infer<typeof ConversationItem>;
 export const MessagesReport = z.object({
   sessionId: z.string().min(1),
   items: z.array(ConversationItem).max(500),
+  /** With a teammate's own steps: the folder and branch it works in now. From plugin 0.14.0. */
+  teammate: TeamFolder.optional(),
 });
 export type MessagesReport = z.infer<typeof MessagesReport>;
 
