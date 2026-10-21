@@ -60,24 +60,28 @@ test('silent until the person has interacted with the page', () => {
   assert.equal(s.made(), 1);
 });
 
-test('two soft notes, about 150ms in all', () => {
+test('two soft notes rising a fourth, about 300ms in all', () => {
   const s = setup();
   s.chime.interacted();
   s.chime.play();
   const notes = s.calls.filter((c) => c.startsWith('hz='));
   assert.equal(notes.length, 2);
-  const peaks = s.calls.filter((c) => c.startsWith('gain->')).map((c) => Number(c.slice(6)));
-  assert.ok(
-    peaks.every((p) => p > 0 && p <= 0.1),
-    'soft',
+  assert.deepEqual(
+    notes.map((c) => Number(c.slice(3))),
+    [659.25, 880],
   );
+  const peaks = s.calls
+    .filter((c) => c.startsWith('gain~>'))
+    .map((c) => Number(c.slice(6)))
+    .filter((p) => p > 0.001);
+  assert.ok(peaks.length === 2 && peaks.every((p) => p > 0 && p <= 0.12), 'soft');
   const starts = s.calls.filter((c) => c.startsWith('start@')).map((c) => Number(c.slice(6)));
   const stops = s.calls.filter((c) => c.startsWith('stop@')).map((c) => Number(c.slice(5)));
   const length = Math.max(...stops) - Math.min(...starts);
-  assert.ok(length > 0.1 && length < 0.2, `lasts ${length}s`);
+  assert.ok(length > 0.25 && length < 0.35, `lasts ${length}s`);
 });
 
-test('at most once every three seconds, however many arrive', () => {
+test('at most once every two seconds, however many arrive', () => {
   const s = setup();
   s.chime.interacted();
   assert.equal(s.chime.play(), true);
