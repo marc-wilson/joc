@@ -4,6 +4,7 @@ import type { Resume, Session } from '@joc/protocol';
 import {
   cantResume,
   failureTitle,
+  hasEnded,
   resumeOf,
   resumePhase,
   resumeStatus,
@@ -39,6 +40,19 @@ test('only an ended Claude Code session can be resumed', () => {
     'Still running. Quit it first.',
   );
   assert.ok(cantResume(session({ id: 'not-a-uuid' }), now));
+});
+
+test("a quiet session hasn't ended until its machine still reports without it", () => {
+  const quiet = session({ state: 'working', updatedAt: '2026-10-19T11:54:00.000Z' });
+  assert.equal(hasEnded(session(), [], now), true);
+  // The machine went quiet too, asleep say: it may still be running.
+  assert.equal(hasEnded(quiet, [quiet], now), false);
+  const other = session({ id: 'other', state: 'idle', updatedAt: '2026-10-19T11:59:40.000Z' });
+  assert.equal(hasEnded(quiet, [quiet, other], now), true);
+  // Another machine reporting says nothing about this one.
+  assert.equal(hasEnded(quiet, [quiet, { ...other, machine: 'harbor-mini' }], now), false);
+  // Not quiet: still running.
+  assert.equal(hasEnded({ ...quiet, updatedAt: '2026-10-19T11:59:50.000Z' }, [other], now), false);
 });
 
 test('the latest resume of the session is the one that counts', () => {

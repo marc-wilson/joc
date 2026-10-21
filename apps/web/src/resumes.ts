@@ -1,5 +1,6 @@
 import type { Resume, Session } from '@joc/protocol';
-import { cantDelete } from './deletes.ts';
+import { cantDelete, machineLive } from './deletes.ts';
+import { isQuiet } from './session-list.ts';
 
 // Resuming an ended session (issue #68): a running session on the machine runs
 // `claude --bg --resume <id>`, and the session comes back under its own id. The dashboard says
@@ -25,6 +26,17 @@ export type ResumePhase = 'none' | 'waiting' | 'starting' | 'loading' | 'live' |
 
 /** Why the session can't be resumed now; undefined when it can. The same as for deleting. */
 export const cantResume = (s: Session, now = Date.now()) => cantDelete(s, now);
+
+/**
+ * Whether the session has ended, as far as the dashboard can tell: Claude Code said so, or it went
+ * quiet while another session on its machine still reports, so the machine is up and this one
+ * stopped. A quiet session on a machine that went quiet too may still be running (a laptop
+ * asleep): it keeps its state, and Resume waits until it's known to have ended.
+ */
+export function hasEnded(s: Session, sessions: Session[], now = Date.now()): boolean {
+  if (s.state === 'offline') return true;
+  return isQuiet(s, now) && !!s.machine && machineLive(sessions, s.machine, now);
+}
 
 /** The newest resume asked for the session, if any. */
 export function resumeOf(resumes: Resume[], sessionId: string): Resume | undefined {

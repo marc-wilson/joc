@@ -6,6 +6,7 @@ import { askResume, withdrawResume } from './hooks.ts';
 import {
   cantResume,
   failureTitle,
+  hasEnded,
   type ResumePhase,
   resumedLine,
   resumeLine,
@@ -90,7 +91,8 @@ export function useResumeView(
       />
     ) : undefined;
 
-  const ended = session.state === 'offline';
+  // A session that's only quiet still says Working: Resume is for one that has ended.
+  const ended = hasEnded(session, sessions, now);
   const going = underWay(phase);
   let composer: ComposerResume | undefined;
   if (ended && going && r) {
@@ -133,7 +135,7 @@ export function useResumeView(
   return {
     phase,
     tag: going ? 'Starting…' : ended ? 'Ended' : undefined,
-    canResume: !going && !cantResume(session, now),
+    canResume: ended && !going && !cantResume(session, now),
     resume: () => void resume(),
     composer,
     divider:
