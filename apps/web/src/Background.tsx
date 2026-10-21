@@ -1,6 +1,7 @@
 import type { ConversationItem } from '@joc/protocol';
 import {
   CopyCommand,
+  Dialog,
   EmptyState,
   SectionHeader,
   TaskAsked,
@@ -22,7 +23,9 @@ import {
   elapsed,
   FINISHED_SHOWN,
   latestStep,
+  lineCount,
   runningCount,
+  taskRowText,
   taskSteps,
 } from './background.ts';
 import { MarkdownText } from './Conversation.tsx';
@@ -33,6 +36,8 @@ import { toggled } from './toggled.ts';
 interface Props {
   sessionId: string;
   tasks: BackgroundTask[];
+  /** Shows the call that started a task in the conversation, when the person asks to. */
+  onReveal?: (callId: string) => void;
 }
 
 // A running time ticks on a clock, which keeps its width; a finished one reads compactly.
@@ -51,7 +56,7 @@ const copy = (text: string) => navigator.clipboard?.writeText(text).catch(() => 
  * The session's background shells and subagents: those still running first, in the order they
  * started, then the finished ones, newest first.
  */
-export function BackgroundView({ sessionId, tasks }: Props) {
+export function BackgroundView({ sessionId, tasks, onReveal }: Props) {
   // Running times tick by the second while the tab is open.
   const now = useNow(1000);
   // The tasks you opened; each stays open until you close it, wherever it moves.
@@ -83,6 +88,7 @@ export function BackgroundView({ sessionId, tasks }: Props) {
       open={open.includes(t.id)}
       onToggle={(on) => setOpen(toggled(open, t.id, on))}
       fadeIn={moved.current.has(t.id)}
+      onReveal={onReveal}
     />
   );
 
@@ -131,6 +137,7 @@ function TaskItem({
   open,
   onToggle,
   fadeIn,
+  onReveal,
 }: {
   sessionId: string;
   task: BackgroundTask;
@@ -138,6 +145,7 @@ function TaskItem({
   open: boolean;
   onToggle: (open: boolean) => void;
   fadeIn: boolean;
+  onReveal?: (callId: string) => void;
 }) {
   const running = task.status === 'running';
   // Only a subagent the transcript started has steps of its own; they're read while it runs or
@@ -146,27 +154,58 @@ function TaskItem({
     task.kind === 'subagent' && task.startedAt && (running || open) ? sessionId : undefined,
     task.id,
   );
+  const text = taskRowText(task);
   return (
     <TaskRow
       kind={task.kind}
       kindLabel={task.label}
-      title={task.title}
-      command={task.command}
-      step={running ? latestStep(steps) : undefined}
-      tail={running ? undefined : task.tail}
+      title={text.title}
+      command={text.command}
+      step={running ? (task.kind === 'subagent' ? latestStep(steps) : text.line) : undefined}
+      tail={running ? undefined : text.line}
       elapsed={elapsed}
       state={running ? 'background' : 'idle'}
       result={task.status === 'pass' || task.status === 'fail' ? task.status : undefined}
       open={open}
       onToggle={() => onToggle(!open)}
       className={fadeIn ? 'joc-fade-in' : undefined}
-      details={open ? <TaskDetails task={task} steps={steps} /> : null}
+      details={open ? <TaskDetails task={task} steps={steps} onReveal={onReveal} /> : null}
     />
   );
 }
 
+/** A shell's whole output, as JOC has it, over the page: it isn't capped there. */
+function FullOutput({ task, onClose }: { task: BackgroundTask; onClose: () => void }) {
+  const output = task.output ?? '';
+  return (
+    <Dialog
+      label={`Output of ${task.command ?? task.title}`}
+      title={task.command ?? task.title}
+      meta={`${lineCount(output)} lines`}
+      actions={<TextLink onClick={() => copy(output)}>Copy</TextLink>}
+      onClose={onClose}
+    >
+      <TaskOutput full>{output}</TaskOutput>
+    </Dialog>
+  );
+}
+
 /** One task, opened: what it was asked, what it did and how it ended. */
-function TaskDetails({ task, steps }: { task: BackgroundTask; steps: ConversationItem[] }) {
+function TaskDetails({
+  task,
+  steps,
+  onReveal,
+}: {
+  task: BackgroundTask;
+  steps: ConversationItem[];
+  onReveal?: (callId: string) => void;
+}) {
+  const [full, setFull] = useState(false);
+  // A task the transcript started has a call to go back to in the conversation.
+  const reveal =
+    task.startedAt && onReveal ? (
+      <TextLink onClick={() => onReveal(task.id)}>Open in conversation</TextLink>
+    ) : null;
   const subagent = task.kind === 'subagent';
   const running = task.status === 'running';
   const command = task.fullCommand ?? task.command;
@@ -196,8 +235,13 @@ function TaskDetails({ task, steps }: { task: BackgroundTask; steps: Conversatio
         <TaskSection
           title={task.status === 'fail' ? 'Error' : 'Report'}
           foot={
-            task.report ? (
-              <TextLink onClick={() => copy(task.report ?? '')}>Copy</TextLink>
+            task.report || reveal ? (
+              <>
+                {reveal}
+                {task.report ? (
+                  <TextLink onClick={() => copy(task.report ?? '')}>Copy</TextLink>
+                ) : null}
+              </>
             ) : undefined
           }
         >
@@ -217,8 +261,20 @@ function TaskDetails({ task, steps }: { task: BackgroundTask; steps: Conversatio
         <TaskSection
           title="Output"
           foot={
-            task.output ? (
-              <TextLink onClick={() => copy(task.output ?? '')}>Copy</TextLink>
+            task.output || reveal ? (
+              <>
+                {task.output ? (
+                  <>
+                    {/* The box shows the end of it, capped in height; the dialog shows it all. */}
+                    <span>{lineCount(task.output)} lines</span>
+                    <TextLink onClick={() => setFull(true)}>Full output</TextLink>
+                  </>
+                ) : null}
+                {reveal}
+                {task.output ? (
+                  <TextLink onClick={() => copy(task.output ?? '')}>Copy</TextLink>
+                ) : null}
+              </>
             ) : undefined
           }
         >
@@ -233,6 +289,7 @@ function TaskDetails({ task, steps }: { task: BackgroundTask; steps: Conversatio
           )}
         </TaskSection>
       )}
+      {full ? <FullOutput task={task} onClose={() => setFull(false)} /> : null}
     </TaskDetailsPanel>
   );
 }

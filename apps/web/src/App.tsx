@@ -339,6 +339,8 @@ export default function App() {
   // The teammate the Team tab shows, per session.
   const [mates, setMates] = useState<Record<string, string>>({});
   const [tab, setTab] = useState('conversation');
+  // A background task's call to bring into view in the conversation, once (Design gaps, #92).
+  const [reveal, setReveal] = useState<string>();
   const review = useSessionReview(selected);
   // The Changes tab needs the width, so the session list folds into a rail of state dots.
   const [listOpen, setListOpen] = useState(false);
@@ -801,7 +803,15 @@ export default function App() {
                   onOpenChanges={() => setTab('changes')}
                 />
               ) : tab === 'background' ? (
-                <BackgroundView key={selected.id} sessionId={selected.id} tasks={tasks} />
+                <BackgroundView
+                  key={selected.id}
+                  sessionId={selected.id}
+                  tasks={tasks}
+                  onReveal={(id) => {
+                    setReveal(id);
+                    setTab('conversation');
+                  }}
+                />
               ) : tab === 'team' ? (
                 <TeamTab
                   key={selected.id}
@@ -846,6 +856,8 @@ export default function App() {
                     state={selected.state}
                     session={selected}
                     divider={resuming?.divider}
+                    reveal={reveal}
+                    onRevealed={() => setReveal(undefined)}
                     after={
                       <ReviewVerdict
                         session={selected}
