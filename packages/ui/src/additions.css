@@ -1005,3 +1005,42 @@ ol.joc-pr-progress { margin: 0; padding: 0; list-style: none; }
   .joc-banner .joc-cmd { flex-basis: 100%; max-width: none; }
 }
 /* ===== End Theme and narrow layouts (#91) ================================================= */
+
+/* ===== Theme and narrow layouts (#91) ===================================================== */
+/* The browser's own parts (scrollbars, form controls) follow the theme set on the root. */
+:root, [data-theme="dark"] { color-scheme: dark; }
+[data-theme="light"] { color-scheme: light; }
+
+/* Nav bar: one line at every width. Narrower than 720px its links fold into the Pages menu
+   (.joc-nav__pages), which names the page you're on; the right-hand cluster stays. */
+.joc-nav { flex-wrap: nowrap; min-width: 0; flex-shrink: 0; }
+.joc-nav__brand { flex: none; }
+.joc-nav__pages { display: none; }
+.joc-nav__pages .joc-menu__list { left: 0; right: auto; }
+.joc-nav__right { flex: none; }
+@media (max-width: 719px) {
+  .joc-nav { gap: var(--space-3); padding: 0 var(--space-3) 0 var(--space-4); }
+  .joc-nav__links { display: none; }
+  .joc-nav__pages { display: inline-flex; min-width: 0; }
+}
+
+/* Banners: the command stays whole on one line and scrolls sideways inside its box; the copy
+   button never scrolls away. Narrow, it takes a full line of its own under the text. A banner
+   never gives up height to the page under it (its min-height would let it), so the two never
+   overlap. */
+.joc-banner { flex-shrink: 0; }
+.joc-banner .joc-cmd { height: var(--control-md); min-height: 0; padding-top: 0; padding-bottom: 0; }
+.joc-banner .joc-cmd__text { overflow-x: auto; white-space: nowrap; overflow-wrap: normal; scrollbar-width: thin; }
+@media (max-width: 719px) {
+  .joc-banner .joc-cmd { flex-basis: 100%; max-width: none; }
+}
+
+/* History rows: the command scrolls inside its box rather than run under the copy button. On a
+   phone (list under 480px) Resume takes its own line and the command a full one under it. */
+.joc-rcmd__text { overflow-x: auto; scrollbar-width: none; }
+@container hist (max-width: 479px) {
+  .joc-hist--resume { grid-template-columns: minmax(0, 1fr) var(--control-md); grid-template-areas: "main menu" "act act" "cmd cmd"; height: 140px; }
+  .joc-hist--select.joc-hist--resume { grid-template-columns: var(--control-sm) minmax(0, 1fr) var(--control-md); grid-template-areas: "select main menu" ". act act" ". cmd cmd"; }
+  .joc-hist--resume .joc-hist__act { justify-content: flex-start; }
+}
+/* ===== End Theme and narrow layouts (#91) ================================================= */
