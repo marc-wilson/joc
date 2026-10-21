@@ -3,11 +3,17 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { MAX_PR_CHECKS as PROTOCOL_MAX_PR_CHECKS } from '@joc/protocol';
+import * as protocol from '@joc/protocol';
 import {
+  clipBody,
   type GraphNode,
   githubDue,
+  MAX_PR_BODY,
   MAX_PR_CHECKS,
+  MAX_PR_CLOSES,
+  MAX_PR_LABELS,
+  MAX_PR_REVIEWERS,
+  MAX_PR_REVIEWS,
   type Rollup,
   toChecks,
   toPullRequest,
@@ -133,6 +139,103 @@ test("a pull request lists its last commit's checks, each with its outcome", () 
   assert.equal(toPullRequest(node(null))?.checks, undefined);
 });
 
-test("the check limit matches the protocol's", () => {
-  assert.equal(MAX_PR_CHECKS, PROTOCOL_MAX_PR_CHECKS);
+test("the limits match the protocol's", () => {
+  assert.deepEqual(
+    [MAX_PR_CHECKS, MAX_PR_BODY, MAX_PR_REVIEWS, MAX_PR_REVIEWERS, MAX_PR_LABELS, MAX_PR_CLOSES],
+    [
+      protocol.MAX_PR_CHECKS,
+      protocol.MAX_PR_BODY,
+      protocol.MAX_PR_REVIEWS,
+      protocol.MAX_PR_REVIEWERS,
+      protocol.MAX_PR_LABELS,
+      protocol.MAX_PR_CLOSES,
+    ],
+  );
+});
+
+test('a pull request carries what a review shows, each field checked', () => {
+  const avatar = 'https://avatars.githubusercontent.com/u/41?v=4';
+  const pr = toPullRequest(
+    node(null, {
+      state: 'OPEN',
+      createdAt: '2026-10-17T09:00:00Z',
+      body: 'Swaps SMTP for Resend.\n\nCloses #230.',
+      headRefOid: 'c0ffee0c0ffee0c0ffee0c0ffee0c0ffee0c0ffe',
+      mergeable: 'CONFLICTING',
+      author: { __typename: 'User', login: 'priya', name: 'Priya N', avatarUrl: avatar },
+      commits: { totalCount: 6, nodes: [] },
+      reviews: {
+        nodes: [
+          {
+            state: 'APPROVED',
+            submittedAt: '2026-10-18T09:00:00Z',
+            author: { __typename: 'Bot', login: 'harbor-bot', avatarUrl: avatar },
+          },
+          { state: 'PENDING', author: { login: 'tomas' } },
+          { state: 'COMMENTED', author: null },
+        ],
+      },
+      reviewRequests: {
+        nodes: [
+          {
+            requestedReviewer: {
+              __typename: 'User',
+              login: 'tomas',
+              avatarUrl: 'https://x.example/a.png',
+            },
+          },
+          { requestedReviewer: { __typename: 'Team', slug: 'mail', name: 'Mail' } },
+          { requestedReviewer: null },
+        ],
+      },
+      labels: {
+        nodes: [
+          { name: 'infra', color: '0e8a16' },
+          { name: 'odd', color: 'blue' },
+        ],
+      },
+      milestone: { title: 'Q4', number: 2, url: 'https://github.example/m/2', dueOn: null },
+      closingIssuesReferences: {
+        nodes: [
+          {
+            number: 230,
+            title: 'Mail bounces',
+            url: 'https://github.example/harbor-labs/atlas-api/issues/230',
+            repository: { nameWithOwner: 'harbor-labs/atlas-api' },
+          },
+        ],
+      },
+    }),
+  );
+  // Everything the server checks passes.
+  assert.equal(protocol.PullRequest.safeParse(pr).success, true);
+  assert.deepEqual(pr?.authorProfile, { login: 'priya', name: 'Priya N', avatarUrl: avatar });
+  assert.deepEqual(
+    [pr?.state, pr?.createdAt, pr?.mergeable, pr?.commits, pr?.headSha?.length],
+    ['open', '2026-10-17T09:00:00.000Z', false, 6, 40],
+  );
+  assert.equal(pr?.body, 'Swaps SMTP for Resend.\n\nCloses #230.');
+  assert.deepEqual(pr?.reviews, [
+    {
+      by: { login: 'harbor-bot', avatarUrl: avatar, bot: true },
+      state: 'approved',
+      submittedAt: '2026-10-18T09:00:00.000Z',
+    },
+  ]);
+  // An avatar from anywhere but GitHub's image host is left out.
+  assert.deepEqual(pr?.requestedReviewers, [{ login: 'tomas' }]);
+  assert.deepEqual(pr?.requestedTeams, [{ slug: 'mail', name: 'Mail' }]);
+  assert.deepEqual(pr?.labels, [{ name: 'infra', color: '0e8a16' }]);
+  assert.deepEqual(pr?.milestone, { title: 'Q4', number: 2, url: 'https://github.example/m/2' });
+  assert.deepEqual(
+    pr?.closes?.map((i) => [i.repo, i.number, i.title]),
+    [['harbor-labs/atlas-api', 230, 'Mail bounces']],
+  );
+});
+
+test('a long description is cut, and says so', () => {
+  const pr = toPullRequest(node(null, { body: 'x'.repeat(MAX_PR_BODY + 1) }));
+  assert.deepEqual([pr?.body?.length, pr?.bodyTruncated], [MAX_PR_BODY, true]);
+  assert.equal(protocol.PullRequest.safeParse(pr).success, true);
+  assert.deepEqual(clipBody(''), {});
 });
