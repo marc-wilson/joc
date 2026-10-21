@@ -57,6 +57,7 @@ import {
   useResumes,
   useSessionSettings,
   useSessions,
+  useToastClearance,
 } from './hooks.ts';
 import { Nav } from './Nav.tsx';
 import { NewSessionDialog } from './NewSession.tsx';
@@ -324,6 +325,7 @@ export default function App() {
   const changes = useChanges(selected?.id);
   const commands = useCommands(selected?.id);
   const dockRef = useCmdlistMax();
+  const toastClear = useToastClearance();
   // What the composer suggests on `/`: the session's own commands, the built-ins until then.
   const slash = selected ? sessionSuggestions(selected, commands) : undefined;
   const tasks = selected
@@ -853,7 +855,13 @@ export default function App() {
                       />
                     }
                   />
-                  <div className="app-main__dock" ref={dockRef}>
+                  <div
+                    className="app-main__dock"
+                    ref={(el) => {
+                      dockRef(el);
+                      toastClear(el);
+                    }}
+                  >
                     {queued ? <QueueNote>{queued}</QueueNote> : null}
                     {/* One composer whether or not the session is online, so going offline keeps
                         what you typed. */}
