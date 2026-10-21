@@ -1,4 +1,4 @@
-import { Alert, NotificationsSnapshot } from '@joc/protocol';
+import { Alert } from '@joc/protocol';
 import { type MouseEvent, useSyncExternalStore } from 'react';
 import { z } from 'zod';
 import { apiFetch } from './auth.ts';
@@ -37,37 +37,33 @@ async function call<T>(path: string, schema: z.ZodType<T>, body?: unknown): Prom
 
 export const noteStore = createNoteStore({
   alerts: () => call('/api/alerts', Alerts),
-  notifications: () => call('/api/notifications', NotificationsSnapshot),
   changeAlerts: (action, ids) => call(`/api/alerts/${action}`, Alerts, { ids }),
-  readThreads: (ids) => call('/api/notifications/read', NotificationsSnapshot, { ids }),
   listen: (onChange) =>
     subscribe((event) => {
       if (event.type === 'alerts') onChange('alerts');
-      if (event.type === 'notifications') onChange('notifications');
-      // A reconnect may have missed either.
+      // A reconnect may have missed some.
       if (event.type === 'snapshot') onChange(undefined);
     }),
 });
 
-/** The alerts and GitHub notifications, as every view shows them. */
+/** The alerts, as every view shows them. */
 export const useNoteData = (): NoteData => useSyncExternalStore(noteStore.subscribe, noteStore.get);
 
 const alertIds = (notes: Note[]) => notes.flatMap((n) => (n.alertId ? [n.alertId] : []));
-const threadIds = (notes: Note[]) => notes.flatMap((n) => n.threadIds);
 
 /**
- * Dismisses the notes, as opening them does: their alerts read here, their threads on GitHub.
+ * Dismisses the notes, as opening them does: their alerts read.
  * They leave the panel in the same frame; the server hears after. A session waiting on you
  * isn't dismissed: it goes when it's answered.
  */
 export function dismiss(notes: Note[]): void {
   const list = notes.filter((n) => !n.live && n.unread);
-  if (list.length) void noteStore.markRead(alertIds(list), threadIds(list));
+  if (list.length) void noteStore.markRead(alertIds(list));
 }
 
 /** Marks these alerts read, as looking at their session does. */
 export function readAlerts(ids: string[]): void {
-  if (ids.length) void noteStore.markRead(ids, [], true);
+  if (ids.length) void noteStore.markRead(ids, true);
 }
 
 /** The event App follows to open a session without a page load. */

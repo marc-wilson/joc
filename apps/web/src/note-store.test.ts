@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { Alert, GitHubNotification, NotificationsSnapshot } from '@joc/protocol';
+import type { Alert } from '@joc/protocol';
 import { createNoteStore, type NoteResource, PROBLEM } from './note-store.ts';
 
 // The store's races, with a fake server whose every answer is held until the test lets it go.
@@ -28,32 +28,12 @@ const alert = (id: string, read = false): Alert => ({
   read,
 });
 
-const thread = (id: string, updatedAt = '2026-10-18T09:00:00.000Z'): GitHubNotification => ({
-  id,
-  reason: 'comment',
-  title: `Thread ${id}`,
-  type: 'PullRequest',
-  repo: 'harbor-labs/atlas-web',
-  url: `https://github.com/harbor-labs/atlas-web/pull/${id}`,
-  updatedAt,
-  number: Number(id),
-});
-
-const snap = (...threads: GitHubNotification[]): NotificationsSnapshot => ({
-  state: 'reported',
-  status: 'ok',
-  threads,
-  more: false,
-  updatedAt: '2026-10-18T10:00:00.000Z',
-});
-
 /** Lets every settled promise's callbacks run. */
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
 function fakeServer() {
   const gets = {
     alerts: [] as Pending<Alert[] | undefined>[],
-    notifications: [] as Pending<NotificationsSnapshot | undefined>[],
   };
   const posts: { kind: string; ids: string[]; answer: Pending<unknown> }[] = [];
   let emit: (r: NoteResource | undefined) => void = () => {};
@@ -63,19 +43,9 @@ function fakeServer() {
       gets.alerts.push(d);
       return d.promise;
     },
-    notifications: () => {
-      const d = deferred<NotificationsSnapshot | undefined>();
-      gets.notifications.push(d);
-      return d.promise;
-    },
     changeAlerts: (action, ids) => {
       const d = deferred<Alert[] | undefined>();
       posts.push({ kind: action, ids, answer: d as Pending<unknown> });
-      return d.promise;
-    },
-    readThreads: (ids) => {
-      const d = deferred<NotificationsSnapshot | undefined>();
-      posts.push({ kind: 'threads', ids, answer: d as Pending<unknown> });
       return d.promise;
     },
     listen: (onChange) => {
@@ -90,7 +60,7 @@ function fakeServer() {
     posts,
     event: (r: NoteResource | undefined) => emit(r),
     /** Answers the oldest unanswered read of the resource. */
-    async answer(r: NoteResource, value: Alert[] | NotificationsSnapshot | undefined) {
+    async answer(r: NoteResource, value: Alert[] | undefined) {
       const next = (gets[r] as Pending<unknown>[]).shift();
       assert.ok(next, `a read of ${r} is waiting`);
       next.resolve(value);
@@ -113,16 +83,15 @@ const unreadAlerts = (s: ReturnType<typeof fakeServer>) =>
     .map((a) => a.id);
 const alertIds = (s: ReturnType<typeof fakeServer>) => s.store.get().alerts?.map((a) => a.id);
 
-async function loaded(alerts: Alert[], threads: GitHubNotification[] = []) {
+async function loaded(alerts: Alert[]) {
   const s = fakeServer();
   await s.answer('alerts', alerts);
-  await s.answer('notifications', snap(...threads));
   return s;
 }
 
 test('marking read shows at once, before the server answers', async () => {
   const s = await loaded([alert('a'), alert('b')]);
-  void s.store.markRead(['a'], []);
+  void s.store.markRead(['a']);
   assert.deepEqual(unreadAlerts(s), ['b']);
   await s.post('read', [alert('a', true), alert('b')]);
   assert.deepEqual(unreadAlerts(s), ['b']);
@@ -132,7 +101,7 @@ test('a stale read that lands after an action never brings its row back', async 
   const s = await loaded([alert('a'), alert('b')]);
   // A stream event starts a read; the person clears `a` while it's on its way.
   s.event('alerts');
-  const done = s.store.clear(['a'], []);
+  const done = s.store.clear(['a']);
   assert.deepEqual(alertIds(s), ['b']);
   // The clear's answer, with a read on its way, waits for a read after it.
   await s.post('clear', [alert('b')]);
@@ -148,7 +117,7 @@ test('a stale read that lands after an action never brings its row back', async 
 
 test('a stream event mid-action keeps the action and brings in what is new', async () => {
   const s = await loaded([alert('a')]);
-  const done = s.store.markRead(['a'], []);
+  const done = s.store.markRead(['a']);
   // Something new arrives on the stream; the server hasn't got to the read yet.
   s.event('alerts');
   await s.answer('alerts', [alert('n'), alert('a')]);
@@ -161,8 +130,8 @@ test('a stream event mid-action keeps the action and brings in what is new', asy
 
 test('two actions answered out of order both stay applied', async () => {
   const s = await loaded([alert('a'), alert('b'), alert('c')]);
-  void s.store.markRead(['a'], []);
-  void s.store.markRead(['b'], []);
+  void s.store.markRead(['a']);
+  void s.store.markRead(['b']);
   assert.deepEqual(unreadAlerts(s), ['c']);
   // The second answer (computed after both) comes first, then the first (only `a` read).
   const second = s.posts[1];
@@ -180,66 +149,15 @@ test('two actions answered out of order both stay applied', async () => {
 
 test('a failed action rolls back and says so quietly, until the next one', async () => {
   const s = await loaded([alert('a'), alert('b')]);
-  const done = s.store.clear(['a'], []);
+  const done = s.store.clear(['a']);
   assert.deepEqual(alertIds(s), ['b']);
   await s.post('clear', undefined);
   assert.equal(await done, false);
   assert.deepEqual(alertIds(s), ['a', 'b']);
   assert.equal(s.store.get().problem, PROBLEM.clear);
   await s.answer('alerts', [alert('a'), alert('b')]);
-  void s.store.markRead(['b'], []);
+  void s.store.markRead(['b']);
   assert.equal(s.store.get().problem, undefined);
-});
-
-test('a GitHub thread read here stays read until something newer happens on it', async () => {
-  const s = await loaded([], [thread('1'), thread('2')]);
-  const done = s.store.markRead([], ['1']);
-  assert.deepEqual([...s.store.get().readThreads], ['1']);
-  await s.post('threads', snap(thread('2')));
-  assert.equal(await done, true);
-  // Kept as a read row though the server no longer lists it.
-  assert.deepEqual(
-    s.store.get().threads.map((t) => t.id),
-    ['2', '1'],
-  );
-  assert.deepEqual([...s.store.get().readThreads], ['1']);
-  // GitHub's next read, before a machine marked it there, still has it: still read.
-  s.event('notifications');
-  await s.answer('notifications', snap(thread('1'), thread('2')));
-  assert.deepEqual([...s.store.get().readThreads], ['1']);
-  // A new comment on it: unread again.
-  s.event('notifications');
-  await s.answer('notifications', snap(thread('1', '2026-10-18T11:00:00.000Z'), thread('2')));
-  assert.deepEqual([...s.store.get().readThreads], []);
-});
-
-test('a GitHub thread whose mark-read failed comes back unread', async () => {
-  const s = await loaded([], [thread('1')]);
-  const done = s.store.markRead([], ['1']);
-  assert.deepEqual([...s.store.get().readThreads], ['1']);
-  await s.post('threads', undefined);
-  assert.equal(await done, false);
-  assert.deepEqual([...s.store.get().readThreads], []);
-  assert.equal(s.store.get().problem, PROBLEM.read);
-});
-
-test('a cleared thread stays out, even when a stale read still lists it', async () => {
-  const s = await loaded([], [thread('1'), thread('2')]);
-  s.event('notifications');
-  void s.store.clear([], ['1']);
-  assert.deepEqual(
-    s.store.get().threads.map((t) => t.id),
-    ['2'],
-  );
-  await s.answer('notifications', snap(thread('1'), thread('2')));
-  assert.deepEqual(
-    s.store.get().threads.map((t) => t.id),
-    ['2'],
-  );
-  assert.deepEqual(
-    s.posts.map((p) => [p.kind, p.ids]),
-    [['threads', ['1']]],
-  );
 });
 
 test('reads are one at a time: a burst of events reads once more, not once each', async () => {
@@ -254,38 +172,26 @@ test('reads are one at a time: a burst of events reads once more, not once each'
   assert.equal(s.gets.alerts.length, 0);
 });
 
-test('Clear all on ninety-odd shows in the same frame, in one call each, and stays cleared', async () => {
+test('Clear all on ninety-odd shows in the same frame, in one call, and stays cleared', async () => {
   const alerts = Array.from({ length: 90 }, (_, i) => alert(`a${i}`));
-  const threads = [thread('1'), thread('2'), thread('3')];
-  const s = await loaded(alerts, threads);
+  const s = await loaded(alerts);
   let heard = 0;
   s.store.subscribe(() => heard++);
-  void s.store.markRead(
-    alerts.map((a) => a.id),
-    threads.map((t) => t.id),
-  );
+  void s.store.markRead(alerts.map((a) => a.id));
   // Synchronously: no await between the click and what the panel draws.
   assert.deepEqual(unreadAlerts(s), []);
-  assert.deepEqual([...s.store.get().readThreads].sort(), ['1', '2', '3']);
   assert.ok(heard > 0);
   assert.deepEqual(
     s.posts.map((p) => [p.kind, p.ids.length]),
-    [
-      ['read', 90],
-      ['threads', 3],
-    ],
+    [['read', 90]],
   );
-  // Refetches that started before the server took it, answered with the old state: still gone.
+  // A refetch that started before the server took it, answered with the old state: still gone.
   s.event(undefined);
   await s.answer('alerts', alerts);
-  await s.answer('notifications', snap(...threads));
   assert.deepEqual(unreadAlerts(s), []);
-  assert.deepEqual([...s.store.get().readThreads].sort(), ['1', '2', '3']);
   await s.post(
     'read',
     alerts.map((a) => ({ ...a, read: true })),
   );
-  await s.post('threads', snap());
   assert.deepEqual(unreadAlerts(s), []);
-  assert.deepEqual([...s.store.get().readThreads].sort(), ['1', '2', '3']);
 });

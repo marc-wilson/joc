@@ -1,4 +1,4 @@
-import type { GitHubNotification, PullRequest, Session } from '@joc/protocol';
+import type { PullRequest, Session } from '@joc/protocol';
 
 // Sessions and pull requests belong together when they're on the same repo and branch.
 
@@ -21,8 +21,8 @@ export const sessionFor = (pr: PullRequest, sessions: Session[]): Session | unde
  * The live session on a notification's branch: a CI run's own, or a pull request's head
  * branch when it's one of the person's or waiting on their review.
  */
-export function sessionForThread(
-  thread: Pick<GitHubNotification, 'repo' | 'number' | 'branch'>,
+export function sessionForNote(
+  thread: { repo: string; number?: number; branch?: string },
   prs: PullRequest[],
   sessions: Session[],
 ): Session | undefined {

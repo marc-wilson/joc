@@ -9,7 +9,6 @@ const Update = z.object({ type: z.literal('session'), session: Session });
 const ChangesEvent = z.object({ type: z.literal('changes'), sessionId: z.string() });
 const CommandsEvent = z.object({ type: z.literal('commands'), sessionId: z.string() });
 const GitHubEvent = z.object({ type: z.literal('github') });
-const NotificationsEvent = z.object({ type: z.literal('notifications') });
 const AlertsEvent = z.object({ type: z.literal('alerts') });
 const LaunchesEvent = z.object({ type: z.literal('launches') });
 const DeletesEvent = z.object({ type: z.literal('deletes') });
@@ -30,7 +29,6 @@ export type LiveEvent =
   | z.infer<typeof ChangesEvent>
   | z.infer<typeof CommandsEvent>
   | z.infer<typeof GitHubEvent>
-  | z.infer<typeof NotificationsEvent>
   | z.infer<typeof AlertsEvent>
   | z.infer<typeof LaunchesEvent>
   | z.infer<typeof DeletesEvent>
@@ -73,7 +71,6 @@ function start(): () => void {
     on('changes', ChangesEvent);
     on('commands', CommandsEvent);
     on('github', GitHubEvent);
-    on('notifications', NotificationsEvent);
     on('alerts', AlertsEvent);
     on('launches', LaunchesEvent);
     on('deletes', DeletesEvent);

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { PullRequest, Session } from '@joc/protocol';
-import { prFor, sessionFor, sessionForThread } from './links.ts';
+import { prFor, sessionFor, sessionForNote } from './links.ts';
 import { duration } from './time.ts';
 
 const pr: PullRequest = {
@@ -50,8 +50,8 @@ test("a notification links to the live session on its pull request's or CI run's
   const main = session('b', 'main', '2026-10-18T09:30:00.000Z');
   const ended = { ...session('c', 'main', '2026-10-18T09:40:00.000Z'), state: 'offline' as const };
   const repo = 'harbor-labs/atlas-api';
-  assert.equal(sessionForThread({ repo, number: 238 }, [pr], [live, main])?.id, 'a');
-  assert.equal(sessionForThread({ repo, number: 239 }, [pr], [live, main]), undefined);
+  assert.equal(sessionForNote({ repo, number: 238 }, [pr], [live, main])?.id, 'a');
+  assert.equal(sessionForNote({ repo, number: 239 }, [pr], [live, main]), undefined);
   // An ended session can't take a prompt.
-  assert.equal(sessionForThread({ repo, branch: 'main' }, [], [main, ended])?.id, 'b');
+  assert.equal(sessionForNote({ repo, branch: 'main' }, [], [main, ended])?.id, 'b');
 });

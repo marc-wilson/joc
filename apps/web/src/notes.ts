@@ -2,7 +2,6 @@ import {
   type Alert,
   channelsOf,
   chimes,
-  type GitHubNotification,
   type GitHubSnapshot,
   type NotificationKind,
   type Prefs,
@@ -20,10 +19,11 @@ import { plain } from './plain.ts';
 // - a session waiting on you (question or permission): gone once it's answered anywhere;
 // - your review requested on a pull request: gone once it's no longer in your review-requested
 //   list (you reviewed it, the request was withdrawn, it closed);
-// - a mention, or a comment on your pull request: gone once you open or dismiss it;
+// - a mention, or a comment on your pull request (alerts from the GitHub App's webhooks): gone
+//   once you open or dismiss it;
 // - CI failed on your pull request: gone once CI passes again (or it closed), or you open it;
 // - off by default, a long turn that finished: gone once you open the session.
-// Everything else (other GitHub activity, the record of a session that waited) is history only.
+// The record of a session that waited is history only.
 // A note that's resolved, read or dismissed is gone from the panel; the history keeps it.
 //
 // Each kind's row (its lead, title and meta line) is spelt here and nowhere else, so a new source
@@ -46,7 +46,7 @@ export type NoteLead =
   | { icon: 'pr' | 'comment' | 'person' | 'inbox' };
 
 export interface Note {
-  /** `session:<id>`, `alert:<id>` or `github:<thread id>`. */
+  /** `session:<id>` or `alert:<id>`. */
   id: string;
   kind: NotificationKind;
   group: NoteGroup;
@@ -86,9 +86,8 @@ export interface Note {
   waiting?: Waiting;
   /** For a failed CI run: the branch it ran on. */
   branch?: string;
-  /** The alert and GitHub threads that opening or dismissing it reads. */
+  /** The alert that opening or dismissing it reads. */
   alertId?: string;
-  threadIds: string[];
 }
 
 const repoName = (repo: string) => repo.split('/')[1] ?? repo;
@@ -139,7 +138,6 @@ export function needsNotes(sessions: Session[], alerts: Alert[] = []): Note[] {
         repo: s.repo,
         sessionId: s.id,
         waiting: asked,
-        threadIds: [],
       };
       if (kind === 'permission') {
         const call = asked?.kind === 'permission' ? asked.summary || asked.tool : said.text;
@@ -203,8 +201,25 @@ export function alertNote(a: Alert): Note {
     unread: !a.read,
     repo: a.repo,
     alertId: a.id,
-    threadIds: [],
   };
+  if (a.kind === 'mention' || a.kind === 'comment') {
+    const on = a.number ? ` on #${a.number}` : '';
+    const about = `${a.title} · ${repoName(a.repo)}`;
+    return {
+      ...base,
+      kind: 'mention',
+      group: 'activity',
+      lead: { icon: 'comment' },
+      title: a.kind === 'mention' ? `You were mentioned${on}` : `New comment${on}`,
+      meta: a.detail ? `${a.detail} · ${about}` : about,
+      text: about,
+      source: a.number ? `${repoName(a.repo)}#${a.number}` : repoName(a.repo),
+      // The comment itself, on GitHub.
+      href: a.url ?? `https://github.com/${a.repo}`,
+      external: true,
+      number: a.number,
+    };
+  }
   if (a.kind === 'review' || a.kind === 'ci-failed') {
     const pr = {
       ...base,
@@ -269,97 +284,6 @@ export function alertNote(a: Alert): Note {
   };
 }
 
-const MENTIONS = ['mention', 'team_mention'];
-
-/** What a thread's note is about. */
-function threadKind(t: GitHubNotification): NotificationKind {
-  if (t.alert === 'ci-failed') return 'ci-failed';
-  if (t.reason === 'review_requested') return 'review';
-  if (MENTIONS.includes(t.reason) || t.reason === 'comment') return 'mention';
-  if (t.reason === 'author' && t.type === 'PullRequest') return 'mention';
-  return 'github';
-}
-
-const OTHER_VERBS = new Map([
-  ['assign', 'Assigned to you'],
-  ['author', 'Activity on your thread'],
-  ['state_change', 'State changed'],
-  ['subscribed', 'Activity on a thread you watch'],
-  ['manual', 'Activity on a thread you watch'],
-  ['invitation', 'You were invited'],
-  ['security_alert', 'Security alert'],
-  ['ci_activity', 'CI finished'],
-]);
-
-/** One of the person's GitHub threads as a note: unread, unless read here. */
-export function threadNote(t: GitHubNotification, unread = true): Note {
-  const kind = threadKind(t);
-  const on = t.number ? ` on #${t.number}` : '';
-  const about = `${t.title} · ${repoName(t.repo)}`;
-  const base = {
-    id: `github:${t.id}`,
-    kind,
-    source: t.number ? `${repoName(t.repo)}#${t.number}` : repoName(t.repo),
-    at: t.updatedAt,
-    unread,
-    href: t.url,
-    external: true,
-    repo: t.repo,
-    number: t.number,
-    branch: t.branch,
-    threadIds: [t.id],
-  };
-  switch (kind) {
-    case 'ci-failed':
-      return {
-        ...base,
-        group: 'activity',
-        lead: { ci: 'fail' },
-        title: `CI failed${on || (t.branch ? ` on ${t.branch}` : '')}`,
-        meta: about,
-        code: on ? t.branch : undefined,
-        text: t.title,
-      };
-    case 'review':
-      return {
-        ...base,
-        group: 'activity',
-        lead: { icon: 'pr' },
-        title: `Review requested${on}`,
-        meta: about,
-        text: about,
-        // Reviewed here, in JOC.
-        ...(t.number ? { href: prHref(t.repo, t.number), external: false } : {}),
-      };
-    case 'mention':
-      return {
-        ...base,
-        group: 'activity',
-        lead: { icon: 'comment' },
-        title:
-          t.reason === 'author'
-            ? `New activity on your #${t.number}`
-            : t.reason === 'comment'
-              ? `New comment${on}`
-              : `You were mentioned${on}`,
-        meta: about,
-        text: about,
-      };
-    default:
-      return {
-        ...base,
-        group: 'activity',
-        lead: {
-          icon: t.reason === 'assign' ? 'person' : t.type === 'PullRequest' ? 'pr' : 'inbox',
-        },
-        title: t.title,
-        meta: `${OTHER_VERBS.get(t.reason) ?? 'Activity'} · ${repoName(t.repo)}`,
-        text: OTHER_VERBS.get(t.reason) ?? 'Activity',
-        historyOnly: true,
-      };
-  }
-}
-
 /** The person's pull requests as their last good GitHub read had them, and when. */
 interface Pulls {
   reviewRequested: PullRequest[];
@@ -379,9 +303,8 @@ function pullsOf(github: GitHubSnapshot | undefined): Pulls | undefined {
 type About = Pick<Note, 'repo' | 'number' | 'branch' | 'at'>;
 
 /**
- * A review request is resolved once the pull request isn't in the review-requested list. For
- * an alert (raised from that list), only a read after it counts; a GitHub thread keeps its
- * reason for good, so the list alone says whether it's still asked.
+ * A review request is resolved once the pull request isn't in the review-requested list. With
+ * `sinceOnly` (an alert, raised from that list), only a read after it counts.
  */
 export function reviewResolved(n: About, pulls: Pulls | undefined, sinceOnly: boolean): boolean {
   if (!pulls || !n.number) return false;
@@ -402,69 +325,27 @@ export function ciResolved(n: About, pulls: Pulls | undefined): boolean {
   return pr.ci !== 'fail';
 }
 
-const prKey = (repo: string, number: number | undefined) => `${repo}#${number}`;
-
 export interface NoteSources {
   sessions: Session[];
   alerts: Alert[];
-  threads: GitHubNotification[];
-  /** The threads read here. */
-  read?: ReadonlySet<string>;
   /** The person's pull requests, which resolve review requests and failed CI. */
   github?: GitHubSnapshot;
   /** Adds the answered `needs` alerts, for the history. */
   records?: boolean;
 }
 
-/**
- * Every note: sessions waiting now, then JOC's alerts and the GitHub threads, newest first. A
- * pull request asking for review (or failing CI) both ways is one note that reads both.
- */
-export function allNotes({
-  sessions,
-  alerts,
-  threads,
-  read = new Set(),
-  github,
-  records = false,
-}: NoteSources): Note[] {
+/** Every note: sessions waiting now, then JOC's alerts, newest first. */
+export function allNotes({ sessions, alerts, github, records = false }: NoteSources): Note[] {
   const pulls = pullsOf(github);
   const waitingNow = new Set(sessions.filter((s) => s.state === 'needs').map((s) => s.id));
   // A needs alert still waiting is the live session's note; once answered it's a record.
   const fromAlerts = alerts
     .filter((a) => a.kind !== 'needs' || (records && !(a.sessionId && waitingNow.has(a.sessionId))))
     .map(alertNote);
-  // Newest first: a thread twins with the latest alert about its pull request.
-  const reviews = new Map<string, Note>();
-  for (const n of fromAlerts) {
-    if (n.kind === 'review' && !reviews.has(prKey(n.repo, n.number))) {
-      reviews.set(prKey(n.repo, n.number), n);
-    }
-  }
-  const failures = fromAlerts.filter((n) => n.kind === 'ci-failed');
-  const fromThreads: Note[] = [];
-  for (const t of threads) {
-    const twin =
-      t.reason === 'review_requested'
-        ? reviews.get(prKey(t.repo, t.number))
-        : t.alert === 'ci-failed'
-          ? failures.find(
-              (n) =>
-                n.repo === t.repo && (t.number ? n.number === t.number : n.branch === t.branch),
-            )
-          : undefined;
-    if (twin) {
-      twin.threadIds.push(t.id);
-      // Unread on GitHub still: the note is too.
-      if (!read.has(t.id)) twin.unread = true;
-    } else {
-      fromThreads.push(threadNote(t, !read.has(t.id)));
-    }
-  }
-  const rest = [...fromAlerts, ...fromThreads].map((n) => {
+  const rest = fromAlerts.map((n) => {
     const resolved =
       n.kind === 'review'
-        ? reviewResolved(n, pulls, n.alertId !== undefined)
+        ? reviewResolved(n, pulls, true)
         : n.kind === 'ci-failed'
           ? ciResolved(n, pulls)
           : false;
