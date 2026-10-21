@@ -16,7 +16,7 @@ import {
   SessionSettings,
   type SlashCommand,
 } from '@joc/protocol';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { apiFetch } from './auth.ts';
 import { type DiffFile, parseDiff } from './diff.ts';
@@ -246,6 +246,36 @@ export function usePromptStatuses(sessionId: string | undefined): PromptStatus[]
   }, [sessionId]);
 
   return statuses && statuses.sessionId === sessionId ? statuses.list : undefined;
+}
+
+/**
+ * Keeps the toasts clear of the composer: `--toast-clear` on the root is the dock's height while
+ * it's on the page, and the toast stack sits that much higher. Give it the dock.
+ */
+export function useToastClearance() {
+  const observer = useRef<ResizeObserver>(undefined);
+  const dock = useRef<HTMLElement>(undefined);
+  useEffect(
+    () => () => {
+      observer.current?.disconnect();
+      document.documentElement.style.removeProperty('--toast-clear');
+    },
+    [],
+  );
+  return useCallback((el: HTMLElement | null) => {
+    if (el === (dock.current ?? null)) return;
+    observer.current?.disconnect();
+    dock.current = el ?? undefined;
+    const root = document.documentElement.style;
+    if (!el) {
+      root.removeProperty('--toast-clear');
+      return;
+    }
+    const fit = () => root.setProperty('--toast-clear', `${Math.round(el.offsetHeight)}px`);
+    observer.current = new ResizeObserver(fit);
+    observer.current.observe(el);
+    fit();
+  }, []);
 }
 
 /**
