@@ -496,3 +496,22 @@ h4.joc-taskd__label { margin: 0; }
   .joc-hist--select.joc-hist--resume { grid-template-columns: var(--control-sm) auto minmax(0, 1fr) var(--control-md); grid-template-areas: "select main main menu" ". act cmd cmd"; }
 }
 /* ===== End Resume (#68) ================================================================= */
+
+/* ===== Pending messages (#77) ============================================================ */
+/* A message sent from JOC that the session hasn't read yet never looks sent: no fill, a dashed
+   hairline, quieter text. The border takes 1px off the padding, so the bubble keeps its size
+   when it becomes the sent message in the same place. Failed: the border in the fail colour. */
+.joc-msg--user.joc-msg--pending { background: transparent; border: 1px dashed var(--border-strong); padding: calc(var(--space-2) - 1px) calc(var(--space-3) - 1px); }
+.joc-msg--pending .joc-msg__body { color: var(--text-secondary); transition: color var(--duration-fade) var(--ease-standard); }
+.joc-msg--user.joc-msg--failed { border-color: var(--ci-fail); }
+.joc-msg__status { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; column-gap: var(--space-2); font-variant-numeric: tabular-nums; transition: color var(--duration-fade) var(--ease-standard); }
+.joc-msg__status.is-error { color: var(--ci-fail); }
+.joc-msg__status .joc-link { font-size: 12px; line-height: 16px; padding: 0; border: 0; background: none; cursor: pointer; font-family: inherit; }
+/* The images of a pending message wait with it. */
+.joc-msg-images--pending { opacity: 0.6; transition: opacity var(--duration-fade) var(--ease-standard); }
+
+/* The line above the composer while messages wait for the session. */
+.joc-queue-note { display: flex; align-items: center; gap: var(--space-2); min-width: 0; margin-bottom: var(--space-2); font-size: 12px; line-height: 16px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.joc-queue-note > svg { flex: none; color: var(--text-tertiary); }
+.joc-queue-note__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ===== End Pending messages (#77) ======================================================== */
