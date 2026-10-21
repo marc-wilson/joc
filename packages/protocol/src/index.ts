@@ -281,7 +281,7 @@ export const PullRequestCheck = z.object({
 });
 export type PullRequestCheck = z.infer<typeof PullRequestCheck>;
 
-/** An open pull request, as the plugin reads it through the `gh` CLI. */
+/** An open pull request, as the GitHub App's webhooks have it, or the plugin reads it with `gh`. */
 export const PullRequest = z.object({
   number: z.number().int().positive(),
   title: z.string().max(500),
@@ -310,7 +310,10 @@ export const PullRequest = z.object({
 });
 export type PullRequest = z.infer<typeof PullRequest>;
 
-/** What the plugin reads from GitHub for its person, about once a minute. */
+/**
+ * What the plugin reads from GitHub for its person, about once a minute, unless the GitHub App
+ * covers them (then the server keeps the same lists from webhooks).
+ */
 export const GitHubReport = z.object({
   at: z.number().int().positive(),
   /** Whether `gh` could answer: missing and signed-out machines say so instead of sending PRs. */
@@ -320,7 +323,7 @@ export const GitHubReport = z.object({
 });
 export type GitHubReport = z.infer<typeof GitHubReport>;
 
-/** `GET /api/github`: the latest report, or `none` before any machine has sent one. */
+/** `GET /api/github`: the latest lists, or `none` before any machine (or the App) sent them. */
 export const GitHubSnapshot = z.discriminatedUnion('state', [
   z.object({ state: z.literal('none') }),
   z.object({
@@ -333,84 +336,26 @@ export const GitHubSnapshot = z.discriminatedUnion('state', [
 ]);
 export type GitHubSnapshot = z.infer<typeof GitHubSnapshot>;
 
-/**
- * Why a GitHub thread wants the person, as the plugin judges it: the few that are worth
- * interrupting them for. Everything else waits in the Inbox.
- */
-export const NotificationAlert = z.enum(['review', 'mention', 'ci-failed']);
-export type NotificationAlert = z.infer<typeof NotificationAlert>;
-
-/** Most unread threads the plugin reads and sends: the newest, as GitHub orders them. */
-export const MAX_NOTIFICATIONS = 200;
-
-/** One unread thread from the person's GitHub notifications, as the plugin reads it via `gh`. */
-export const GitHubNotification = z.object({
-  /** GitHub's thread id, for marking it read. */
-  id: z.string().regex(/^\d+$/).max(30),
-  /**
-   * GitHub's reason: `review_requested`, `mention`, `team_mention`, `comment`, `assign`,
-   * `author`, `ci_activity`, `state_change`, `subscribed`, and others GitHub may add.
-   */
-  reason: z.string().min(1).max(50),
-  title: z.string().max(500),
-  /** GitHub's subject type: `PullRequest`, `Issue`, `CheckSuite`, `Discussion`, `Release`, ... */
-  type: z.string().min(1).max(50),
-  /** `owner/name`, matching Session.repo. */
-  repo: z.string().max(200),
-  /** The thread's page on GitHub. */
-  url: z.url(),
-  updatedAt: z.iso.datetime(),
-  /** The pull request or issue number, when the thread is one. */
-  number: z.number().int().positive().optional(),
-  /** For a CI thread, the branch its run was on. */
-  branch: z.string().max(300).optional(),
-  alert: NotificationAlert.optional(),
-});
-export type GitHubNotification = z.infer<typeof GitHubNotification>;
-
-/** What the plugin reads from the person's GitHub notifications, when the feed changed. */
-export const NotificationsReport = z.object({
-  at: z.number().int().positive(),
-  status: GitHubReport.shape.status,
-  threads: z.array(GitHubNotification).max(MAX_NOTIFICATIONS),
-  /** True when GitHub has more unread threads than were read. */
-  more: z.boolean(),
-});
-export type NotificationsReport = z.infer<typeof NotificationsReport>;
-
-/**
- * `GET /api/notifications`: the unread threads, or `none` before any machine has sent them.
- * Threads the person marked read leave the list at once, before GitHub hears of it.
- */
-export const NotificationsSnapshot = z.discriminatedUnion('state', [
-  z.object({ state: z.literal('none') }),
-  z.object({
-    state: z.literal('reported'),
-    status: GitHubReport.shape.status,
-    threads: z.array(GitHubNotification),
-    more: z.boolean(),
-    updatedAt: z.iso.datetime(),
-  }),
-]);
-export type NotificationsSnapshot = z.infer<typeof NotificationsSnapshot>;
-
-/** `POST /api/notifications/read`, from the dashboard: mark these threads read on GitHub. */
-export const MarkReadRequest = z.object({
-  ids: z.array(GitHubNotification.shape.id).min(1).max(MAX_NOTIFICATIONS),
-});
-export type MarkReadRequest = z.infer<typeof MarkReadRequest>;
-
-/** `POST /api/notifications/reads/claim`, the plugin's: the threads to mark read on GitHub. */
-export const ReadsClaim = z.object({ ids: z.array(GitHubNotification.shape.id) });
-export type ReadsClaim = z.infer<typeof ReadsClaim>;
-
 // Alerts: JOC's own record of what involved the person, kept on the server so they can look back
-// on what they missed. The server raises them from what the plugin reports: a session that went
-// to `needs`, a long turn that finished, a pull request newly asking for their review, CI newly
-// failing on one of theirs. One that resolves itself (answered, reviewed, CI green) reads itself.
+// on what they missed. The server raises them from what the plugin reports and what the GitHub
+// App's webhooks say: a session that went to `needs`, a long turn that finished, a pull request
+// newly asking for their review, CI newly failing on one of theirs, a comment that mentions them
+// or is on their pull request. One that resolves itself (answered, reviewed, CI green) reads
+// itself; a mention or comment reads once opened or dismissed.
 
-/** What an alert is about. (`finished`, every turn's end, is no longer raised.) */
-export const AlertKind = z.enum(['needs', 'long-turn', 'review', 'ci-failed']);
+/**
+ * What an alert is about. (`finished`, every turn's end, is no longer raised.) `mention` and
+ * `comment` come from the GitHub App's webhooks: a comment naming the person, or one on their
+ * pull request or issue.
+ */
+export const AlertKind = z.enum([
+  'needs',
+  'long-turn',
+  'review',
+  'ci-failed',
+  'mention',
+  'comment',
+]);
 export type AlertKind = z.infer<typeof AlertKind>;
 
 /** Most alerts kept per person; older ones go first. */
@@ -426,15 +371,16 @@ export const Alert = z.object({
   /** The session's title, or the pull request's. */
   title: z.string(),
   /**
-   * One line more: what the session said it needs, how its long turn ended, or (for `review`
-   * and `ci-failed`) the pull request's author or branch.
+   * One line more: what the session said it needs, how its long turn ended, (for `review` and
+   * `ci-failed`) the pull request's author or branch, or (for `mention` and `comment`) who
+   * commented.
    */
   detail: z.string().optional(),
   /** `owner/name`, matching Session.repo. */
   repo: z.string(),
   /** The session it's about, for `needs` and `long-turn`. */
   sessionId: z.string().optional(),
-  /** The pull request, for `review` and `ci-failed`. */
+  /** The pull request (or issue, for `mention` and `comment`). */
   number: z.number().int().positive().optional(),
   /** The pull request's head branch, for `ci-failed`. */
   branch: z.string().optional(),
@@ -933,8 +879,6 @@ export type StreamEvent =
   | { type: 'commands'; sessionId: string }
   /** New GitHub data; fetch it from `/api/github`. */
   | { type: 'github' }
-  /** The unread GitHub notifications changed; fetch them from `/api/notifications`. */
-  | { type: 'notifications' }
   /** The person's alerts changed; fetch them from `/api/alerts`. */
   | { type: 'alerts' }
   /** A new session was asked for or changed; fetch them from `/api/launches`. */
