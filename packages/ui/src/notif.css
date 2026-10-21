@@ -45,6 +45,8 @@
   box-shadow: 0 0 0 2px var(--bg-base); /* cut-out from the bar */
 }
 .joc-count.is-needs { --arrive: var(--state-needs); background: var(--state-needs); color: var(--on-state-needs); }
+/* Fitted to JOC: the bell's unread count is accent, so activity that doesn't need you is still seen. */
+.joc-count.is-unread { --arrive: var(--accent); background: var(--accent); color: var(--on-accent); }
 
 /* New arrival: ONE soft pulse. The ring never grows — only its colour fades. */
 .joc-arriving { animation: joc-arrive var(--duration-arrive) var(--ease-standard) 1; }

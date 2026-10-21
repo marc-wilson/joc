@@ -6,6 +6,8 @@ export interface CountPillProps {
   count: number;
   /** Something here needs you: the pill is needs orange. Otherwise it's neutral. */
   needs?: boolean;
+  /** Unread notifications that don't need you: the pill is accent, so it's seen. */
+  unread?: boolean;
   /**
    * Counts arrivals: each time it goes up, the pill pulses once (a ring whose colour fades over
    * --duration-arrive; nothing under reduced motion). 0 or left out for none yet.
@@ -16,13 +18,17 @@ export interface CountPillProps {
 const capped = (n: number) => (n > 99 ? '99+' : String(n));
 
 /** The count pill the bell and the nav bar's Sessions item share. Hidden at 0. */
-export function CountPill({ count, needs, pulse = 0 }: CountPillProps) {
+export function CountPill({ count, needs, unread, pulse = 0 }: CountPillProps) {
   if (!count) return null;
   return (
     // Keyed by the arrivals, so each one plays the pulse once.
     <span
       key={pulse}
-      className={cx('joc-count', needs && 'is-needs', pulse > 0 && 'joc-arriving')}
+      className={cx(
+        'joc-count',
+        needs ? 'is-needs' : unread && 'is-unread',
+        pulse > 0 && 'joc-arriving',
+      )}
       aria-hidden="true"
     >
       {capped(count)}
@@ -76,7 +82,7 @@ export function NotificationBell({
       onClick={onToggle}
     >
       <Icon name="bell" />
-      <CountPill count={unread} needs={needs > 0} pulse={arrivals} />
+      <CountPill count={unread} needs={needs > 0} unread pulse={arrivals} />
     </button>
   );
 }
