@@ -20,6 +20,9 @@ import type {
  */
 export const MAX_PR_CHECKS = 50;
 
+/** The longest check detail sent: @joc/protocol's MAX_CHECK_DETAIL, copied for the same reason. */
+export const MAX_CHECK_DETAIL = 200;
+
 const EVERY_MS = 60_000;
 const stampFile = () => join(homedir(), '.claude', 'joc', 'github-read-at');
 
@@ -70,8 +73,8 @@ const PR_FIELDS = `
       checkRunCountsByState { state count }
       statusContextCountsByState { state count }
       nodes {
-        ... on CheckRun { name status conclusion startedAt completedAt }
-        ... on StatusContext { context state }
+        ... on CheckRun { name status conclusion startedAt completedAt title }
+        ... on StatusContext { context state description }
       }
     } } } } }
   }`;
@@ -95,6 +98,21 @@ export interface GraphCheck {
   completedAt?: string | null;
   context?: string;
   state?: string;
+  /** A check run's output title. */
+  title?: string | null;
+  /** A commit status's description. */
+  description?: string | null;
+}
+
+/** A check's detail line from what it says: its first line, bounded; undefined when it's empty. */
+function detailOf(text: unknown): string | undefined {
+  if (typeof text !== 'string') return undefined;
+  const line = text
+    .split('\n')
+    .map((l) => l.trim())
+    .find(Boolean);
+  if (!line) return undefined;
+  return line.length > MAX_CHECK_DETAIL ? `${line.slice(0, MAX_CHECK_DETAIL - 1)}…` : line;
 }
 
 /** A commit's combined CI result, as GitHub's GraphQL API reports it. */
@@ -207,11 +225,13 @@ export function toChecks(nodes: GraphCheck[] | undefined): PullRequestCheck[] | 
     const status = (outcome && CHECK.get(outcome)) || 'pending';
     const ran =
       c.startedAt && c.completedAt ? Date.parse(c.completedAt) - Date.parse(c.startedAt) : NaN;
+    const detail = detailOf(c.name ? c.title : c.description);
     return [
       {
         name: name.slice(0, 200),
         status,
         ...(Number.isFinite(ran) && ran >= 0 ? { seconds: Math.round(ran / 1000) } : {}),
+        ...(detail ? { detail } : {}),
       },
     ];
   });
