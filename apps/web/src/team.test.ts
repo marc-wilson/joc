@@ -157,6 +157,22 @@ test('a teammate shows its last seven steps and counts the earlier ones', () => 
   assert.equal(shown.steps.at(-1)?.text, 'Edit src/file-9.ts');
 });
 
+test("a hand-back is a teammate's report, though its notification comes after it", () => {
+  const [mate] = sessionTeam(session, items) as [Teammate];
+  const handback: ConversationItem = {
+    id: 'hb',
+    at: at(17),
+    kind: 'agent_message',
+    from: 'a79',
+    text: 'Fixed #79 for real',
+    report: true,
+  };
+  const all = [...items.slice(0, -1), handback, ...items.slice(-1)];
+  assert.equal(teammateReport(all, mate)?.text, 'Fixed #79 for real');
+  // Not a message between them.
+  assert.equal(teammateMessages(all, mate).length, 2);
+});
+
 test('only JOC images in a report are screenshots', () => {
   const id = 'a'.repeat(64);
   assert.deepEqual(reportImages(`See /api/images/${id} and https://example.test/x.png`), [id]);
