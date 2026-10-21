@@ -33,7 +33,15 @@ export interface HistoryRowProps {
   actions?: ReactNode;
   /** Resume, "Starting…", Try again or Open session: before the command, in a slot of its own. */
   resume?: ReactNode;
-  /** How an action on it stands, e.g. "Deleting on harbor-mbp…": shown in the meta line's place. */
+  /**
+   * Claude's last words, in a column of their own after the title (two lines at most). Pass it,
+   * empty too, on every row of a list so the columns line up; narrow, the column folds away.
+   */
+  summary?: string;
+  /**
+   * How an action on it stands, e.g. "Deleting on harbor-mbp…": in the summary's place, or the
+   * meta line's where there's no summary column.
+   */
   status?: ReactNode;
   /** The status says something failed: drawn in the fail colour. */
   statusError?: boolean;
@@ -58,6 +66,7 @@ export function HistoryRow({
   select,
   actions,
   resume,
+  summary,
   status,
   statusError,
   removed,
@@ -65,12 +74,23 @@ export function HistoryRow({
   const tip = useId();
   const full = resumeCommand(sessionId, path);
   const when = duration ? `${ended} · ${duration}` : ended;
+  const column = summary !== undefined;
+  const statusLine = (className?: string) =>
+    status ? (
+      <div
+        className={cx('joc-hist__status', statusError && 'is-error', className)}
+        role={statusError ? 'alert' : 'status'}
+      >
+        {status}
+      </div>
+    ) : null;
   return (
     <div
       className={cx(
         'joc-hist',
         select && 'joc-hist--select',
         resume !== undefined && 'joc-hist--resume',
+        column && 'joc-hist--sum',
         removed && 'is-removed',
       )}
       aria-hidden={removed ? 'true' : undefined}
@@ -94,15 +114,10 @@ export function HistoryRow({
           </span>
           {pr ? <span className="joc-tag">{pr}</span> : null}
         </div>
-        {status ? (
-          <div
-            className={cx('joc-hist__meta joc-hist__status', statusError && 'is-error')}
-            role={statusError ? 'alert' : 'status'}
-          >
-            {status}
-          </div>
+        {status && !column ? (
+          statusLine('joc-hist__meta')
         ) : (
-          <div className="joc-hist__meta">
+          <div className={cx('joc-hist__meta', !!status && 'joc-hist__meta--wide')}>
             {branch ? <Branch>{branch}</Branch> : null}
             {path ? (
               <code className="joc-hist__path" title={path}>
@@ -113,7 +128,20 @@ export function HistoryRow({
             <span className="joc-hist__when-inline">{when}</span>
           </div>
         )}
+        {/* With the summary column folded away, the status takes the meta line's place. */}
+        {column ? statusLine('joc-hist__meta joc-hist__status--narrow') : null}
       </div>
+      {column ? (
+        <div className="joc-hist__sum">
+          {status ? (
+            statusLine()
+          ) : summary ? (
+            <span className="joc-hist__summary" title={summary}>
+              {summary}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       <div className="joc-hist__when">
         <time>{ended}</time>
         {duration ? <span className="joc-hist__when-sub">{duration}</span> : null}
