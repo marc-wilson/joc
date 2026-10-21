@@ -24,16 +24,13 @@ import {
   LaunchRequest,
   LaunchResult,
   MAX_IMAGE_BYTES,
-  MarkReadRequest,
   MessagesReport,
-  NotificationsReport,
   PluginVersion,
   PrefsPatch,
   ProblemsReport,
   PromptHandoff,
   type PromptQueued,
   PromptRequest,
-  type ReadsClaim,
   ResumeClaim,
   ResumeRequest,
   ResumeResult,
@@ -69,6 +66,8 @@ import { getCommands, saveCommands } from './commands.ts';
 import { claimDeletes, finishDelete, isDeleted, listDeletes, requestDeletes } from './deletes.ts';
 import type { GitHubAuth } from './github.ts';
 import { getGitHub, saveGitHub } from './github-data.ts';
+import { backfillOwner, isCovered } from './github-events.ts';
+import { firstDelivery, verifySignature, type Webhooks } from './github-webhook.ts';
 import {
   approveLink,
   createWebSession,
@@ -86,13 +85,6 @@ import {
 import { findImages, getImage, saveImage } from './images.ts';
 import { claimLaunches, createLaunch, finishLaunch, listLaunches } from './launches.ts';
 import { addMessages, listMessages } from './messages.ts';
-import {
-  claimReads,
-  getNotifications,
-  markAllRead,
-  markRead,
-  saveNotifications,
-} from './notifications.ts';
 import { type Owner, ownerFrom } from './owner.ts';
 import { getPrefs, patchPrefs } from './prefs.ts';
 import { listProblems, saveProblems } from './problems.ts';
@@ -116,7 +108,13 @@ import {
   saveReviewSettings,
   saveSessionSettings,
 } from './settings.ts';
-import { INSTALLED_HEADER, isBehind, LATEST_HEADER, PLUGIN_HEADER } from './version.ts';
+import {
+  GITHUB_SOURCE_HEADER,
+  INSTALLED_HEADER,
+  isBehind,
+  LATEST_HEADER,
+  PLUGIN_HEADER,
+} from './version.ts';
 
 /** The first plugin that says when Claude Code took a prompt it claimed. */
 const HANDOFF_FROM = '0.12.1';
@@ -135,6 +133,8 @@ export interface AppOptions {
   build?: string;
   /** Where its live streams hear updates: this process's bus, unless a test stands in another. */
   bus?: Bus;
+  /** The JOC GitHub App's webhooks. Without them, GitHub data comes from each machine's plugin. */
+  webhooks?: Webhooks;
 }
 
 /** How a request proved who it is: a browser session, a machine's token, or open local dev. */
@@ -153,6 +153,7 @@ export function createApp({
   build,
   shutdown = new AbortController().signal,
   bus = processBus,
+  webhooks,
 }: AppOptions): Hono<Env> {
   const app = new Hono<Env>();
 
@@ -213,6 +214,9 @@ export function createApp({
     if (!github) return c.redirect('/');
     const { state, returnTo } = takeOAuthCookies(c);
     const code = c.req.query('code');
+    // Back from installing the App, which authorizes without a state of ours: sign in afresh,
+    // which GitHub answers at once for someone who just authorized.
+    if (!state && c.req.query('setup_action')) return c.redirect('/auth/github');
     // The state ties the callback to a sign-in this browser started: no forged callbacks.
     if (!code || !state || !secretsEqual(c.req.query('state'), state)) {
       return c.text('Sign-in expired or was started elsewhere. Try again.', 400);
@@ -221,6 +225,11 @@ export function createApp({
     if (!profile) return c.text('GitHub sign-in failed. Try again.', 400);
     const owner = await signInGitHubUser(profile);
     setSessionCookie(c, await createWebSession(owner));
+    // Their pull requests, read once through the App; webhooks keep them current after.
+    if (webhooks) {
+      const { context } = webhooks;
+      webhooks.run('A sign-in backfill', () => backfillOwner(context, owner));
+    }
     return c.redirect(returnTo);
   });
 
@@ -243,7 +252,8 @@ export function createApp({
   // ── Everything else under /api acts for one owner ──────────────────────────
 
   // A machine linking itself has no owner yet; the sign-in screen asks before it has one.
-  const open = ['/api/auth', '/api/devices/start', '/api/devices/token'];
+  // GitHub's webhook proves itself with its signature instead.
+  const open = ['/api/auth', '/api/devices/start', '/api/devices/token', '/api/github/webhook'];
   app.use('/api/*', async (c, next) => {
     if (open.includes(c.req.path)) return next();
     const who = await identify(c);
@@ -255,7 +265,11 @@ export function createApp({
     c.set('owner', who.owner);
     c.set('via', who.via);
     if (who.device) c.set('device', who.device);
-    return next();
+    await next();
+    // A machine whose person the App covers leaves GitHub to it: no `gh` reads.
+    if (webhooks && who.via === 'device' && (await isCovered(who.owner))) {
+      c.header(GITHUB_SOURCE_HEADER, 'app');
+    }
   });
 
   app.get('/api/auth', async (c) => {
@@ -387,11 +401,33 @@ export function createApp({
     return c.json(await patchPrefs(c.get('owner'), parsed.data));
   });
 
-  // ── GitHub, as the person's plugin reads it through `gh` ────────────────────
+  // ── GitHub: from the App's webhooks, or as the person's plugin reads it through `gh` ──
+
+  app.post('/api/github/webhook', bodyLimit({ maxSize: 25 * 1024 * 1024 }), async (c) => {
+    if (!webhooks) return c.json({ error: 'No GitHub App here' }, 404);
+    const body = await c.req.text();
+    if (!verifySignature(webhooks.secret, body, c.req.header('x-hub-signature-256'))) {
+      return c.json({ error: 'Bad signature' }, 401);
+    }
+    const event = c.req.header('x-github-event');
+    const delivery = c.req.header('x-github-delivery');
+    if (!event || !delivery) return c.json({ error: 'Not a GitHub delivery' }, 400);
+    let payload: unknown;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      return c.json({ error: 'Not JSON' }, 400);
+    }
+    if (!(await firstDelivery(delivery, event))) return c.json({ duplicate: true }, 200);
+    webhooks.enqueue(event, payload);
+    return c.body(null, 202);
+  });
 
   app.post('/api/github', async (c) => {
     const parsed = GitHubReport.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    // An older plugin still reads for a person the App covers: taken, and dropped.
+    if (webhooks && (await isCovered(c.get('owner')))) return c.body(null, 202);
     // 202 for a stale report: accepted, but a newer one already won.
     return (await saveGitHub(c.get('owner'), parsed.data))
       ? c.json({ ok: true })
@@ -400,33 +436,10 @@ export function createApp({
 
   app.get('/api/github', async (c) => c.json(await getGitHub(c.get('owner'))));
 
-  // ── GitHub notifications: read by the plugin, marked read from the dashboard ─
-
-  app.post('/api/notifications', async (c) => {
-    const parsed = NotificationsReport.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
-    // 202 for a stale report: accepted, but a newer one already won.
-    return (await saveNotifications(c.get('owner'), parsed.data))
-      ? c.json({ ok: true })
-      : c.body(null, 202);
-  });
-
-  app.get('/api/notifications', async (c) => c.json(await getNotifications(c.get('owner'))));
-
-  // Marking read is safe to repeat, and answers with the snapshot after it.
-  app.post('/api/notifications/read', async (c) => {
-    const parsed = MarkReadRequest.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
-    return c.json(await markRead(c.get('owner'), parsed.data.ids));
-  });
-
-  app.post('/api/notifications/read-all', async (c) => c.json(await markAllRead(c.get('owner'))));
-
-  // A machine's plugin takes the queue; a browser has no `gh` to mark them with.
-  app.post('/api/notifications/reads/claim', async (c) => {
-    if (c.get('via') === 'session') return c.json({ error: 'Forbidden' }, 403);
-    return c.json({ ids: await claimReads(c.get('owner')) } satisfies ReadsClaim);
-  });
+  // GitHub's notifications inbox is gone (mentions and comments are alerts now). Plugins before
+  // 0.13.0 still send it and ask for threads to mark read: answered, and nothing kept.
+  app.post('/api/notifications', (c) => c.json({ ignored: true }, 200));
+  app.post('/api/notifications/reads/claim', (c) => c.json({ ids: [] }));
 
   // ── Alerts: raised by the server from reports, kept to look back on ─────────
   // Reading and clearing are safe to repeat, and answer with the list after the change.

@@ -22,10 +22,8 @@ import {
   Launch,
   LONG_TURN_MS,
   MachineProblem,
-  NotificationsSnapshot,
   Prefs,
   PrefsSnapshot,
-  ReadsClaim,
   Resume,
   ReviewSettings,
   Session,
@@ -39,6 +37,15 @@ import { createApp } from './app.ts';
 import { bus, createBus } from './bus.ts';
 import { claimDeletes, DELETE_WAIT_MS, listDeletes, requestDeletes } from './deletes.ts';
 import type { GitHubAuth } from './github.ts';
+import {
+  commentEvent,
+  delivery,
+  INSTALLATION,
+  installationEvent,
+  PEOPLE,
+  pullEvent,
+} from './github-fixtures.ts';
+import { createWebhooks } from './github-webhook.ts';
 import { createDeviceToken, createWebSession, signInGitHubUser } from './identity.ts';
 import type { Owner } from './owner.ts';
 import { claimResumes, listResumes, RESUME_WAIT_MS, requestResume } from './resumes.ts';
@@ -132,10 +139,7 @@ test('every API route needs an owner', async () => {
     ['POST', '/api/problems'],
     ['POST', '/api/images'],
     ['GET', `/api/images/${'0'.repeat(64)}`],
-    ['GET', '/api/notifications'],
     ['POST', '/api/notifications'],
-    ['POST', '/api/notifications/read'],
-    ['POST', '/api/notifications/read-all'],
     ['POST', '/api/notifications/reads/claim'],
     ['GET', '/api/settings/sessions'],
     ['PUT', '/api/settings/sessions'],
@@ -480,17 +484,11 @@ test("a live stream hears only its owner's updates", async () => {
       diff: '',
       truncated: false,
     });
-    await call('bob', '/api/notifications', {
-      at: ++clock,
-      status: 'ok',
-      threads: [thread('9001', 'Bob secret thread')],
-      more: false,
-    });
     await call('alice', '/api/reports', report('alice-live', { title: 'Alice update' }));
   });
   assert.match(heard, /event: snapshot/);
   assert.match(heard, /Alice update/);
-  assert.doesNotMatch(heard, /bob-live|Bob secret|event: notifications/);
+  assert.doesNotMatch(heard, /bob-live|Bob secret/);
 });
 
 /** The events of one kind in a stream's text that mention `text`. */
@@ -856,132 +854,12 @@ test("slash commands stay with their owner, and a command's output isn't counted
   assert.equal(history.find((s) => s.id === 'alice-cmd')?.messages, 1);
 });
 
-function thread(id: string, title: string, updatedAt = new Date().toISOString()) {
-  return {
-    id,
-    reason: 'review_requested',
-    title,
-    type: 'PullRequest',
-    repo: 'harbor-labs/atlas-web',
-    url: `https://github.com/harbor-labs/atlas-web/pull/${id}`,
-    updatedAt,
-    number: Number(id),
-    alert: 'review',
-  };
-}
-
-const unread = async (who: Who) => {
-  const snapshot = await read(await call(who, '/api/notifications'), NotificationsSnapshot);
-  return snapshot.state === 'reported' ? snapshot.threads.map((t) => t.title) : 'none';
-};
-const claim = async (who: Who) =>
-  (await read(await call(who, '/api/notifications/reads/claim', {}), ReadsClaim)).ids;
-
-test('notifications stay with their owner', async () => {
-  const sent = { at: ++clock, status: 'ok', threads: [thread('101', 'Alice thread')], more: false };
+test("an old plugin's GitHub inbox is answered, and kept nowhere", async () => {
+  const sent = { at: ++clock, status: 'ok', threads: [], more: false };
   assert.equal((await call('alice', '/api/notifications', sent)).status, 200);
-  assert.deepEqual(await unread('alice'), ['Alice thread']);
-  // Bob's own, from the live stream test, and never Alice's.
-  assert.deepEqual(await unread('bob'), ['Bob secret thread']);
-});
-
-test("marking read reaches only the owner's machines, and hides only the owner's thread", async () => {
-  const at = ++clock;
-  await call('alice', '/api/notifications', {
-    at,
-    status: 'ok',
-    threads: [thread('201', 'Alice one'), thread('202', 'Alice two')],
-    more: false,
-  });
-  await call('bob', '/api/notifications', {
-    at,
-    status: 'ok',
-    threads: [thread('201', 'Bob one')],
-    more: false,
-  });
-
-  // Bob marks the same thread id read, and then everything he has.
-  // Each answers with the owner's snapshot after it.
-  const bobRead = await read(
-    await call('bob', '/api/notifications/read', { ids: ['201'] }),
-    NotificationsSnapshot,
-  );
-  assert.deepEqual(bobRead.state === 'reported' ? bobRead.threads : 'none', []);
-  const bobAll = await read(
-    await call('bob', '/api/notifications/read-all', {}),
-    NotificationsSnapshot,
-  );
-  assert.deepEqual(bobAll.state === 'reported' ? bobAll.threads : 'none', []);
-  assert.deepEqual(await unread('bob'), []);
-  assert.deepEqual(await unread('alice'), ['Alice one', 'Alice two']);
-  assert.deepEqual(await claim('alice'), []);
-  assert.deepEqual(await claim('bob'), ['201']);
-
-  const alices = await read(
-    await call('alice', '/api/notifications/read', { ids: ['202'] }),
-    NotificationsSnapshot,
-  );
-  assert.deepEqual(alices.state === 'reported' ? alices.threads.map((t) => t.title) : 'none', [
-    'Alice one',
-  ]);
-  // Asked again before a machine took it: still queued once.
-  assert.equal((await call('alice', '/api/notifications/read', { ids: ['202'] })).status, 200);
-  assert.deepEqual(await unread('alice'), ['Alice one']);
-  assert.deepEqual(await claim('bob'), []);
-  assert.deepEqual(await claim('alice'), ['202']);
-  // Claimed once: the next machine to read finds nothing left.
-  assert.deepEqual(await claim('alice'), []);
-});
-
-test('a thread marked read comes back when something new happens on it', async () => {
-  const earlier = new Date(Date.now() - 60_000).toISOString();
-  await call('alice', '/api/notifications/read', { ids: ['301'] });
-  const later = new Date(Date.now() + 60_000).toISOString();
-  await call('alice', '/api/notifications', {
-    at: ++clock,
-    status: 'ok',
-    threads: [thread('301', 'Quiet since', earlier), thread('302', 'New comment', later)],
-    more: false,
-  });
-  await call('alice', '/api/notifications/read', { ids: ['302'] });
-  await call('alice', '/api/notifications', {
-    at: ++clock,
-    status: 'ok',
-    threads: [
-      thread('301', 'Quiet since', earlier),
-      thread('302', 'New comment', new Date(Date.now() + 120_000).toISOString()),
-    ],
-    more: false,
-  });
-  assert.deepEqual(await unread('alice'), ['New comment']);
-});
-
-test("a thread marked read stays read when GitHub's clock runs ahead of ours", async () => {
-  const ahead = new Date(Date.now() + 30_000).toISOString();
-  const send = (updatedAt: string) =>
-    call('alice', '/api/notifications', {
-      at: ++clock,
-      status: 'ok',
-      threads: [thread('401', 'Ahead', updatedAt)],
-      more: false,
-    });
-  await send(ahead);
-  await call('alice', '/api/notifications/read', { ids: ['401'] });
-  // GitHub's next read still has it, before a machine marked it: the version read stays read.
-  await send(ahead);
-  assert.deepEqual(await unread('alice'), []);
-  await send(new Date(Date.now() + 90_000).toISOString());
-  assert.deepEqual(await unread('alice'), ['Ahead']);
-});
-
-test('only a machine takes the mark-read queue, and bad ids are refused', async () => {
-  const res = await app.request('/api/notifications/reads/claim', {
-    method: 'POST',
-    headers: { cookie: cookies.get('alice') ?? '', host: 'joc.test', origin: 'http://joc.test' },
-  });
-  assert.equal(res.status, 403);
-  assert.equal((await call('alice', '/api/notifications/read', { ids: ['../x'] })).status, 400);
-  assert.equal((await call('alice', '/api/notifications/read', { ids: [] })).status, 400);
+  const claimed = await call('alice', '/api/notifications/reads/claim', {});
+  assert.deepEqual(await claimed.json(), { ids: [] });
+  assert.equal((await call('alice', '/api/notifications')).status, 404);
 });
 
 const Alerts = z.array(Alert);
@@ -1833,4 +1711,75 @@ test('a resume no machine takes in time fails, and says so', async () => {
     await claimResumes(owner, 'alice-mini', undefined, now + RESUME_WAIT_MS + 1),
     [],
   );
+});
+
+test('a GitHub webhook reaches only the people it concerns, and a forged one nobody', async () => {
+  const secret = 'isolation-webhook-secret';
+  const webhooks = createWebhooks(secret, {});
+  const hooked = createApp({
+    github,
+    publicUrl: 'http://joc.test',
+    pluginVersion: '1.0.0',
+    webhooks,
+  });
+  // Alice and Bob reach the harbor-labs installation; Carol uses JOC, but not through it.
+  await signInGitHubUser({ ...PEOPLE.alice, installations: [INSTALLATION] });
+  await signInGitHubUser({ ...PEOPLE.bob, installations: [INSTALLATION] });
+  const carol = await signInGitHubUser(PEOPLE.carol);
+  const carolToken = await createDeviceToken(carol, 'carol-laptop');
+  const as = (token: string | undefined, path: string, body?: unknown) =>
+    hooked.request(path, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  const send = (event: string, payload: unknown) =>
+    hooked.request('/api/github/webhook', delivery(secret, event, payload));
+
+  // A forged delivery: refused, and nothing comes of it.
+  const forged = delivery('not-the-secret', 'pull_request', pullEvent('opened', { number: 41 }));
+  assert.equal((await hooked.request('/api/github/webhook', forged)).status, 401);
+  const unsigned = { ...forged, headers: { ...forged.headers, 'x-hub-signature-256': '' } };
+  assert.equal((await hooked.request('/api/github/webhook', unsigned)).status, 401);
+
+  assert.equal((await send('installation', installationEvent('created'))).status, 202);
+  const opened = pullEvent('opened', {
+    number: 42,
+    author: PEOPLE.alice,
+    reviewers: [PEOPLE.bob, PEOPLE.carol],
+  });
+  assert.equal((await send('pull_request', opened)).status, 202);
+  // Bob mentions Carol and Alice on Alice's pull request.
+  await send('issue_comment', commentEvent(PEOPLE.bob, 'Thanks @alice, and @carol too', 42));
+  await webhooks.idle();
+
+  const snapshot = async (token: string | undefined) =>
+    read(await as(token, '/api/github'), GitHubSnapshot);
+  const alice = await snapshot(tokens.get('alice'));
+  const bob = await snapshot(tokens.get('bob'));
+  assert.deepEqual(alice.state === 'reported' && alice.mine.map((p) => p.number), [42]);
+  assert.deepEqual(alice.state === 'reported' && alice.reviewRequested, []);
+  assert.deepEqual(bob.state === 'reported' && bob.reviewRequested.map((p) => p.number), [42]);
+  assert.deepEqual(bob.state === 'reported' && bob.mine, []);
+  // Carol was asked and mentioned, but the App doesn't cover her: nothing reaches her.
+  assert.equal((await snapshot(carolToken)).state, 'none');
+  const alertsFor = async (token: string | undefined) =>
+    (await read(await as(token, '/api/alerts'), Alerts)).filter((a) => a.number === 42);
+  assert.deepEqual(
+    (await alertsFor(tokens.get('alice'))).map((a) => [a.kind, a.detail]),
+    [['mention', 'bob']],
+  );
+  assert.deepEqual(
+    (await alertsFor(tokens.get('bob'))).map((a) => a.kind),
+    ['review'],
+  );
+  assert.deepEqual(await alertsFor(carolToken), []);
+
+  // Covered machines hear the App brings GitHub, and an old plugin's read is taken and dropped.
+  assert.equal((await as(tokens.get('alice'), '/api/sessions')).headers.get('x-joc-github'), 'app');
+  assert.equal((await as(carolToken, '/api/sessions')).headers.get('x-joc-github'), null);
+  const stale = { at: Date.now() + 60_000, status: 'ok', reviewRequested: [], mine: [] };
+  assert.equal((await as(tokens.get('alice'), '/api/github', stale)).status, 202);
+  const after = await snapshot(tokens.get('alice'));
+  assert.deepEqual(after.state === 'reported' && after.mine.map((p) => p.number), [42]);
 });

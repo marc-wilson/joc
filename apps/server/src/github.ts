@@ -1,5 +1,7 @@
-// "Sign in with GitHub": the OAuth web flow, used only to learn who someone is. GitHub's access
-// token is used once to read the profile and then dropped; JOC never stores it.
+// "Sign in with GitHub": the web flow, used only to learn who someone is. It's the same flow for
+// an OAuth app and a GitHub App (whose client id and secret then go here). GitHub's token is used
+// once to read the profile (and, for the App, which of its installations the person can reach)
+// and then dropped; JOC never stores it.
 import { z } from 'zod';
 import type { GitHubProfile } from './identity.ts';
 
@@ -11,6 +13,7 @@ const UserResponse = z.object({
   name: z.string().nullish(),
   avatar_url: z.string().nullish(),
 });
+const InstallationsResponse = z.object({ installations: z.array(z.object({ id: z.number() })) });
 
 export interface GitHubAuth {
   authorizeUrl(state: string): string;
@@ -22,9 +25,11 @@ export interface GitHubConfig {
   clientId: string;
   clientSecret: string;
   redirectUri: string;
+  /** The client id and secret are a GitHub App's: sign-in also reads the person's installations. */
+  app?: boolean;
 }
 
-export function githubAuth({ clientId, clientSecret, redirectUri }: GitHubConfig): GitHubAuth {
+export function githubAuth({ clientId, clientSecret, redirectUri, app }: GitHubConfig): GitHubAuth {
   return {
     authorizeUrl(state) {
       // No scopes: the public profile is all JOC needs.
@@ -48,12 +53,13 @@ export function githubAuth({ clientId, clientSecret, redirectUri }: GitHubConfig
       const token = TokenResponse.safeParse(await tokenRes.json().catch(() => null));
       if (!token.success) return undefined;
 
+      const headers = {
+        accept: 'application/vnd.github+json',
+        authorization: `Bearer ${token.data.access_token}`,
+        'user-agent': 'joc',
+      };
       const userRes = await fetch('https://api.github.com/user', {
-        headers: {
-          accept: 'application/vnd.github+json',
-          authorization: `Bearer ${token.data.access_token}`,
-          'user-agent': 'joc',
-        },
+        headers,
         signal: AbortSignal.timeout(10_000),
       });
       if (!userRes.ok) return undefined;
@@ -64,7 +70,24 @@ export function githubAuth({ clientId, clientSecret, redirectUri }: GitHubConfig
         login: user.data.login,
         name: user.data.name ?? undefined,
         avatarUrl: user.data.avatar_url ?? undefined,
+        ...(app ? { installations: await installationsOf(headers) } : {}),
       };
     },
   };
+}
+
+/**
+ * The App's installations the person can reach: on their own account, or an org they're in.
+ * Undefined when GitHub didn't say, so what's known stays.
+ */
+async function installationsOf(
+  headers: NonNullable<RequestInit['headers']>,
+): Promise<number[] | undefined> {
+  const res = await fetch('https://api.github.com/user/installations?per_page=100', {
+    headers,
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => undefined);
+  if (!res?.ok) return undefined;
+  const body = InstallationsResponse.safeParse(await res.json().catch(() => null));
+  return body.success ? body.data.installations.map((i) => i.id) : undefined;
 }
