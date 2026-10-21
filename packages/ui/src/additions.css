@@ -705,3 +705,26 @@ h4.joc-taskd__label { margin: 0; }
 /* A session row with teammates keeps its chip before the meter; the toggle sits under its dot. */
 .joc-srow__expand .joc-icon { width: 16px; height: 16px; }
 /* ===== End Teammates (#82) =============================================================== */
+
+/* ===== Design gaps (#92) ==================================================================
+   Pieces of Claude Design's passes that hadn't shipped, fitted to JOC's markup. */
+
+/* ---------- History: Claude's last words in a column after the title ---------- */
+/* As the Resume pass draws History rows: the summary (or a status in its place) sits between
+   the title and the time. Narrower than 1100px it folds away, and a status takes the meta line. */
+.joc-hist__sum { grid-area: sum; display: flex; align-items: center; min-width: 0; }
+.joc-hist__sum .joc-hist__summary { min-width: 0; }
+.joc-hist__status--narrow { display: none; }
+@container hist (min-width: 1100px) {
+  /* The title column keeps the larger share: its meta line (branch, folder) gives way first. */
+  .joc-hist--sum { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 128px minmax(300px, 360px) var(--control-md); grid-template-areas: "main sum when cmd menu"; }
+  .joc-hist--sum.joc-hist--select { grid-template-columns: var(--control-sm) minmax(0, 1.4fr) minmax(0, 1fr) 128px minmax(300px, 360px) var(--control-md); grid-template-areas: "select main sum when cmd menu"; }
+  .joc-hist--sum.joc-hist--resume { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 128px 112px minmax(300px, 360px) var(--control-md); grid-template-areas: "main sum when act cmd menu"; }
+  .joc-hist--sum.joc-hist--select.joc-hist--resume { grid-template-columns: var(--control-sm) minmax(0, 1.4fr) minmax(0, 1fr) 128px 112px minmax(300px, 360px) var(--control-md); grid-template-areas: "select main sum when act cmd menu"; }
+}
+@container hist (max-width: 1099px) {
+  .joc-hist__sum { display: none; }
+  .joc-hist__meta--wide { display: none; }
+  .joc-hist__status--narrow { display: inline-flex; }
+}
+/* ===== End design gaps (#92) ============================================================== */
