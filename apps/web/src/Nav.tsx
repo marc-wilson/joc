@@ -1,5 +1,6 @@
 import { NavBar } from '@joc/ui';
 import { useAuth } from './auth.ts';
+import { GitHubConnect } from './GitHubConnect.tsx';
 import { useSessions } from './hooks.ts';
 import { useNotificationCenter } from './Notifications.tsx';
 import { Updates } from './Updates.tsx';
@@ -39,6 +40,7 @@ export function Nav({ page, connected, viewing }: Props) {
         machineOffline={connected === false}
         user={auth.status === 'signedIn' ? auth.user?.login : undefined}
       />
+      <GitHubConnect />
       <Updates />
       {center.overlay}
     </>
