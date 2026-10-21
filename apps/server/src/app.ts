@@ -31,6 +31,7 @@ import {
   PrefsPatch,
   ProblemsReport,
   PromptHandoff,
+  type PromptQueued,
   PromptRequest,
   type ReadsClaim,
   ResumeClaim,
@@ -504,7 +505,7 @@ export function createApp({
     const images = await findImages(owner, parsed.data.images ?? []);
     if (!images) return c.json({ error: 'No such image' }, 400);
     const id = await queuePrompt(owner, c.req.param('id'), parsed.data.text, images);
-    return c.json({ id }, 201);
+    return c.json({ id } satisfies PromptQueued, 201);
   });
 
   // Where the session's prompts from the dashboard stand: in JOC, with Claude Code, or failed.
