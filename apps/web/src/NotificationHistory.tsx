@@ -7,16 +7,25 @@ import { dismiss } from './note-data.ts';
 import { clearable, type Note, type NoteGroup } from './notes.ts';
 
 // /notifications: everything to look back on, in day groups with clock times, the resolved and
-// dismissed ones too. JOC keeps its own alerts for 30 days; GitHub's are the unread ones your
-// plugin last read.
+// dismissed ones too. JOC keeps its own alerts for 30 days (GitHub's notifications inbox isn't
+// used).
 
-type View = 'all' | NoteGroup;
+type View = 'all' | 'reviews' | NoteGroup;
 
 const VIEWS: { id: View; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'needs', label: 'Needs you' },
+  { id: 'reviews', label: 'Reviews' },
   { id: 'activity', label: 'Activity' },
 ];
+
+/** Whether a note shows in a view. Review requests have their own, apart from the activity. */
+function inView(n: Note, view: View): boolean {
+  if (view === 'all') return true;
+  if (view === 'reviews') return n.kind === 'review';
+  if (view === 'activity') return n.group === 'activity' && n.kind !== 'review';
+  return n.group === view;
+}
 
 const SEARCH_ID = 'notification-search';
 
@@ -71,7 +80,7 @@ export function NotificationsPage() {
     (n) => !hidden.has(n.repo) && (!unreadOnly || n.unread) && matches(n, query),
   );
   const shown = filtered
-    .filter((n) => view === 'all' || n.group === view)
+    .filter((n) => inView(n, view))
     .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
   const days = new Map<string, Note[]>();
   for (const n of shown) days.set(dayKey(n.at), [...(days.get(dayKey(n.at)) ?? []), n]);
@@ -100,7 +109,7 @@ export function NotificationsPage() {
               >
                 {v.label}
                 <span className="joc-nav__count app-notif-filters__count">
-                  {filtered.filter((n) => v.id === 'all' || n.group === v.id).length}
+                  {filtered.filter((n) => inView(n, v.id)).length}
                 </span>
               </button>
             ))}
@@ -142,10 +151,7 @@ export function NotificationsPage() {
               size="lg"
               title="Notifications"
               count={notes.length || undefined}
-              description={
-                problem ??
-                "JOC's alerts from the last 30 days and your unread GitHub notifications, newest first."
-              }
+              description={problem ?? 'Everything from the last 30 days, newest first.'}
             >
               <Button variant="secondary" disabled={!clear.length} onClick={() => dismiss(clear)}>
                 Clear all
