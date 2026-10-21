@@ -122,6 +122,7 @@ export const checkRunEvent = (
   status: 'queued' | 'in_progress' | 'completed',
   conclusion: string | null,
   sha = 'a1b2c3',
+  output: { title: string | null; summary: string | null } | null = null,
 ) => ({
   action: status === 'completed' ? 'completed' : 'created',
   ...base,
@@ -133,6 +134,7 @@ export const checkRunEvent = (
     completed_at: status === 'completed' ? '2026-10-20T09:01:30Z' : null,
     head_sha: sha,
     pull_requests: [],
+    output,
   },
 });
 

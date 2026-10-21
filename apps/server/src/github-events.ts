@@ -13,6 +13,7 @@
 import { getDb } from '@joc/db';
 import {
   type CIStatus,
+  checkDetail,
   clipBody,
   closingIssues,
   GitHubAvatarUrl,
@@ -109,6 +110,8 @@ const Check = z.object({
   completed_at: z.string().nullish(),
   head_sha: z.string(),
   pull_requests: z.array(z.object({ number: z.number() })).optional(),
+  /** What the check said of how it went, its detail line. */
+  output: z.object({ title: z.string().nullish(), summary: z.string().nullish() }).nullish(),
 });
 
 // ── The installation's stores ───────────────────────────────────────────────
@@ -836,7 +839,14 @@ async function onCheckRun(payload: unknown) {
     name: run.name.slice(0, 200),
     status: runStatus(run.status, run.conclusion),
     ...seconds(run.started_at, run.completed_at),
+    ...detailOf(run.output?.title, run.output?.summary),
   });
+}
+
+/** A check's detail line from what it said, when it said something. */
+function detailOf(...said: (string | null | undefined)[]): { detail?: string } {
+  const detail = checkDetail(...said);
+  return detail ? { detail } : {};
 }
 
 const CheckSuiteEvent = z.object({
@@ -903,16 +913,18 @@ const StatusEvent = z.object({
   sha: z.string(),
   context: z.string(),
   state: z.string(),
+  description: z.string().nullish(),
 });
 
 async function onStatus(payload: unknown) {
   const event = StatusEvent.safeParse(payload);
   if (!event.success) return;
-  const { repository, sha, context, state } = event.data;
+  const { repository, sha, context, state, description } = event.data;
   await setCheck(repository.full_name, sha, {
     key: `status:${context}`,
     name: context.slice(0, 200),
     status: commitStatus(state),
+    ...detailOf(description),
   });
 }
 
@@ -1021,7 +1033,9 @@ const ApiRuns = z.object({
   check_runs: z.array(Check.omit({ head_sha: true, pull_requests: true })),
 });
 const ApiStatus = z.object({
-  statuses: z.array(z.object({ context: z.string(), state: z.string() })),
+  statuses: z.array(
+    z.object({ context: z.string(), state: z.string(), description: z.string().nullish() }),
+  ),
 });
 
 /** Reads one pull request whole, as webhooks would have built it: its reviews and CI too. */
@@ -1051,11 +1065,13 @@ async function readPull(ctx: Context, installationId: number, repo: string, numb
       name: run.name.slice(0, 200),
       status: runStatus(run.status, run.conclusion),
       ...seconds(run.started_at, run.completed_at),
+      ...detailOf(run.output?.title, run.output?.summary),
     })),
     ...(s.success ? s.data.statuses : []).map((st) => ({
       key: `status:${st.context}`,
       name: st.context.slice(0, 200),
       status: commitStatus(st.state),
+      ...detailOf(st.description),
     })),
   ];
   await pulls().updateOne(
