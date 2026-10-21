@@ -44,6 +44,7 @@ import {
   SessionReport,
   SessionSettings,
   type StreamEvent,
+  teamDrafts,
   Waiting,
   WaitingDone,
 } from '@joc/protocol';
@@ -99,7 +100,7 @@ import {
 } from './identity.ts';
 import { findImages, getImage, saveImage } from './images.ts';
 import { claimLaunches, createLaunch, finishLaunch, listLaunches } from './launches.ts';
-import { addMessages, listMessages } from './messages.ts';
+import { addMessages, listMessages, movesTeam, teamItems } from './messages.ts';
 import { type Owner, ownerFrom } from './owner.ts';
 import { getPrefs, patchPrefs } from './prefs.ts';
 import { listProblems, saveProblems } from './problems.ts';
@@ -115,6 +116,8 @@ import {
   listSessions,
   listStaleSessions,
   markReview,
+  setTeam,
+  setTeamFolder,
   setWaiting,
 } from './sessions.ts';
 import {
@@ -558,8 +561,16 @@ export function createApp({
   app.post('/api/messages', async (c) => {
     const parsed = MessagesReport.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
-    if (await isDeleted(c.get('owner'), parsed.data.sessionId)) return ignored(c);
-    return c.json({ added: await addMessages(c.get('owner'), parsed.data) });
+    const owner = c.get('owner');
+    const { sessionId, teammate } = parsed.data;
+    if (await isDeleted(owner, sessionId)) return ignored(c);
+    const fresh = await addMessages(owner, parsed.data);
+    if (teammate) await setTeamFolder(owner, sessionId, teammate);
+    // New word on a teammate: work its team out again from the conversation.
+    if (fresh.some(movesTeam)) {
+      await setTeam(owner, sessionId, teamDrafts(await teamItems(owner, sessionId)));
+    }
+    return c.json({ added: fresh.length });
   });
 
   app.get('/api/sessions/:id/messages', async (c) =>
