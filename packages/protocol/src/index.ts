@@ -406,10 +406,11 @@ export type ReadsClaim = z.infer<typeof ReadsClaim>;
 
 // Alerts: JOC's own record of what involved the person, kept on the server so they can look back
 // on what they missed. The server raises them from what the plugin reports: a session that went
-// to `needs`, a turn that finished, a pull request newly asking for their review.
+// to `needs`, a long turn that finished, a pull request newly asking for their review, CI newly
+// failing on one of theirs. One that resolves itself (answered, reviewed, CI green) reads itself.
 
-/** What an alert is about. */
-export const AlertKind = z.enum(['needs', 'finished', 'review']);
+/** What an alert is about. (`finished`, every turn's end, is no longer raised.) */
+export const AlertKind = z.enum(['needs', 'long-turn', 'review', 'ci-failed']);
 export type AlertKind = z.infer<typeof AlertKind>;
 
 /** Most alerts kept per person; older ones go first. */
@@ -425,16 +426,18 @@ export const Alert = z.object({
   /** The session's title, or the pull request's. */
   title: z.string(),
   /**
-   * One line more: what the session said it needs, how its turn ended, or (for `review`) the
-   * pull request's author.
+   * One line more: what the session said it needs, how its long turn ended, or (for `review`
+   * and `ci-failed`) the pull request's author or branch.
    */
   detail: z.string().optional(),
   /** `owner/name`, matching Session.repo. */
   repo: z.string(),
-  /** The session it's about, for `needs` and `finished`. */
+  /** The session it's about, for `needs` and `long-turn`. */
   sessionId: z.string().optional(),
-  /** The pull request, for `review`. */
+  /** The pull request, for `review` and `ci-failed`. */
   number: z.number().int().positive().optional(),
+  /** The pull request's head branch, for `ci-failed`. */
+  branch: z.string().optional(),
   url: z.url().optional(),
   at: z.iso.datetime(),
   read: z.boolean(),
