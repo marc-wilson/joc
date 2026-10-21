@@ -175,8 +175,9 @@
 .joc-banner__session span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .joc-banner__more { font-size: 12px; line-height: 16px; color: var(--text-tertiary); }
 .joc-banner__actions { flex: none; display: flex; align-items: center; gap: var(--space-1); margin-left: auto; }
-.joc-banner .joc-cmd { flex: 1 1 300px; min-width: 0; max-width: 480px; height: var(--control-md); }
-.joc-banner .joc-cmd__text { scrollbar-width: thin; }
+/* Fitted to JOC: the update command wraps instead of scrolling, so it's never clipped (AGENTS.md). */
+.joc-banner .joc-cmd { flex: 1 1 300px; min-width: 0; max-width: 640px; height: auto; min-height: var(--control-md); padding-top: var(--space-1); padding-bottom: var(--space-1); }
+.joc-banner .joc-cmd__text { overflow-x: visible; white-space: normal; overflow-wrap: anywhere; line-height: 18px; }
 .joc-cmd__copy { flex: none; }
 
 /* ---------- Fitted to JOC's markup ---------- */
