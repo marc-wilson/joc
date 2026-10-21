@@ -107,6 +107,13 @@ export const DEFAULT_NOTIFICATION_CHANNELS: Record<NotificationKind, Channels> =
 export const SessionSort = z.enum(['state', 'activity', 'name', 'seen']);
 export type SessionSort = z.infer<typeof SessionSort>;
 
+/**
+ * The dashboard's colours: the system's light or dark appearance (followed live), or one of them
+ * always.
+ */
+export const Theme = z.enum(['system', 'light', 'dark']);
+export type Theme = z.infer<typeof Theme>;
+
 /** The notification panel's filter. */
 export const NotificationTab = z.enum(['all', 'needs', 'github']);
 export type NotificationTab = z.infer<typeof NotificationTab>;
@@ -138,6 +145,8 @@ export const Prefs = z.object({
   /** Finished reviews cleared from the list (they stay in the history), oldest first. */
   dismissedReviews: Entries,
   diffMode: DiffMode,
+  /** Light, dark, or as the system is. */
+  theme: Theme,
   /** The Background tab lists every finished task, not just the latest few. */
   showAllFinishedTasks: z.boolean(),
   /** The plugin version whose out-of-date banner was dismissed. */
@@ -160,6 +169,7 @@ export const DEFAULT_PREFS: Prefs = {
   sessionSort: 'state',
   dismissedReviews: [],
   diffMode: 'unified',
+  theme: 'system',
   showAllFinishedTasks: false,
   sessions: [],
 };
