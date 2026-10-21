@@ -11,6 +11,9 @@ import { z } from 'zod';
 export const PLUGIN_HEADER = 'x-joc-plugin';
 /** The request header a plugin (0.7.1 on) names the version installed on its machine in. */
 export const INSTALLED_HEADER = 'x-joc-plugin-installed';
+/** The response header that tells a plugin (0.13.0 on) the GitHub App brings its person's
+ * GitHub data, so it reads none with `gh`. */
+export const GITHUB_SOURCE_HEADER = 'x-joc-github';
 /** The response header that tells a plugin which version it's behind. */
 export const LATEST_HEADER = 'x-joc-plugin-latest';
 

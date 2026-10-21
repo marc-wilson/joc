@@ -29,6 +29,8 @@ interface UserDoc {
   avatarUrl?: string;
   createdAt: Date;
   lastSignInAt: Date;
+  /** The JOC GitHub App's installations the user can reach: their account's, or an org's. */
+  installations?: number[];
 }
 
 interface WebSessionDoc {
@@ -84,6 +86,9 @@ export function ensureIdentityIndexes(): Promise<unknown> {
     links().createIndex({ userCode: 1 }, { unique: true }),
     devices().createIndex({ id: 1 }, { unique: true }),
     devices().createIndex({ userId: 1 }),
+    users().createIndex({ githubId: 1 }),
+    users().createIndex({ login: 1 }),
+    users().createIndex({ installations: 1 }),
   ]);
   return indexed;
 }
@@ -100,6 +105,8 @@ export interface GitHubProfile {
   login: string;
   name?: string;
   avatarUrl?: string;
+  /** With the GitHub App: the installations the user can reach, as sign-in read them. */
+  installations?: number[];
 }
 
 /** Creates or refreshes the user GitHub vouched for; their owner id never changes. */
@@ -115,12 +122,83 @@ export async function signInGitHubUser(profile: GitHubProfile): Promise<Owner> {
         name: profile.name,
         avatarUrl: profile.avatarUrl,
         lastSignInAt: now,
+        ...(profile.installations ? { installations: profile.installations } : {}),
       },
       $setOnInsert: { createdAt: now },
     },
     { upsert: true },
   );
   return ownerFrom(_id);
+}
+
+/** The JOC user behind a GitHub account, as GitHub (a webhook) names them. */
+export interface GitHubPerson {
+  owner: Owner;
+  githubId: number;
+  login: string;
+  installations: number[];
+}
+
+const toPerson = (doc: UserDoc): GitHubPerson => ({
+  owner: ownerFrom(doc._id),
+  githubId: doc.githubId,
+  login: doc.login,
+  installations: doc.installations ?? [],
+});
+
+/** The owner's GitHub identity, for routing webhooks to them. */
+export async function githubPerson(owner: Owner): Promise<GitHubPerson | undefined> {
+  const doc = await users().findOne({ _id: owner });
+  return doc ? toPerson(doc) : undefined;
+}
+
+/**
+ * The JOC users among these GitHub accounts, by id or login (a mention names only a login).
+ * Logins compare case-insensitively, as GitHub's do. Accounts that never signed in to JOC are
+ * left out: their events go nowhere.
+ */
+export async function peopleOnGitHub(by: {
+  ids?: number[];
+  logins?: string[];
+}): Promise<GitHubPerson[]> {
+  const ids = [...new Set(by.ids ?? [])];
+  const logins = [...new Set((by.logins ?? []).map((l) => l.toLowerCase()))];
+  if (!ids.length && !logins.length) return [];
+  await ensureIdentityIndexes();
+  const plain = (l: string) => l.replace(/[^\w-]/g, '');
+  const docs = await users()
+    .find({
+      $or: [
+        ...(ids.length ? [{ githubId: { $in: ids } }] : []),
+        ...logins.map((l) => ({ login: { $regex: `^${plain(l)}$`, $options: 'i' } })),
+      ],
+    })
+    .toArray();
+  return docs.map(toPerson);
+}
+
+/** The users who can reach an installation. */
+export async function peopleOfInstallation(installationId: number): Promise<GitHubPerson[]> {
+  await ensureIdentityIndexes();
+  const docs = await users().find({ installations: installationId }).toArray();
+  return docs.map(toPerson);
+}
+
+/** These GitHub accounts' JOC users can now reach the installation (installed or joined). */
+export async function grantInstallation(githubIds: number[], installationId: number) {
+  if (!githubIds.length) return;
+  await users().updateMany(
+    { githubId: { $in: githubIds } },
+    { $addToSet: { installations: installationId } },
+  );
+}
+
+/** The installation is gone: nobody reaches it any more. */
+export async function revokeInstallation(installationId: number) {
+  await users().updateMany(
+    { installations: installationId },
+    { $pull: { installations: installationId } },
+  );
 }
 
 export async function getUser(owner: Owner): Promise<User | undefined> {

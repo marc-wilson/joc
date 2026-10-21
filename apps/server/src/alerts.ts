@@ -1,5 +1,5 @@
 // The person's alerts: what involved them, kept so they can look back on what they missed. The
-// server raises them from reports (sessions.ts, github-data.ts); the dashboard lists them, marks
+// server raises them from reports and webhooks (sessions.ts, github-data.ts, github-events.ts); the dashboard lists them, marks
 // them read and clears them. One document per alert, always looked up with its owner.
 import { randomUUID } from 'node:crypto';
 import { getDb } from '@joc/db';
@@ -115,6 +115,24 @@ export async function alertOnSession(
   ) {
     await add(owner, [{ kind: 'long-turn', ...about }]);
   }
+}
+
+/** A comment that concerns the person: it mentions them, or it's on their pull request or issue. */
+export interface CommentAlert {
+  kind: 'mention' | 'comment';
+  /** The pull request's or issue's title. */
+  title: string;
+  /** Who commented. */
+  detail: string;
+  repo: string;
+  number: number;
+  /** The comment on GitHub. */
+  url: string;
+}
+
+/** Raised from the GitHub App's comment webhooks; read once opened or dismissed. */
+export async function alertOnComment(owner: Owner, alert: CommentAlert): Promise<void> {
+  await add(owner, [alert]);
 }
 
 async function readSession(owner: Owner, sessionId: string) {
