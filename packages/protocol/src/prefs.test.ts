@@ -18,6 +18,15 @@ test('a patch replaces only the fields it gives', () => {
   assert.deepEqual(next, { ...DEFAULT_PREFS, pinned: ['s1'] });
 });
 
+test('the theme follows the system unless chosen, and a stored choice outside the three is refused', () => {
+  assert.equal(DEFAULT_PREFS.theme, 'system');
+  // Prefs stored before the theme existed take the default.
+  const { theme: _, ...before } = DEFAULT_PREFS;
+  assert.equal(Prefs.parse({ ...DEFAULT_PREFS, ...before }).theme, 'system');
+  assert.equal(applyPrefsPatch(DEFAULT_PREFS, { theme: 'light' }, 1).theme, 'light');
+  assert.equal(PrefsPatch.safeParse({ theme: 'sepia' }).success, false);
+});
+
 test("a session's lists merge by id, and an emptied session is dropped", () => {
   const one = applyPrefsPatch(
     DEFAULT_PREFS,

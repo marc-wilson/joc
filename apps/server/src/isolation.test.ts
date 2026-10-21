@@ -1339,6 +1339,7 @@ test("preferences are each owner's own, only a signed-in person's, and heard onl
       sessionSort: 'state',
       dismissedReviews: [],
       diffMode: 'unified',
+      theme: 'system',
       showAllFinishedTasks: false,
       sessions: [],
     },
@@ -1353,6 +1354,7 @@ test("preferences are each owner's own, only a signed-in person's, and heard onl
       pinned: ['alice-pref', 'bob-pref'],
       dismissedReviews: ['bob-pref', 'alice-pref'],
       sessionSort: 'name',
+      theme: 'light',
       sessions: [
         { id: 'alice-pref', foldedMessages: ['m1'] },
         { id: 'bob-pref', foldedMessages: ['m2'] },
@@ -1368,6 +1370,7 @@ test("preferences are each owner's own, only a signed-in person's, and heard onl
   assert.deepEqual(alice.prefs.pinned, ['alice-pref']);
   assert.deepEqual(alice.prefs.dismissedReviews, ['alice-pref']);
   assert.equal(alice.prefs.sessionSort, 'name');
+  assert.equal(alice.prefs.theme, 'light');
   assert.deepEqual(
     alice.prefs.sessions.map((s) => [s.id, s.foldedMessages]),
     [['alice-pref', ['m1']]],
@@ -1377,6 +1380,7 @@ test("preferences are each owner's own, only a signed-in person's, and heard onl
   assert.equal(bob.saved, false);
   assert.equal(bob.prefs.browserNotifications, false);
   assert.equal(bob.prefs.sessionSort, 'state');
+  assert.equal(bob.prefs.theme, 'system');
   assert.deepEqual(bob.prefs.notificationKinds, {});
 
   // A patch keeps what it doesn't name, and Alice's other tabs hear the result.
