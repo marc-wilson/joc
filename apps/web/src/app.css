@@ -247,6 +247,8 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  /* Its rows fit its width (@joc/ui's pull request rows stack when it's narrow). */
+  container-type: inline-size;
 }
 
 .app-actions {
