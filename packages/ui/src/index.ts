@@ -24,7 +24,12 @@ export {
   type TaskStep,
   TaskSteps,
 } from './background.tsx';
-export { NotificationBell, type NotificationBellProps } from './bell.tsx';
+export {
+  CountPill,
+  type CountPillProps,
+  NotificationBell,
+  type NotificationBellProps,
+} from './bell.tsx';
 export { ContextMeter, type ContextMeterProps } from './ContextMeter.tsx';
 export { CIBadge, type CIBadgeProps, CIMark, type CIMarkProps } from './ci.tsx';
 export { CommandList, type CommandListProps } from './cmdlist.tsx';
@@ -133,17 +138,18 @@ export {
   type OverflowMenuProps,
 } from './menu.tsx';
 export {
-  ArrivalsPill,
-  type ArrivalsPillProps,
   NeedsAnswers,
   type NeedsAnswersProps,
   type NotificationChannel,
+  NotificationEmpty,
   NotificationGroup,
   type NotificationGroupProps,
   type NotificationLead,
   NotificationMatrix,
   type NotificationMatrixKind,
   type NotificationMatrixProps,
+  NotificationNewBar,
+  type NotificationNewBarProps,
   NotificationPanel,
   type NotificationPanelProps,
   NotificationRow,

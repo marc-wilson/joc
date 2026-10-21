@@ -1,9 +1,8 @@
-import { channelsOf, type NotificationKind, PINNED_KINDS } from '@joc/protocol';
+import { type Channels, channelsOf, type NotificationKind, PINNED_KINDS } from '@joc/protocol';
 import {
   Button,
-  CIMark,
   Dialog,
-  Icon,
+  type NotificationChannel,
   NotificationMatrix,
   type NotificationMatrixKind,
 } from '@joc/ui';
@@ -12,33 +11,33 @@ import { sendTestNotification } from './Notifications.tsx';
 import { supported } from './notify.ts';
 import { updatePrefs, usePrefs } from './prefs.ts';
 
-// Where each kind of notification shows up: Panel, Toast, Sound, Desktop, kept with the person's
-// prefs.
-// Whether this browser may show desktop notifications is the browser's own, asked for here.
+// Where each kind of notification shows up: Panel, Toast, Sound, Desktop, under the Sound master
+// switch, kept with the person's prefs. Whether this browser may show desktop notifications is
+// the browser's own, asked for here.
 
-const GROUPS: { label: string; kinds: { id: NotificationKind; label: string; note?: string }[] }[] =
-  [
-    {
-      label: 'Sessions',
-      kinds: [
-        { id: 'question', label: 'Asks a question' },
-        { id: 'permission', label: 'Wants permission' },
-        {
-          id: 'long-turn',
-          label: 'Finished a long turn',
-          note: 'Over five minutes; not while you’re viewing that session',
-        },
-      ],
-    },
-    {
-      label: 'GitHub',
-      kinds: [
-        { id: 'review', label: 'Review requested', note: 'Until you post your review' },
-        { id: 'mention', label: 'Mention or comment on your PR' },
-        { id: 'ci-failed', label: 'CI failed on your PR', note: 'Until CI passes again' },
-      ],
-    },
-  ];
+/** The settings' rows. Needs you sets both a question and a permission. */
+const KINDS: { id: string; label: string; sub: string; kinds: NotificationKind[] }[] = [
+  {
+    id: 'needs',
+    label: 'Needs you',
+    sub: 'A session asks a question or permission',
+    kinds: ['question', 'permission'],
+  },
+  {
+    id: 'review',
+    label: 'Review requested',
+    sub: 'On a PR in your review queue',
+    kinds: ['review'],
+  },
+  { id: 'mention', label: 'Mentions and comments', sub: 'On your PRs', kinds: ['mention'] },
+  { id: 'ci-failed', label: 'CI failed', sub: 'On your PRs', kinds: ['ci-failed'] },
+  {
+    id: 'long-turn',
+    label: 'Long session finished',
+    sub: 'Sessions that ran 10 min or more',
+    kinds: ['long-turn'],
+  },
+];
 
 type Permission = 'unsupported' | NotificationPermission;
 
@@ -63,66 +62,31 @@ function usePermission(): [Permission, () => Promise<void>] {
   return [permission, ask];
 }
 
-function DesktopStatus() {
-  const prefs = usePrefs();
-  const [permission, ask] = usePermission();
-  const on = prefs.browserNotifications;
-  const allowed = permission === 'granted';
-  const title =
-    permission === 'unsupported'
-      ? 'This browser can’t show desktop notifications'
-      : permission === 'denied'
-        ? 'Desktop notifications are blocked in this browser'
-        : allowed
-          ? 'Desktop notifications are allowed in this browser'
-          : 'Desktop notifications aren’t allowed in this browser yet';
-
+/** The line under the grid: what always holds, and what this browser still has to allow. */
+function Footnote({
+  desktop,
+  permission,
+  ask,
+}: {
+  desktop: boolean;
+  permission: Permission;
+  ask: () => Promise<void>;
+}) {
+  const blocked = desktop && permission !== 'granted';
   return (
-    <div className="app-notif-desktop">
-      <span className="app-notif-desktop__lead">
-        {allowed ? (
-          <CIMark status="pass" />
-        ) : permission === 'denied' ? (
-          <CIMark status="fail" />
-        ) : (
-          <Icon name="bell" size={14} />
-        )}
-      </span>
-      <div className="app-notif-desktop__text">
-        <span className="app-notif-desktop__title">{title}</span>
-        {permission === 'denied' ? (
-          <span className="app-notif-desktop__hint">
-            Allow notifications for this site in the browser’s settings.
-          </span>
-        ) : null}
-        {permission !== 'unsupported' ? (
-          <>
-            <label className="app-notif-desktop__check">
-              <input
-                type="checkbox"
-                className="jn-check"
-                checked={on}
-                onChange={(e) => {
-                  updatePrefs({ browserNotifications: e.target.checked });
-                  if (e.target.checked && permission === 'default') void ask();
-                }}
-              />
-              Show desktop notifications for the kinds set to Desktop
-            </label>
-            <label className="app-notif-desktop__check">
-              <input
-                type="checkbox"
-                className="jn-check"
-                checked={prefs.desktopWhenAway}
-                disabled={!on}
-                onChange={(e) => updatePrefs({ desktopWhenAway: e.target.checked })}
-              />
-              Only when JOC isn’t the focused window
-            </label>
-          </>
-        ) : null}
-      </div>
-      {permission === 'default' ? (
+    <div className="app-notif-foot">
+      <p>
+        Needs you always shows in the panel. Desktop notifications appear only when JOC isn’t the
+        focused window.
+        {blocked
+          ? permission === 'unsupported'
+            ? ' This browser can’t show them.'
+            : permission === 'denied'
+              ? ' They’re blocked in this browser: allow them for this site in its settings.'
+              : ' This browser hasn’t allowed them yet.'
+          : null}
+      </p>
+      {blocked && permission === 'default' ? (
         <Button variant="secondary" size="sm" onClick={() => void ask()}>
           Allow in this browser
         </Button>
@@ -131,75 +95,57 @@ function DesktopStatus() {
   );
 }
 
-/** The chime's master switch, and a test of how a notification arrives. */
-function SoundStatus() {
-  const prefs = usePrefs();
-  return (
-    <div className="app-notif-desktop">
-      <span className="app-notif-desktop__lead">
-        <Icon name="bell" size={14} />
-      </span>
-      <div className="app-notif-desktop__text">
-        <label className="app-notif-desktop__check">
-          <input
-            type="checkbox"
-            className="jn-check"
-            checked={prefs.notificationSound}
-            onChange={(e) => updatePrefs({ notificationSound: e.target.checked })}
-          />
-          Sound: a short chime for the kinds set to Sound
-        </label>
-      </div>
-      <Button variant="ghost" size="sm" onClick={sendTestNotification}>
-        Send a test
-      </Button>
-    </div>
-  );
-}
-
-/** The sound and desktop switches and the Panel / Toast / Sound / Desktop matrix. */
+/** The Sound switch and the Panel / Toast / Sound / Desktop grid. */
 export function NotificationSettingsForm() {
   const prefs = usePrefs();
-  const groups = GROUPS.map((g) => ({
-    label: g.label,
-    kinds: g.kinds.map(
-      (k): NotificationMatrixKind => ({
-        ...k,
-        channels: channelsOf(prefs, k.id),
-        locked: PINNED_KINDS.includes(k.id),
-      }),
-    ),
-  }));
+  const [permission, ask] = usePermission();
+  const kinds = KINDS.map(
+    (k): NotificationMatrixKind => ({
+      id: k.id,
+      label: k.label,
+      sub: k.sub,
+      // A row of two kinds shows the first; a change sets both.
+      channels: channelsOf(prefs, k.kinds[0] ?? 'question'),
+      locked: k.kinds.some((kind) => PINNED_KINDS.includes(kind)),
+    }),
+  );
+  const desktop = kinds.some((k) => k.channels.desktop);
+
+  function change(id: string, channel: NotificationChannel, on: boolean) {
+    const row = KINDS.find((k) => k.id === id);
+    if (!row) return;
+    const next = { ...prefs.notificationKinds };
+    for (const kind of row.kinds) {
+      next[kind] = { ...channelsOf(prefs, kind), [channel]: on } satisfies Channels;
+    }
+    updatePrefs({ notificationKinds: next });
+    // Desktop asked for here: the browser asks the person once.
+    if (channel === 'desktop' && on && permission === 'default') void ask();
+  }
+
   return (
     <div className="app-notif-settings">
-      <SoundStatus />
-      <DesktopStatus />
       <NotificationMatrix
-        groups={groups}
-        soundOff={!prefs.notificationSound}
-        onChange={(kind, channel, on) => {
-          const id = kind as NotificationKind;
-          updatePrefs({
-            notificationKinds: {
-              ...prefs.notificationKinds,
-              [id]: { ...channelsOf(prefs, id), [channel]: on },
-            },
-          });
-        }}
+        kinds={kinds}
+        sound={prefs.notificationSound}
+        onSound={(on) => updatePrefs({ notificationSound: on })}
+        onTest={sendTestNotification}
+        onChange={change}
       />
+      <Footnote desktop={desktop} permission={permission} ask={ask} />
     </div>
   );
 }
 
 export const resetNotificationSettings = () =>
-  updatePrefs({ notificationKinds: {}, desktopWhenAway: true, notificationSound: true });
+  updatePrefs({ notificationKinds: {}, notificationSound: true });
 
-/** The settings as a dialog, from the panel's settings button. */
+/** The settings as a dialog, from the panel's Settings button. */
 export function NotificationSettingsDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog
       label="Notification settings"
-      title="Notification settings"
+      title="Notifications"
       className="app-notif-dialog"
       onClose={onClose}
       footer={
@@ -215,9 +161,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
         </div>
       }
     >
-      <p className="app-notif-dialog__desc">
-        Choose where each kind shows up. Everything is kept in history for 30 days.
-      </p>
+      <p className="app-notif-dialog__desc">Each notification clears itself once it’s handled.</p>
       <NotificationSettingsForm />
     </Dialog>
   );

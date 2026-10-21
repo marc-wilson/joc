@@ -1,14 +1,9 @@
+import { channelsOf, type NotificationsSnapshot, type Session } from '@joc/protocol';
 import {
-  channelsOf,
-  type NotificationsSnapshot,
-  NotificationTab,
-  type Session,
-} from '@joc/protocol';
-import {
-  ArrivalsPill,
-  EmptyState,
   type NotificationBellProps,
+  NotificationEmpty,
   NotificationGroup,
+  NotificationNewBar,
   NotificationPanel,
   NotificationRow,
   Toast,
@@ -30,14 +25,13 @@ import {
   groupNotes,
   type Held,
   hold,
-  inTab,
   type Note,
   pageTitle,
   panelNotes,
   withLeaving,
 } from './notes.ts';
 import { supported } from './notify.ts';
-import { currentPrefs, updatePrefs, usePrefs } from './prefs.ts';
+import { currentPrefs, usePrefs } from './prefs.ts';
 import { chime } from './sound.ts';
 import { age, ago } from './time.ts';
 
@@ -49,6 +43,8 @@ const PANEL_ID = 'joc-notifications';
 const MAX_TOASTS = 3;
 /** = --duration-fast: how long a leaving row takes to fade out before it goes. */
 const LEAVE_MS = 140;
+/** Arrivals this close together share the count's one pulse. */
+const PULSE_SHARED_MS = 2_000;
 
 /**
  * Every note, from the one note store (note-data.ts) with what was done here applied, and
@@ -80,9 +76,6 @@ export function useNotes(records = false): {
   };
 }
 
-const mono = (note: Note): ReactNode =>
-  note.mono && note.text ? <code>{note.text}</code> : note.text;
-
 interface NoteRowProps {
   note: Note;
   now: number;
@@ -92,18 +85,20 @@ interface NoteRowProps {
   leaving?: boolean;
 }
 
-/** One note's row: opening it reads it; the ✕ dismisses it. */
+/** One note's row: opening it reads it; the ✕ dismisses it; a needs row may answer inline. */
 export function NoteRow({ note, now, sessions, time, leaving }: NoteRowProps) {
   return (
     <NotificationRow
       lead={note.lead}
       title={note.title}
-      source={note.source}
-      text={mono(note)}
+      meta={note.meta}
+      code={note.code}
       time={time ?? age(note.at, now)}
-      unread={note.unread}
+      read={!note.unread}
       needs={note.live}
-      answers={note.live ? <NoteAnswers note={note} sessions={sessions} /> : undefined}
+      actions={
+        note.live && note.answer ? <NoteAnswers note={note} sessions={sessions} /> : undefined
+      }
       href={note.href}
       external={note.external}
       onOpen={(e: MouseEvent<HTMLAnchorElement>) => openNote(note, e)}
@@ -112,51 +107,6 @@ export function NoteRow({ note, now, sessions, time, leaving }: NoteRowProps) {
       label={`${note.title}, ${ago(note.at, now)}`}
     />
   );
-}
-
-function PanelEmpty({ tab, snapshot }: { tab: NotificationTab; snapshot?: NotificationsSnapshot }) {
-  const reported = snapshot?.state === 'reported' ? snapshot : undefined;
-  const unconnected =
-    snapshot?.state === 'none' ||
-    reported?.status === 'not-installed' ||
-    reported?.status === 'signed-out';
-  let empty: ReactNode;
-  if (tab === 'needs') {
-    empty = (
-      <EmptyState
-        compact
-        icon="check"
-        title="Nothing needs you"
-        body="When a session asks a question or wants permission, it shows up here first."
-      />
-    );
-  } else if (tab === 'github' && unconnected) {
-    empty = (
-      <EmptyState
-        compact
-        title="GitHub isn’t connected"
-        body={
-          reported?.status === 'not-installed'
-            ? 'JOC reads your GitHub notifications through gh on your machine.'
-            : 'Sign gh in on a linked machine; JOC picks it up within a minute.'
-        }
-        command={
-          reported?.status === 'not-installed'
-            ? 'brew install gh && gh auth login'
-            : 'gh auth login'
-        }
-      />
-    );
-  } else {
-    empty = (
-      <EmptyState
-        compact
-        title="Nothing needs you"
-        body="Questions from sessions, review requests, mentions and failed CI on your PRs show up here."
-      />
-    );
-  }
-  return <div className="jn-panel__empty">{empty}</div>;
 }
 
 /**
@@ -204,102 +154,81 @@ function useLeaving(ids: string[], byId: Map<string, Note>) {
 interface PanelProps {
   notes: Note[];
   sessions: Session[];
-  snapshot?: NotificationsSnapshot;
   problem?: string;
   anchor: React.RefObject<HTMLButtonElement | null>;
   onClose: () => void;
 }
 
-/** The open panel: what needs you, by group. Arrivals wait while you read. */
-function Panel({ notes, sessions, snapshot, problem, anchor, onClose }: PanelProps) {
-  const prefs = usePrefs();
+/**
+ * The open panel: one list, needs you pinned first, then activity, newest first. What arrives
+ * while it's open waits behind the new-items bar; a row that's handled or dismissed fades out and
+ * leaves at once.
+ */
+function Panel({ notes, sessions, problem, anchor, onClose }: PanelProps) {
   const now = useNow();
-  const tab = prefs.notificationTab;
   const [settings, setSettings] = useState(false);
-  const [inList, setInList] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
-  const body = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const [held, setHeld] = useState<Held>();
 
-  const inThisTab = notes.filter((n) => inTab(n, tab));
-  const byId = new Map(inThisTab.map((n) => [n.id, n]));
+  const byId = new Map(notes.map((n) => [n.id, n]));
   // In the same render as the change: a note that went is off the list now, not after an effect.
-  const current = hold(held, inThisTab, inList || scrolled);
+  const current = hold(held, notes, true);
   const latestKey = `${current.ids.join(' ')}|${current.waiting.join(' ')}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: kept when the list changes
   useEffect(() => setHeld(current), [latestKey]);
   const rows = useLeaving(current.ids, byId);
-  const waiting = current.waiting.flatMap((id) => byId.get(id) ?? []);
-  const unread = notes.filter((n) => n.unread);
-  // Unread, as the bell counts them, so the bell, the tabs and the summary always agree.
-  const count = (t: NotificationTab) =>
-    notes.filter((n) => n.unread && inTab(n, t)).length || undefined;
-  const clear = clearable(inThisTab);
+  const clear = clearable(notes);
+  const groups = groupNotes(rows.map((r) => ({ ...r, group: r.note.group })));
+  const needsShown = groups.some(([g]) => g === 'needs');
 
   function showArrivals() {
-    setHeld(hold(undefined, inThisTab, false));
-    body.current?.scrollTo({ top: 0 });
+    setHeld(hold(undefined, notes, false));
+    list.current?.scrollTo({ top: 0 });
   }
 
   return (
     <>
       <NotificationPanel
         id={PANEL_ID}
-        summary={problem ?? (unread.length ? `${unread.length} unread` : 'Nothing unread')}
-        tabs={[
-          { id: 'all', label: 'All', count: count('all') },
-          { id: 'needs', label: 'Needs you', state: 'needs', count: count('needs') },
-          { id: 'github', label: 'GitHub', count: count('github') },
-        ]}
-        tab={tab}
-        onTabChange={(id) => {
-          const parsed = NotificationTab.safeParse(id);
-          if (parsed.success) {
-            updatePrefs({ notificationTab: parsed.data });
-            setHeld(undefined);
-          }
-        }}
+        note={problem}
         onClearAll={clear.length ? () => dismiss(clear) : undefined}
         onSettings={() => setSettings(true)}
-        historyHref="/notifications"
+        foot={
+          <a className="joc-notif-link" href="/notifications">
+            History
+          </a>
+        }
         onClose={() => {
           if (!settings) onClose();
         }}
         anchor={anchor}
-        bodyRef={body}
-        onPointerLeave={() => setInList(false)}
-        onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
-        arrivals={
-          <ArrivalsPill
-            count={waiting.length}
-            needs={waiting.filter((n) => n.live).length}
-            onShow={showArrivals}
-          />
-        }
+        listRef={list}
+        arrivals={<NotificationNewBar count={current.waiting.length} onShow={showArrivals} />}
       >
         {rows.length ? (
-          <div onPointerEnter={() => setInList(true)} onPointerLeave={() => setInList(false)}>
-            {groupNotes(rows.map((r) => ({ ...r, group: r.note.group }))).map(([group, list]) => (
-              <NotificationGroup
-                key={group}
-                label={GROUP_LABEL[group]}
-                count={list.filter((r) => !r.leaving).length || undefined}
-                hint={group === 'needs' ? 'Stays until answered' : undefined}
-              >
-                {list.map(({ note, leaving }) => (
-                  <NoteRow
-                    key={note.id}
-                    note={note}
-                    leaving={leaving}
-                    now={now}
-                    sessions={sessions}
-                  />
-                ))}
-              </NotificationGroup>
-            ))}
-          </div>
-        ) : (
-          <PanelEmpty tab={tab} snapshot={snapshot} />
+          groups.map(([group, items]) => (
+            <NotificationGroup
+              key={group}
+              label={GROUP_LABEL[group]}
+              count={group === 'needs' ? items.filter((r) => !r.leaving).length : undefined}
+              bare={group === 'activity' && !needsShown}
+            >
+              {items.map(({ note, leaving }) => (
+                <NoteRow
+                  key={note.id}
+                  note={note}
+                  leaving={leaving}
+                  now={now}
+                  sessions={sessions}
+                />
+              ))}
+            </NotificationGroup>
+          ))
+        ) : current.waiting.length ? null : (
+          <NotificationEmpty
+            title="All caught up"
+            body="Sessions that need you, review requests, mentions and CI failures on your PRs show up here."
+          />
         )}
       </NotificationPanel>
       {settings ? <NotificationSettingsDialog onClose={() => setSettings(false)} /> : null}
@@ -314,12 +243,14 @@ function follow(note: Note) {
   else location.assign(note.href);
 }
 
+/** A desktop notification, only while JOC isn't the focused window, and the browser allows it. */
 function showDesktop(note: Note) {
-  const prefs = currentPrefs();
-  if (!prefs.browserNotifications || !channelsOf(prefs, note.kind).desktop) return;
-  if (!supported() || Notification.permission !== 'granted') return;
-  if (prefs.desktopWhenAway && document.hasFocus()) return;
-  const n = new Notification(note.title, { body: note.text ?? note.source, tag: note.id });
+  if (!channelsOf(currentPrefs(), note.kind).desktop) return;
+  if (!supported() || Notification.permission !== 'granted' || document.hasFocus()) return;
+  const n = new Notification(note.toastTitle ?? note.title, {
+    body: note.text ?? note.meta,
+    tag: note.id,
+  });
   n.onclick = () => {
     window.focus();
     follow(note);
@@ -330,12 +261,11 @@ function showDesktop(note: Note) {
 /** "Send a test" in the settings: the chime, a toast, and a desktop notification if allowed. */
 const testListeners = new Set<() => void>();
 export function sendTestNotification() {
-  chime.test();
+  if (currentPrefs().notificationSound) chime.test();
   for (const listener of testListeners) listener();
-  const prefs = currentPrefs();
-  if (prefs.browserNotifications && supported() && Notification.permission === 'granted') {
-    const n = new Notification('Notifications are on', {
-      body: 'This is how JOC tells you something needs you.',
+  if (supported() && Notification.permission === 'granted') {
+    const n = new Notification('Test: a session needs you', {
+      body: 'This is how a needs-you notification looks and sounds.',
       tag: 'joc-test',
     });
     n.onclick = () => {
@@ -354,10 +284,12 @@ function useArrivals(
   notes: Note[],
   loaded: boolean,
   viewing: string | undefined,
-): { toasts: Note[]; arrivals: number } {
+): { toasts: Note[]; arrivals: number; needsArrivals: number } {
   const seen = useRef<Set<string>>(undefined);
   const [toasts, setToasts] = useState<string[]>([]);
   const [arrivals, setArrivals] = useState(0);
+  const [needsArrivals, setNeedsArrivals] = useState(0);
+  const pulsed = useRef({ any: Number.NEGATIVE_INFINITY, needs: Number.NEGATIVE_INFINITY });
   const ids = notes.map((n) => n.id).join(' ');
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the set of notes changes
   useEffect(() => {
@@ -371,7 +303,16 @@ function useArrivals(
     const { toasts: toast, chime: ring } = attention(news, prefs);
     if (toast.length) setToasts((list) => [...list, ...toast.map((n) => n.id)]);
     if (ring) chime.play();
-    if (panelNotes(news, prefs).length) setArrivals((n) => n + 1);
+    // One pulse for arrivals close together: a burst doesn't flash the count again and again.
+    const at = Date.now();
+    if (panelNotes(news, prefs).length && at - pulsed.current.any >= PULSE_SHARED_MS) {
+      pulsed.current.any = at;
+      setArrivals((n) => n + 1);
+    }
+    if (news.some((n) => n.live) && at - pulsed.current.needs >= PULSE_SHARED_MS) {
+      pulsed.current.needs = at;
+      setNeedsArrivals((n) => n + 1);
+    }
     for (const n of news) showDesktop(n);
   }, [ids, loaded]);
   const byId = new Map(notes.map((n) => [n.id, n]));
@@ -382,27 +323,23 @@ function useArrivals(
       return n?.unread && n.sessionId !== (viewing ?? '\0') ? [n] : [];
     }),
     arrivals,
+    needsArrivals,
   };
 }
 
 const TONE = (n: Note) => (n.live ? 'needs' : n.kind === 'ci-failed' ? 'error' : 'neutral');
 
-function NoteToast({
-  note,
-  sessions,
-  onDismiss,
-}: {
-  note: Note;
-  sessions: Session[];
-  onDismiss: () => void;
-}) {
+/**
+ * A note's toast. Needs you stays until it's answered (anywhere) or opened, with Answer to open
+ * the session; the rest leave after five seconds and stay in the panel.
+ */
+function NoteToast({ note, onDismiss }: { note: Note; onDismiss: () => void }) {
   return (
     <Toast
       tone={TONE(note)}
-      title={note.title}
-      body={mono(note)}
-      answers={note.live ? <NoteAnswers note={note} sessions={sessions} /> : undefined}
-      action="Open"
+      title={note.toastTitle ?? note.title}
+      body={note.text ?? note.meta}
+      action={note.live ? 'Answer' : 'Open'}
       onAction={() => {
         follow(note);
         onDismiss();
@@ -419,15 +356,17 @@ function NoteToast({
  */
 export function useNotificationCenter(viewing: string | undefined): {
   bell: NotificationBellProps;
+  /** Counts arrivals of sessions needing you, for the Sessions item's pulse. */
+  needsArrivals: number;
   overlay: ReactNode;
 } {
   const prefs = usePrefs();
-  const { notes, loaded, sessions, snapshot, problem } = useNotes();
+  const { notes, loaded, sessions, problem } = useNotes();
   const panel = panelNotes(notes, prefs);
   const counts = bellCounts(panel);
   const [open, setOpen] = useState(false);
   const bell = useRef<HTMLButtonElement>(null);
-  const { toasts, arrivals } = useArrivals(notes, loaded, viewing);
+  const { toasts, arrivals, needsArrivals } = useArrivals(notes, loaded, viewing);
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const [tests, setTests] = useState(0);
 
@@ -481,13 +420,13 @@ export function useNotificationCenter(viewing: string | undefined): {
       controls: open ? PANEL_ID : undefined,
       buttonRef: bell,
     },
+    needsArrivals,
     overlay: (
       <>
         {open ? (
           <Panel
             notes={panel}
             sessions={sessions}
-            snapshot={snapshot}
             problem={problem}
             anchor={bell}
             onClose={() => setOpen(false)}
@@ -498,13 +437,17 @@ export function useNotificationCenter(viewing: string | undefined): {
             {test ? (
               <Toast
                 key={`test:${tests}`}
-                title="Notifications are on"
-                body="This is how JOC tells you something needs you."
+                tone="needs"
+                title="Test: a session needs you"
+                body="This is how a needs-you notification looks and sounds."
+                action="Answer"
+                onAction={() => hide(`test:${tests}`)}
                 onDismiss={() => hide(`test:${tests}`)}
+                persist={false}
               />
             ) : null}
             {visible.map((n) => (
-              <NoteToast key={n.id} note={n} sessions={sessions} onDismiss={() => hide(n.id)} />
+              <NoteToast key={n.id} note={n} onDismiss={() => hide(n.id)} />
             ))}
             {dropped.map((d) => (
               <Toast

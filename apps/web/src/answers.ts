@@ -114,6 +114,20 @@ export function quickQuestion(waiting: Waiting | undefined) {
   return only && !only.multiSelect && only.options.length ? only : undefined;
 }
 
+/** Most options a needs row shows inline, and the longest label it fits. */
+const INLINE_OPTIONS = 2;
+const INLINE_LABEL = 24;
+
+/**
+ * A question short enough to answer in the panel's row: one single-choice question with at most
+ * two short options. Anything else opens the session to answer.
+ */
+export function inlineQuestion(waiting: Waiting | undefined) {
+  const quick = quickQuestion(waiting);
+  if (!quick || quick.options.length > INLINE_OPTIONS) return undefined;
+  return quick.options.every((o) => o.label.length <= INLINE_LABEL) ? quick : undefined;
+}
+
 /** The answer to a question by its text. */
 export const questionAnswer = (answers: Record<string, string>): Answer => ({
   kind: 'question',

@@ -6,84 +6,92 @@ import {
   type RefObject,
   type UIEvent,
   useEffect,
+  useLayoutEffect,
   useRef,
+  useState,
 } from 'react';
 import { CIMark, type CIMarkProps } from './ci.tsx';
-import { Button, type TabItem, Tabs } from './controls.tsx';
+import { Button, SegmentedControl } from './controls.tsx';
 import { cx } from './cx.ts';
 import { Icon, type IconName } from './Icon.tsx';
+import { EmptyState } from './layout.tsx';
 import { StateDot } from './state.tsx';
 
-// The notification center's pieces: the panel the bell opens, its groups and rows, the pill that
-// holds new arrivals back while you read, the toast stack, and the settings matrix. Styles are
-// in notif.css (prefix `jn-`).
+// The notification center's pieces (v2): the panel the bell opens, its groups and rows, the bar
+// that holds new arrivals back while it's open, the toast stack, and the settings grid. Styles
+// are in notif.css (prefix `joc-notif-`).
 
-const ROW = 'article.jn-row';
+const OPEN = 'a.joc-notif-row__title';
 
-/** Clicks the focused row's control marked `data-row`, as the panel's keys do. */
-function press(row: Element | null, which: 'open' | 'dismiss') {
-  row?.querySelector<HTMLElement>(`[data-row="${which}"]:not(:disabled)`)?.click();
+/** Where the panel sits: under its bell, right edges aligned, kept on screen. */
+function usePlacement(anchor: RefObject<HTMLElement | null>) {
+  const [at, setAt] = useState<{ top: number; right: number }>();
+  useLayoutEffect(() => {
+    const place = () => {
+      const r = anchor.current?.getBoundingClientRect();
+      if (!r) return;
+      const gutter = 8;
+      setAt({ top: r.bottom + gutter, right: Math.max(gutter, window.innerWidth - r.right) });
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [anchor]);
+  return at;
 }
 
 export interface NotificationPanelProps {
   id?: string;
-  /** "7 unread", "Nothing unread". */
-  summary: string;
-  tabs: TabItem[];
-  tab: string;
-  onTabChange: (id: string) => void;
   /** Dismisses every row but the sessions waiting on you. Disabled when there's none. */
   onClearAll?: () => void;
   onSettings: () => void;
-  historyHref: string;
+  /** A quiet line in the header, e.g. why the last dismiss didn't take. */
+  note?: string;
+  /** A link at the foot, e.g. to the history. */
+  foot?: ReactNode;
   /** Escape, or a press outside the panel and its bell. Focus goes back to the bell. */
   onClose: () => void;
-  /** The bell: a press on it isn't outside, and it takes focus back. */
+  /** The bell: the panel sits under it, a press on it isn't outside, and it takes focus back. */
   anchor: RefObject<HTMLElement | null>;
-  /** Pinned to the top of the list: new arrivals waiting (ArrivalsPill). */
+  /** On top of the list: new arrivals waiting (NotificationNewBar). */
   arrivals?: ReactNode;
-  onPointerEnter?: () => void;
-  onPointerLeave?: () => void;
   onScroll?: (e: UIEvent<HTMLDivElement>) => void;
-  bodyRef?: RefObject<HTMLDivElement | null>;
+  listRef?: RefObject<HTMLDivElement | null>;
   children: ReactNode;
 }
 
 /**
- * The notifications popover, under the nav bar's bell: never a page of its own. It fades in,
- * takes focus, and closes on Escape or a press outside it. Keys: ↑ ↓ move between rows, Enter
- * opens a row, Backspace (or e) dismisses it, 1–9 pick a needs row's answer.
+ * The notifications popover, under the nav bar's bell: never a page of its own. One list, no
+ * tabs. It fades in, takes focus, and closes on Escape or a press outside it. Keys: ↑ ↓ move
+ * between rows, Enter opens a row, Backspace (or e) dismisses it, 1–9 press a needs row's answer.
  */
 export function NotificationPanel({
   id,
-  summary,
-  tabs,
-  tab,
-  onTabChange,
   onClearAll,
   onSettings,
-  historyHref,
+  note,
+  foot,
   onClose,
   anchor,
   arrivals,
-  onPointerEnter,
-  onPointerLeave,
   onScroll,
-  bodyRef,
+  listRef,
   children,
 }: NotificationPanelProps) {
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLElement>(null);
   const close = useRef(onClose);
   close.current = onClose;
+  const at = usePlacement(anchor);
 
   useEffect(() => {
     ref.current?.focus();
     const bell = anchor.current;
     const outside = (e: PointerEvent) => {
-      const at = e.target as Node;
-      if (ref.current?.contains(at) || anchor.current?.contains(at)) return;
+      const target = e.target;
+      if (!(target instanceof Node)) return;
+      if (ref.current?.contains(target) || anchor.current?.contains(target)) return;
       // A dialog opened from the panel (its settings) isn't outside it.
-      if (at instanceof Element && at.closest('dialog')) return;
+      if (target instanceof Element && target.closest('dialog')) return;
       close.current();
     };
     document.addEventListener('pointerdown', outside);
@@ -95,7 +103,7 @@ export function NotificationPanel({
     };
   }, [anchor]);
 
-  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+  function onKeyDown(e: KeyboardEvent<HTMLElement>) {
     const target = e.target as HTMLElement;
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -105,93 +113,87 @@ export function NotificationPanel({
     }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      const rows = [...(ref.current?.querySelectorAll<HTMLElement>(ROW) ?? [])];
+      const rows = [...(ref.current?.querySelectorAll<HTMLElement>(OPEN) ?? [])];
       if (!rows.length) return;
       e.preventDefault();
-      const at = rows.findIndex((r) => r.contains(target));
+      // From the row's link, or a button in its row.
+      const i = rows.findIndex((r) => r.closest('.joc-notif-row')?.contains(target));
       const next =
-        at < 0
+        i < 0
           ? e.key === 'ArrowDown'
             ? 0
             : rows.length - 1
-          : Math.min(rows.length - 1, Math.max(0, at + (e.key === 'ArrowDown' ? 1 : -1)));
+          : Math.min(rows.length - 1, Math.max(0, i + (e.key === 'ArrowDown' ? 1 : -1)));
       rows[next]?.focus();
       return;
     }
-    // The rest act on the focused row itself, not a button inside it.
-    if (!target.matches(ROW)) return;
-    if (e.key === 'Enter') press(target, 'open');
-    else if (e.key === 'e' || e.key === 'Backspace') press(target, 'dismiss');
-    else if (/^[1-9]$/.test(e.key)) {
-      // A needs row's numbered answer.
-      target.querySelector<HTMLElement>(`[data-answer="${e.key}"]:not(:disabled)`)?.click();
+    // The rest act on the focused row (its link), not a button inside it. Enter is the link's.
+    if (!target.matches(OPEN)) return;
+    const row = target.closest('.joc-notif-row');
+    if (e.key === 'e' || e.key === 'Backspace') {
+      row?.querySelector<HTMLElement>('.joc-notif-row__dismiss')?.click();
+    } else if (/^[1-9]$/.test(e.key)) {
+      row?.querySelector<HTMLElement>(`[data-answer="${e.key}"]:not(:disabled)`)?.click();
     } else return;
     e.preventDefault();
   }
 
   return (
-    <div
+    <section
       ref={ref}
       id={id}
-      className="jn-panel is-anchored joc-fade-in"
+      className="joc-notif-panel is-anchored joc-fade-in"
+      style={at ? { top: at.top, right: at.right } : { visibility: 'hidden' }}
       role="dialog"
       aria-label="Notifications"
       tabIndex={-1}
       onKeyDown={onKeyDown}
-      onPointerEnter={onPointerEnter}
-      onPointerLeave={onPointerLeave}
     >
-      <div className="jn-panel__head">
-        <h2 className="jn-panel__title">Notifications</h2>
-        <span className="jn-panel__sub">{summary}</span>
-        <span className="jn-spacer" />
+      <div className="joc-notif-panel__header">
+        <span className="joc-notif-panel__title">Notifications</span>
+        {note ? <span className="joc-notif-panel__note">{note}</span> : null}
         <Button variant="ghost" size="sm" disabled={!onClearAll} onClick={onClearAll}>
           Clear all
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          icon="settings"
-          aria-label="Notification settings"
-          title="Notification settings"
-          onClick={onSettings}
-        />
+        <Button variant="ghost" size="sm" onClick={onSettings}>
+          Settings
+        </Button>
       </div>
-      <div className="jn-panel__tabs">
-        <Tabs items={tabs} value={tab} onChange={onTabChange} />
-      </div>
-      <div className="jn-panel__body" ref={bodyRef} onScroll={onScroll}>
+      <div className="joc-notif-panel__list" ref={listRef} onScroll={onScroll}>
         {arrivals}
         {children}
       </div>
-      <div className="jn-panel__foot">
-        <span />
-        <a className="jn-link" href={historyHref}>
-          View history
-          <Icon name="chevronRight" size={12} />
-        </a>
-      </div>
+      {foot ? <div className="joc-notif-panel__foot">{foot}</div> : null}
+    </section>
+  );
+}
+
+/** "All caught up": the panel's empty list. */
+export function NotificationEmpty({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="joc-notif-empty">
+      <EmptyState compact icon="bell" title={title} body={body} />
     </div>
   );
 }
 
 export interface NotificationGroupProps {
+  /** "Needs you", "Activity", a day. */
   label: string;
+  /** After the label: "Needs you · 3". */
   count?: number;
-  /** Quieter words at the end of the header, e.g. "Stays until answered". */
-  hint?: string;
+  /** Left out: the rows, with no header (Activity, when nothing needs you). */
+  bare?: boolean;
   children: ReactNode;
 }
 
 /** A sticky group header and its rows. */
-export function NotificationGroup({ label, count, hint, children }: NotificationGroupProps) {
+export function NotificationGroup({ label, count, bare, children }: NotificationGroupProps) {
   return (
     <section aria-label={label}>
-      <div className="jn-group__head">
-        {label}
-        {count != null ? <span className="jn-group__count">{count}</span> : null}
-        {hint ? <span className="jn-group__hint">{hint}</span> : null}
-      </div>
+      {bare ? null : (
+        <div className="joc-notif-group">{count != null ? `${label} · ${count}` : label}</div>
+      )}
       {children}
     </section>
   );
@@ -212,45 +214,40 @@ function Lead({ lead }: { lead: NotificationLead }) {
 export interface NotificationRowProps {
   lead: NotificationLead;
   title: string;
-  /** Where it's from, in mono: `atlas-web#12`, `atlas-web`. */
-  source: string;
-  text?: ReactNode;
+  /** The second line: repo and branch, the PR's title, a quote. */
+  meta?: ReactNode;
+  /** Mono, ahead of the meta: a check's name. */
+  code?: string;
   time: string;
-  /** Unread rows are heavier and brighter; read rows quieter. Never a dot. */
-  unread: boolean;
-  /**
-   * A session waiting on you: the needs rail and tint, a taller row with `answers` under it, and
-   * no dismiss. It leaves when the session stops waiting.
-   */
+  /** Read rows drop weight and colour. Never a dot. */
+  read?: boolean;
+  /** A session waiting on you: the needs ground and rail, and no dismiss. */
   needs?: boolean;
-  /** The needs row's lower line. */
-  answers?: ReactNode;
+  /** A needs row's inline answer (NeedsAnswers): the row grows to --row-notif-action. */
+  actions?: ReactNode;
   /** Where the row goes: the whole row opens it, in a new tab when `external`. */
   href: string;
   external?: boolean;
   /** Runs as the row opens, before the browser follows the link (which it may prevent). */
   onOpen?: (e: MouseEvent<HTMLAnchorElement>) => void;
-  /** The hover ✕. Left out for a needs row: it goes when answered. */
+  /** The ✕ that swaps with the time on hover. Left out for a needs row: it goes when answered. */
   onDismiss?: () => void;
-  /** Going: it fades out (opacity only), takes no pointer or focus, then is dropped. */
+  /** Going: it fades out (opacity only) over --duration-fast, takes no pointer or focus. */
   leaving?: boolean;
-  /** Its accessible name, e.g. "Fix auth redirect needs you, 2 minutes ago". */
+  /** Its accessible name, e.g. "Fix auth redirect needs permission, 2 minutes ago". */
   label?: string;
 }
 
-/**
- * One notification, with one action: the row opens what it's about. Lead glyph, title, source
- * and detail, time; on hover, a single ✕ dismisses it.
- */
+/** One notification, with one action: the row opens what it's about. */
 export function NotificationRow({
   lead,
   title,
-  source,
-  text,
+  meta,
+  code,
   time,
-  unread,
+  read,
   needs,
-  answers,
+  actions,
   href,
   external,
   onOpen,
@@ -258,173 +255,150 @@ export function NotificationRow({
   leaving,
   label,
 }: NotificationRowProps) {
-  const className = cx(
-    'jn-row',
-    needs && 'jn-row--needs',
-    unread && 'is-unread',
-    leaving && 'is-leaving',
-  );
+  const dismissable = !needs && !!onDismiss;
   return (
-    // Rows take focus for the panel's keys.
-    <article
-      className={className}
-      aria-label={label ?? title}
-      tabIndex={leaving ? -1 : 0}
+    <div
+      className={cx(
+        'joc-notif-row',
+        needs && 'is-needs',
+        read && 'is-read',
+        actions != null && 'joc-notif-row--action',
+        dismissable && 'is-dismissable',
+        leaving && 'is-leaving',
+      )}
       aria-hidden={leaving || undefined}
       inert={leaving || undefined}
     >
-      <span className="jn-row__lead" aria-hidden="true">
+      <span className="joc-notif-row__glyph" aria-hidden="true">
         <Lead lead={lead} />
       </span>
-      <div className="jn-row__main">
-        <div className="jn-row__title">
-          <a
-            className="jn-row__open"
-            href={href}
-            data-row="open"
-            tabIndex={-1}
-            onClick={onOpen}
-            {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-          >
-            {unread && !needs ? <span className="joc-sr">Unread: </span> : null}
-            {title}
-          </a>
-        </div>
-        <div className="jn-row__detail">
-          <span className="jn-src">{source}</span>
-          {text ? <span className="jn-row__text">{text}</span> : null}
+      <div className="joc-notif-row__body">
+        <a
+          className="joc-notif-row__title"
+          href={href}
+          aria-label={label}
+          onClick={onOpen}
+          {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+        >
+          {title}
+        </a>
+        <div className="joc-notif-row__meta">
+          {code ? <code>{code}</code> : null}
+          {meta ? code ? <span>{meta}</span> : meta : null}
         </div>
       </div>
-      <div className="jn-row__side">
-        <span className="jn-time">{time}</span>
-      </div>
-      {needs ? (
-        answers ? (
-          <div className="jn-answers">{answers}</div>
-        ) : null
-      ) : onDismiss ? (
-        <div className="jn-row__hover">
-          <Button
-            variant="ghost"
-            size="sm"
-            icon="x"
+      <div className="joc-notif-row__aside">
+        <span className="joc-notif-row__time">{time}</span>
+        {dismissable ? (
+          <button
+            type="button"
+            className="joc-notif-row__dismiss"
             aria-label={`Dismiss: ${title}`}
             title="Dismiss (Backspace)"
-            data-row="dismiss"
             tabIndex={-1}
             onClick={onDismiss}
-          />
-        </div>
-      ) : null}
-    </article>
+          >
+            <Icon name="x" size={14} />
+          </button>
+        ) : null}
+      </div>
+      {actions != null ? <div className="joc-notif-row__actions">{actions}</div> : null}
+    </div>
   );
 }
 
 export interface NeedsAnswersProps {
-  /** A question's options, numbered 1–9 in order; `mono` for a value such as a domain or path. */
-  options?: { label: string; mono?: boolean }[];
-  onPick?: (index: number) => void;
-  /** "Other…": a free-text answer, given where there's room for one (the session's QuestionCard). */
-  onOther?: () => void;
-  /** Its label: "Other…" by default, "Answer…" when there are no options to pick. */
-  otherLabel?: string;
-  /** A permission request: Allow once and Deny. Never a rule for later calls. */
+  /** A permission request: the call, then Deny and Allow. Allow is this call only. */
+  command?: string;
   onAllow?: () => void;
   onDeny?: () => void;
-  /** Sending, or sent: the answers hold still. */
+  /** A short single-choice question's options, numbered 1–9 for the panel's keys. */
+  options?: string[];
+  onPick?: (index: number) => void;
+  /** "Other…": opens the session at its question, where there's room to type. */
+  onOther?: () => void;
+  /** Sending: the answers hold still. */
   busy?: boolean;
   /** One line in place of the answers: "Sending…", "Answered in Claude Code". */
   status?: ReactNode;
 }
 
 /**
- * A needs row's (or a needs toast's) answers: a question's numbered options and Other…, or a
- * permission request's Allow once and Deny. The panel's 1–9 keys press the numbered ones.
+ * A needs row's inline answer: a permission's command with Deny and Allow, or a short question's
+ * options and Other…. The panel's 1–9 keys press them in order.
  */
 export function NeedsAnswers({
+  command,
+  onAllow,
+  onDeny,
   options = [],
   onPick,
   onOther,
-  otherLabel = 'Other…',
-  onAllow,
-  onDeny,
   busy,
   status,
 }: NeedsAnswersProps) {
-  if (status) return <span className="jn-answers__note joc-fade-in">{status}</span>;
+  if (status) return <span className="joc-notif-row__status">{status}</span>;
   if (onAllow || onDeny) {
     return (
       <>
-        <Button variant="secondary" size="sm" disabled={busy} onClick={onAllow} data-answer="1">
-          Allow once
-        </Button>
+        {command ? (
+          <code title={command}>{command}</code>
+        ) : (
+          <span className="joc-notif-row__spacer" />
+        )}
         <Button variant="secondary" size="sm" disabled={busy} onClick={onDeny} data-answer="2">
           Deny
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={busy}
+          onClick={onAllow}
+          title="Allow this call once"
+          data-answer="1"
+        >
+          Allow
         </Button>
       </>
     );
   }
-  const shown = options.slice(0, onOther ? 8 : 9);
   return (
     <>
-      {shown.map((o, i) => (
-        <button
-          key={o.label}
-          type="button"
-          className={cx('jn-opt', o.mono && 'is-mono')}
+      {options.map((o, i) => (
+        <Button
+          key={o}
+          variant="secondary"
+          size="sm"
           disabled={busy}
-          title={o.label}
           data-answer={i + 1}
           onClick={() => onPick?.(i)}
         >
-          <span className="jn-opt__n">{i + 1}</span>
-          <span className="jn-opt__label">{o.label}</span>
-        </button>
+          {o}
+        </Button>
       ))}
+      <span className="joc-notif-row__spacer" />
       {onOther ? (
-        <button
-          type="button"
-          className="jn-opt"
-          disabled={busy}
-          data-answer={shown.length + 1}
-          onClick={onOther}
-        >
-          <span className="jn-opt__n">{shown.length + 1}</span>
-          <span className="jn-opt__label">{otherLabel}</span>
-        </button>
+        <Button variant="ghost" size="sm" disabled={busy} onClick={onOther}>
+          Other…
+        </Button>
       ) : null}
     </>
   );
 }
 
-export interface ArrivalsPillProps {
-  /** New notifications held back. */
+export interface NotificationNewBarProps {
+  /** New notifications held back while the panel is open. */
   count: number;
-  /** How many of them are a session needing you. */
-  needs?: number;
   onShow: () => void;
 }
 
-/**
- * "2 new · Show": new notifications wait behind it while you read, rather than landing above
- * the row under your pointer. With a session needing you among them, it says so.
- */
-export function ArrivalsPill({ count, needs = 0, onShow }: ArrivalsPillProps) {
+/** "2 new — show": arrivals wait here while the panel is open, so nothing moves under you. */
+export function NotificationNewBar({ count, onShow }: NotificationNewBarProps) {
   if (!count) return null;
   return (
-    <div className="jn-newpill">
-      <button type="button" className="jn-bar" onClick={onShow}>
-        {needs ? (
-          <>
-            <StateDot state="needs" />
-            {needs} {needs === 1 ? 'needs' : 'need'} you
-          </>
-        ) : (
-          `${count} new`
-        )}
-        <span className="jn-bar__go">Show</span>
-      </button>
-    </div>
+    <button type="button" className="joc-notif-newbar joc-fade-in" onClick={onShow}>
+      {count} new — show
+    </button>
   );
 }
 
@@ -442,11 +416,11 @@ export interface ToastStackProps {
  */
 export function ToastStack({ more = 0, onOpenMore, children }: ToastStackProps) {
   return (
-    <section className="jn-toasts is-fixed" aria-label="Notifications">
+    <section className="joc-notif-toasts is-fixed" aria-label="Notifications">
       {more ? (
-        <div className="jn-toasts__more joc-fade-in">
+        <div className="joc-notif-toasts__more joc-fade-in">
           <span>{more} more waiting</span>
-          <button type="button" className="jn-link" onClick={onOpenMore}>
+          <button type="button" className="joc-notif-link" onClick={onOpenMore}>
             Open notifications
           </button>
         </div>
@@ -461,69 +435,91 @@ export type NotificationChannel = 'panel' | 'toast' | 'sound' | 'desktop';
 export interface NotificationMatrixKind {
   id: string;
   label: string;
-  /** Quieter line under the label, when it isn't history only or locked. */
-  note?: string;
+  /** The quieter line under it: "On your PRs". */
+  sub: string;
   channels: Record<NotificationChannel, boolean>;
   /** Always in the panel: its Panel box is checked and can't change. */
   locked?: boolean;
 }
 
 export interface NotificationMatrixProps {
-  groups: { label: string; kinds: NotificationMatrixKind[] }[];
-  soundOff?: boolean;
+  kinds: NotificationMatrixKind[];
+  /** The master switch for every Sound box. */
+  sound: boolean;
+  onSound: (on: boolean) => void;
+  /** "Send a test": how a notification looks and sounds. */
+  onTest: () => void;
   onChange: (kind: string, channel: NotificationChannel, on: boolean) => void;
 }
 
-const CHANNELS: { id: NotificationChannel; label: string; aria: string }[] = [
-  { id: 'panel', label: 'Panel', aria: 'in panel' },
-  { id: 'toast', label: 'Toast', aria: 'as toast' },
-  { id: 'sound', label: 'Sound', aria: 'with a sound' },
-  { id: 'desktop', label: 'Desktop', aria: 'on desktop' },
+const CHANNELS: { id: NotificationChannel; label: string }[] = [
+  { id: 'panel', label: 'Panel' },
+  { id: 'toast', label: 'Toast' },
+  { id: 'sound', label: 'Sound' },
+  { id: 'desktop', label: 'Desktop' },
+];
+
+const SOUND = [
+  { id: 'on', label: 'On' },
+  { id: 'off', label: 'Off' },
 ];
 
 /**
- * Where each kind shows up: Panel, Toast, Sound, Desktop. All off keeps it in the history only.
- * `soundOff` greys the Sound column out while the master switch is off.
+ * Where each kind shows up: Panel, Toast, Sound, Desktop, under a Sound On/Off master switch.
+ * The Sound column is greyed out while the switch is off.
  */
-export function NotificationMatrix({ groups, soundOff, onChange }: NotificationMatrixProps) {
+export function NotificationMatrix({
+  kinds,
+  sound,
+  onSound,
+  onTest,
+  onChange,
+}: NotificationMatrixProps) {
   return (
-    // biome-ignore lint/a11y/useSemanticElements: a grid of checkboxes, laid out by notif.css
-    <div className="jn-matrix" role="group" aria-label="Where each kind shows up">
-      <div className="jn-mx__row jn-mx__head">
+    <div className="joc-notif-settings">
+      <div className="joc-notif-settings__sound">
+        <div className="joc-notif-settings__kind">
+          <span className="joc-notif-settings__name">Sound</span>
+          <span className="joc-notif-settings__sub">Master switch for every kind below</span>
+        </div>
+        <SegmentedControl
+          label="Sound"
+          options={SOUND}
+          value={sound ? 'on' : 'off'}
+          onChange={(v) => onSound(v === 'on')}
+        />
+        <Button variant="secondary" size="sm" onClick={onTest}>
+          Send a test
+        </Button>
+      </div>
+      <div className="joc-notif-settings__grid joc-notif-settings__head">
         <span>Kind</span>
         {CHANNELS.map((c) => (
-          <span key={c.id}>{c.label}</span>
+          <span key={c.id} className="joc-notif-settings__cell">
+            {c.label}
+          </span>
         ))}
       </div>
-      {groups.map((g) => (
-        <div key={g.label} role="presentation">
-          <div className="jn-mx__group">{g.label}</div>
-          {g.kinds.map((k) => {
-            const off = CHANNELS.every((c) => !k.channels[c.id]);
-            const note = k.locked
-              ? 'Always in the panel until answered'
-              : off
-                ? 'History only'
-                : k.note;
+      {kinds.map((k) => (
+        <div key={k.id} className="joc-notif-settings__grid joc-notif-settings__row">
+          <div className="joc-notif-settings__kind">
+            <span className="joc-notif-settings__name">{k.label}</span>
+            <span className="joc-notif-settings__sub">{k.sub}</span>
+          </div>
+          {CHANNELS.map((c) => {
+            const locked = c.id === 'panel' && !!k.locked;
+            const muted = c.id === 'sound' && !sound;
             return (
-              <div key={k.id} className="jn-mx__row">
-                <span className="jn-mx__kind">
-                  <span>{k.label}</span>
-                  {note ? <span className="jn-matrix__note">{note}</span> : null}
-                </span>
-                {CHANNELS.map((c) => (
-                  <span key={c.id}>
-                    <input
-                      type="checkbox"
-                      className="jn-check"
-                      checked={k.channels[c.id] || (c.id === 'panel' && !!k.locked)}
-                      disabled={(c.id === 'panel' && k.locked) || (c.id === 'sound' && soundOff)}
-                      aria-label={`${k.label} ${c.aria}`}
-                      onChange={(e) => onChange(k.id, c.id, e.target.checked)}
-                    />
-                  </span>
-                ))}
-              </div>
+              <span key={c.id} className="joc-notif-settings__cell">
+                <input
+                  type="checkbox"
+                  checked={k.channels[c.id] || locked}
+                  disabled={locked || muted}
+                  aria-label={`${c.label} for ${k.label}`}
+                  title={locked ? 'Always on' : muted ? 'Sound is off' : c.label}
+                  onChange={(e) => onChange(k.id, c.id, e.target.checked)}
+                />
+              </span>
             );
           })}
         </div>

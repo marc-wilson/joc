@@ -10,6 +10,7 @@ import {
   type Session,
   type Waiting,
 } from '@joc/protocol';
+import { inlineQuestion } from './answers.ts';
 import { plain } from './plain.ts';
 
 // The notification center's one list, as notes. This module is UI-free so its rules are tested
@@ -24,17 +25,19 @@ import { plain } from './plain.ts';
 // - off by default, a long turn that finished: gone once you open the session.
 // Everything else (other GitHub activity, the record of a session that waited) is history only.
 // A note that's resolved, read or dismissed is gone from the panel; the history keeps it.
+//
+// Each kind's row (its lead, title and meta line) is spelt here and nowhere else, so a new source
+// of the same kinds (webhooks, say) only has to make the same notes.
 
-/** Where a note groups in the panel, in this order. */
-export type NoteGroup = 'needs' | 'reviews' | 'activity';
+/** Where a note groups in the panel, in this order: needs you pinned first, then the rest. */
+export type NoteGroup = 'needs' | 'activity';
 
 export const GROUP_LABEL: Record<NoteGroup, string> = {
   needs: 'Needs you',
-  reviews: 'Reviews',
   activity: 'Activity',
 };
 
-const GROUPS: NoteGroup[] = ['needs', 'reviews', 'activity'];
+const GROUPS: NoteGroup[] = ['needs', 'activity'];
 
 /** NotificationRow's lead, spelt here so this module stays UI-free. */
 export type NoteLead =
@@ -47,15 +50,22 @@ export interface Note {
   id: string;
   kind: NotificationKind;
   group: NoteGroup;
-  /** On the panel's GitHub tab. */
-  github: boolean;
   lead: NoteLead;
   title: string;
-  /** In mono: `atlas-web#12`, or the repo's name. */
+  /** The row's second line: `atlas-web · fix/auth-redirect`, a PR's title and its repo. */
+  meta: string;
+  /** Mono, ahead of the meta: a branch, or a command that can't be answered from here. */
+  code?: string;
+  /** `atlas-web#12`, or the repo's name. */
   source: string;
+  /** What it says in a toast or a desktop notification, under the title. */
   text?: string;
-  /** The text is a command or a tool call: mono. */
-  mono?: boolean;
+  /** Its toast's title, when it isn't the row's. */
+  toastTitle?: string;
+  /** A session waiting on you that its row answers inline: a permission, or a short question. */
+  answer?: 'permission' | 'options';
+  /** The permission's call, beside Deny and Allow. */
+  command?: string;
   at: string;
   /** Still needs you: not read, dismissed or resolved. */
   unread: boolean;
@@ -107,27 +117,20 @@ function waiting(activity: string | undefined): {
 export function needsNotes(sessions: Session[], alerts: Alert[] = []): Note[] {
   return sessions
     .filter((s) => s.state === 'needs')
-    .map((s) => {
+    .map((s): Note => {
       const asked = s.waiting;
       const said = waiting(s.activity);
       const kind = asked?.kind ?? said.kind;
-      const text = asked?.kind === 'permission' ? asked.summary || said.text : said.text;
-      const title = s.title ?? UNTITLED;
-      const wants =
-        asked?.kind === 'permission' && asked.tool === 'Bash'
-          ? 'wants to run a command'
-          : 'wants permission';
+      const name = s.title ?? UNTITLED;
+      const repo = repoName(s.repo);
+      const where = [repo, s.branch].filter(Boolean).join(' · ');
       const since = alerts.find((a) => a.kind === 'needs' && a.sessionId === s.id && !a.read);
-      return {
+      const base = {
         id: `session:${s.id}`,
-        kind,
-        group: 'needs',
-        github: false,
-        lead: { state: 'needs' },
-        title: kind === 'permission' ? `${title} ${wants}` : `${title} needs you`,
-        source: repoName(s.repo),
-        text,
-        mono: kind === 'permission',
+        group: 'needs' as const,
+        lead: { state: 'needs' as const },
+        source: repo,
+        toastTitle: `${name} needs you`,
         at: since?.at ?? s.updatedAt,
         unread: true,
         live: true,
@@ -137,6 +140,54 @@ export function needsNotes(sessions: Session[], alerts: Alert[] = []): Note[] {
         sessionId: s.id,
         waiting: asked,
         threadIds: [],
+      };
+      if (kind === 'permission') {
+        const call = asked?.kind === 'permission' ? asked.summary || asked.tool : said.text;
+        const text =
+          asked?.kind === 'permission' && asked.tool !== 'Bash'
+            ? `Claude wants to use ${asked.tool}${asked.summary ? `: ${asked.summary}` : ''}`
+            : call
+              ? `Claude wants to run ${call}`
+              : 'Claude wants permission';
+        // A plugin from before 0.9.0 takes no answers: the call shows in the meta instead.
+        return asked
+          ? {
+              ...base,
+              kind,
+              title: `${name} needs permission`,
+              meta: where,
+              text,
+              answer: 'permission',
+              command: call,
+            }
+          : { ...base, kind, title: `${name} needs permission`, meta: repo, code: call, text };
+      }
+      const quick = inlineQuestion(asked);
+      const first = asked?.kind === 'question' ? asked.questions[0]?.question : said.text;
+      if (quick) {
+        return {
+          ...base,
+          kind,
+          title: `${name}: ${quick.question}`,
+          meta: where,
+          text: quick.question,
+          answer: 'options',
+        };
+      }
+      const what =
+        asked?.kind === 'question'
+          ? asked.questions.length > 1
+            ? `${asked.questions.length} questions`
+            : `${asked.questions[0]?.options.length || 'no'} options`
+          : undefined;
+      return {
+        ...base,
+        kind,
+        title: `${name} has a question`,
+        meta: [repo, what, asked ? 'open to answer' : 'answer in Claude Code']
+          .filter(Boolean)
+          .join(' · '),
+        text: first,
       };
     });
 }
@@ -157,7 +208,6 @@ export function alertNote(a: Alert): Note {
   if (a.kind === 'review' || a.kind === 'ci-failed') {
     const pr = {
       ...base,
-      github: true,
       source: a.number ? `${repoName(a.repo)}#${a.number}` : repoName(a.repo),
       href: a.number ? prHref(a.repo, a.number) : (a.url ?? `https://github.com/${a.repo}`),
       external: !a.number,
@@ -167,10 +217,11 @@ export function alertNote(a: Alert): Note {
       return {
         ...pr,
         kind: 'review',
-        group: 'reviews',
+        group: 'activity',
         lead: { icon: 'pr' },
         title: a.number ? `Review requested on #${a.number}` : 'Review requested',
-        text: a.detail ? `${a.title} · ${a.detail}` : a.title,
+        meta: `${a.title} · ${repoName(a.repo)}`,
+        text: `${a.title} · ${repoName(a.repo)}`,
       };
     }
     return {
@@ -179,13 +230,14 @@ export function alertNote(a: Alert): Note {
       group: 'activity',
       lead: { ci: 'fail' },
       title: a.number ? `CI failed on #${a.number}` : 'CI failed',
+      meta: `${a.title} · ${repoName(a.repo)}`,
+      code: a.branch,
       text: a.title,
       branch: a.branch,
     };
   }
   const session = {
     ...base,
-    github: false,
     source: repoName(a.repo),
     href: sessionHref(a.sessionId ?? ''),
     external: false,
@@ -198,6 +250,7 @@ export function alertNote(a: Alert): Note {
       group: 'activity',
       lead: { state: 'idle' },
       title: `${a.title} finished`,
+      meta: [repoName(a.repo), a.detail && plain(a.detail)].filter(Boolean).join(' · '),
       text: a.detail && plain(a.detail),
     };
   }
@@ -208,8 +261,9 @@ export function alertNote(a: Alert): Note {
     group: 'needs',
     lead: { state: 'needs' },
     title: kind === 'permission' ? `${a.title} wanted permission` : `${a.title} needed you`,
+    meta: repoName(a.repo),
+    code: kind === 'permission' ? text : undefined,
     text,
-    mono: kind === 'permission',
     // A record: the live session is the notification.
     historyOnly: true,
   };
@@ -241,10 +295,10 @@ const OTHER_VERBS = new Map([
 export function threadNote(t: GitHubNotification, unread = true): Note {
   const kind = threadKind(t);
   const on = t.number ? ` on #${t.number}` : '';
+  const about = `${t.title} · ${repoName(t.repo)}`;
   const base = {
     id: `github:${t.id}`,
     kind,
-    github: true,
     source: t.number ? `${repoName(t.repo)}#${t.number}` : repoName(t.repo),
     at: t.updatedAt,
     unread,
@@ -262,22 +316,25 @@ export function threadNote(t: GitHubNotification, unread = true): Note {
         group: 'activity',
         lead: { ci: 'fail' },
         title: `CI failed${on || (t.branch ? ` on ${t.branch}` : '')}`,
+        meta: about,
+        code: on ? t.branch : undefined,
         text: t.title,
       };
     case 'review':
       return {
         ...base,
-        group: 'reviews',
+        group: 'activity',
         lead: { icon: 'pr' },
         title: `Review requested${on}`,
-        text: t.title,
+        meta: about,
+        text: about,
         // Reviewed here, in JOC.
         ...(t.number ? { href: prHref(t.repo, t.number), external: false } : {}),
       };
     case 'mention':
       return {
         ...base,
-        group: 'reviews',
+        group: 'activity',
         lead: { icon: 'comment' },
         title:
           t.reason === 'author'
@@ -285,7 +342,8 @@ export function threadNote(t: GitHubNotification, unread = true): Note {
             : t.reason === 'comment'
               ? `New comment${on}`
               : `You were mentioned${on}`,
-        text: t.title,
+        meta: about,
+        text: about,
       };
     default:
       return {
@@ -295,6 +353,7 @@ export function threadNote(t: GitHubNotification, unread = true): Note {
           icon: t.reason === 'assign' ? 'person' : t.type === 'PullRequest' ? 'pr' : 'inbox',
         },
         title: t.title,
+        meta: `${OTHER_VERBS.get(t.reason) ?? 'Activity'} · ${repoName(t.repo)}`,
         text: OTHER_VERBS.get(t.reason) ?? 'Activity',
         historyOnly: true,
       };
@@ -426,12 +485,7 @@ export const panelNotes = (notes: Note[], prefs: Prefs) =>
 /** What Clear all dismisses: everything on the panel but the sessions waiting on you. */
 export const clearable = (notes: Note[]) => notes.filter((n) => !n.live && n.unread);
 
-export type NoteTab = 'all' | 'needs' | 'github';
-
-export const inTab = (n: Note, tab: NoteTab) =>
-  tab === 'all' || (tab === 'needs' ? n.group === 'needs' : n.github);
-
-/** The notes in their groups, in the panel's order: needs you, reviews, activity. */
+/** The notes in their groups, in the panel's order: needs you, then activity. */
 export function groupNotes<T extends Pick<Note, 'group'>>(notes: T[]): [NoteGroup, T[]][] {
   return GROUPS.map((g) => [g, notes.filter((n) => n.group === g)] as [NoteGroup, T[]]).filter(
     ([, list]) => list.length > 0,
@@ -451,8 +505,8 @@ export interface Held {
 
 /**
  * The panel's list after the latest notes. A note that went leaves at once. While `arrivals`
- * are held (the pointer in the list, or the list scrolled) new notes wait behind the pill
- * rather than land above what you're reading; otherwise they take their place.
+ * are held (the panel is open) new notes wait behind the new-items bar rather than land above
+ * what you're reading; otherwise they take their place.
  */
 export function hold(shown: Held | undefined, latest: Note[], arrivals: boolean): Held {
   if (!shown || !arrivals) return { ids: panelOrder(latest), waiting: [] };

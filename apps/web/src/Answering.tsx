@@ -3,9 +3,9 @@ import { Code, NeedsAnswers, QuestionCard } from '@joc/ui';
 import { useEffect, useRef, useState } from 'react';
 import {
   answerStatus,
+  inlineQuestion,
   permissionAnswer,
   questionAnswer,
-  quickQuestion,
   sendAnswer,
   useSent,
   waitingOf,
@@ -19,40 +19,38 @@ import type { Note } from './notes.ts';
 /** Where "Other…" goes: the session, at its question card. */
 export const ANSWER_HASH = '#answer';
 
-/** A value such as a domain or a path reads better in mono. */
-const looksLikeValue = (label: string) => !/\s/.test(label) && /[./:@]/.test(label);
-
-/** A needs row's or toast's answers: options, Other…, or Allow once and Deny. */
+/**
+ * A needs row's inline answer, sent the way the session's own cards send it (answers.ts): a
+ * permission's Deny and Allow, or a short question's options and Other…. Nothing for a wait the
+ * row can't answer: the row opens the session.
+ */
 export function NoteAnswers({ note, sessions }: { note: Note; sessions: Session[] }) {
   const mine = useSent();
   const session = sessions.find((s) => s.id === note.sessionId);
   const waiting = waitingOf(session);
-  if (!session || !waiting) {
-    // A plugin from before 0.9.0 takes no answers.
-    return <span className="jn-answers__note">Answer it in Claude Code</span>;
-  }
+  if (!note.answer || !session || !waiting) return null;
   const status = answerStatus(waiting.id, session, mine.get(waiting.id));
   if (status) return <NeedsAnswers status={status} />;
   const send = (answer: Answer) => void sendAnswer(session.id, waiting.id, answer, apiFetch);
   if (waiting.kind === 'permission') {
     return (
       <NeedsAnswers
+        command={note.command}
         onAllow={() => send(permissionAnswer(true))}
         onDeny={() => send(permissionAnswer(false))}
       />
     );
   }
-  const open = () => location.assign(`${note.href}${ANSWER_HASH}`);
-  const quick = quickQuestion(waiting);
-  if (!quick) return <NeedsAnswers onOther={open} otherLabel="Answer…" />;
+  const quick = inlineQuestion(waiting);
+  if (!quick) return null;
   return (
     <NeedsAnswers
-      options={quick.options.map((o) => ({ label: o.label, mono: looksLikeValue(o.label) }))}
+      options={quick.options.map((o) => o.label)}
       onPick={(i) => {
         const label = quick.options[i]?.label;
         if (label) send(questionAnswer({ [quick.question]: label }));
       }}
-      onOther={open}
+      onOther={() => location.assign(`${note.href}${ANSWER_HASH}`)}
     />
   );
 }
