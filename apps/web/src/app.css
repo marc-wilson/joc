@@ -27,6 +27,15 @@
   overflow-y: auto;
 }
 
+/* A conversation's scroller and what floats over its bottom edge. */
+.app-main__conv {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .app-main__scroll {
   flex: 1;
   overflow-y: auto;

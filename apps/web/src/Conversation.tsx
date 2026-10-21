@@ -7,13 +7,22 @@ import {
   EmptyState,
   formatBytes,
   ImageViewer,
+  JumpToLatest,
   Message,
   MessageStatus,
   SlashPill,
   TextLink,
   Thread,
 } from '@joc/ui';
-import { isValidElement, type ReactNode, useLayoutEffect, useRef, useState } from 'react';
+import {
+  isValidElement,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { WaitingCards } from './Answering.tsx';
@@ -22,6 +31,13 @@ import type { PendingView } from './pending.ts';
 import { plain } from './plain.ts';
 import { updateSessionPrefs, useSessionPrefs } from './prefs.ts';
 import { toggled } from './toggled.ts';
+import { seenIds, unseenCount } from './unseen.ts';
+
+/** Within this of the bottom you're at the newest message, and the thread follows new ones. */
+const PINNED_PX = 80;
+
+/** Where End goes elsewhere: typing, or a dialog over the page. */
+const KEEPS_END = 'input, textarea, select, [contenteditable="true"], [role="dialog"], dialog';
 
 const time = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -318,71 +334,110 @@ export function Conversation({
     : undefined;
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  // While you're scrolled up: the items on screen when you left the bottom, to count new ones.
+  const [seen, setSeen] = useState<ReadonlySet<string>>();
+  // More than a screen of the thread is below what you're reading.
+  const [far, setFar] = useState(false);
   const [viewing, setViewing] = useState<Viewing>();
   // Claude's messages you folded, remembered per session.
   const folded = useSessionPrefs(sessionId).foldedMessages;
+  const unseen = unseenCount(items, seen, settled);
 
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (el && pinned.current) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    if (pinned.current) el.scrollTop = el.scrollHeight;
+    // New messages below grow what's left to read without a scroll; nothing on screen moves.
+    else setFar(el.scrollHeight - el.scrollTop - el.clientHeight > el.clientHeight);
   });
 
+  // You asked for it, so the one jump: straight there, never a smooth scroll.
+  const jump = useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    pinned.current = true;
+    setSeen(undefined);
+    setFar(false);
+    el.scrollTop = el.scrollHeight;
+  }, []);
+
+  // End jumps too, unless it's moving a cursor or a dialog is open.
+  useEffect(() => {
+    if (viewing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'End' || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.target instanceof Element && e.target.closest(KEEPS_END)) return;
+      e.preventDefault();
+      jump();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [viewing, jump]);
+
   return (
-    <div
-      className="app-main__scroll"
-      ref={scroller}
-      onScroll={(e) => {
-        const el = e.currentTarget;
-        // Follow new messages only while you're already at the bottom.
-        pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-      }}
-    >
-      {items.length || pending.length || session?.waiting ? (
-        <Thread>
-          <ThreadItems
-            items={items}
-            working={state === 'working'}
-            folded={folded}
-            onFold={(id) =>
-              updateSessionPrefs({
-                id: sessionId,
-                foldedMessages: toggled(folded, id, !folded.includes(id)),
-              })
-            }
-            onOpen={setViewing}
-            insert={insert}
-            settled={settled}
-          />
-          {pending.map((view) => (
-            <UserMessage
-              key={view.prompt.id}
-              text={view.prompt.text}
-              images={view.prompt.images}
-              pending={view.phase}
-              footer={<PendingLine view={view} actions={pendingActions} />}
+    <div className="app-main__conv">
+      <div
+        className="app-main__scroll"
+        ref={scroller}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          const below = el.scrollHeight - el.scrollTop - el.clientHeight;
+          // Follow new messages only while you're already at the bottom.
+          pinned.current = below < PINNED_PX;
+          setFar(below > el.clientHeight);
+          if (pinned.current) setSeen(undefined);
+          else setSeen((s) => s ?? seenIds(items));
+        }}
+      >
+        {items.length || pending.length || session?.waiting ? (
+          <Thread>
+            <ThreadItems
+              items={items}
+              working={state === 'working'}
+              folded={folded}
+              onFold={(id) =>
+                updateSessionPrefs({
+                  id: sessionId,
+                  foldedMessages: toggled(folded, id, !folded.includes(id)),
+                })
+              }
               onOpen={setViewing}
+              insert={insert}
+              settled={settled}
             />
-          ))}
-          {session ? <WaitingCards session={session} items={items.length} /> : null}
-        </Thread>
-      ) : (
-        <EmptyState
-          title="No messages yet"
-          body="Messages show here as the session works. Earlier history from before the plugin was installed may be partial."
-        />
-      )}
-      {viewing ? (
-        <ImageViewer
-          images={viewing.images.map((image, i) => ({
-            src: imageSrc(image),
-            name: imageName(i),
-            size: imageSize(image),
-          }))}
-          index={viewing.index}
-          onIndex={(index) => setViewing({ ...viewing, index })}
-          onClose={() => setViewing(undefined)}
-        />
-      ) : null}
+            {pending.map((view) => (
+              <UserMessage
+                key={view.prompt.id}
+                text={view.prompt.text}
+                images={view.prompt.images}
+                pending={view.phase}
+                footer={<PendingLine view={view} actions={pendingActions} />}
+                onOpen={setViewing}
+              />
+            ))}
+            {session ? <WaitingCards session={session} items={items.length} /> : null}
+          </Thread>
+        ) : (
+          <EmptyState
+            title="No messages yet"
+            body="Messages show here as the session works. Earlier history from before the plugin was installed may be partial."
+          />
+        )}
+        {viewing ? (
+          <ImageViewer
+            images={viewing.images.map((image, i) => ({
+              src: imageSrc(image),
+              name: imageName(i),
+              size: imageSize(image),
+            }))}
+            index={viewing.index}
+            onIndex={(index) => setViewing({ ...viewing, index })}
+            onClose={() => setViewing(undefined)}
+          />
+        ) : null}
+      </div>
+      {/* Over the bottom of the thread while you read further up; hidden at the bottom. */}
+      <JumpToLatest shown={Boolean(seen) && (far || unseen > 0)} count={unseen} onJump={jump} />
     </div>
   );
 }
