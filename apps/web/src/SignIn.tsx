@@ -1,6 +1,6 @@
 import { Button, EmptyState } from '@joc/ui';
 import type { ReactNode } from 'react';
-import { signIn, useAuth } from './auth.ts';
+import { signIn, signInNote, useAuth } from './auth.ts';
 
 function SignIn() {
   return (
@@ -9,7 +9,11 @@ function SignIn() {
         <EmptyState
           icon="lock"
           title="Sign in to JOC"
-          body="JOC shows your live Claude Code sessions. Sign in with your GitHub account to see yours."
+          body={
+            signInNote && signInNote !== 'requested'
+              ? "GitHub sign-in didn't finish. Try again."
+              : 'JOC shows your live Claude Code sessions. Sign in with your GitHub account to see yours.'
+          }
           action={
             <Button variant="primary" onClick={signIn}>
               Sign in with GitHub
