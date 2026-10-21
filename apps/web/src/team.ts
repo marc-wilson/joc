@@ -61,7 +61,7 @@ export function teammateMessages(items: ConversationItem[], t: Teammate): TeamLi
     if (i.kind === 'tool_call' && i.message && addresses(t, i.to)) {
       return [{ id: i.id, from: 'lead', at: i.at, text: i.message }];
     }
-    if (i.kind === 'agent_message' && addresses(t, i.from)) {
+    if (i.kind === 'agent_message' && !i.report && addresses(t, i.from)) {
       return [{ id: i.id, from: 'mate', at: i.at, text: i.text }];
     }
     return [];
@@ -69,13 +69,18 @@ export function teammateMessages(items: ConversationItem[], t: Teammate): TeamLi
 }
 
 /**
- * A teammate's latest report: a background one's from its last task notification, a blocking
- * one's from its call's result.
+ * A teammate's latest report: the one it handed back, else a background one's from its last
+ * task notification (which, after a hand-back, only points to it), else a blocking one's from
+ * its call's result.
  */
 export function teammateReport(
   items: ConversationItem[],
   t: Teammate,
 ): { text: string; at: string } | undefined {
+  const handedBack = items.findLast(
+    (i) => i.kind === 'agent_message' && i.report && !i.task && addresses(t, i.from),
+  );
+  if (handedBack?.kind === 'agent_message') return { text: handedBack.text, at: handedBack.at };
   for (let n = items.length - 1; n >= 0; n--) {
     const i = items[n];
     if (!i || i.task) continue;
