@@ -1,5 +1,5 @@
 import { NavBar } from '@joc/ui';
-import { useAuth } from './auth.ts';
+import { reconnect, signOut, useAuth } from './auth.ts';
 import { GitHubConnect } from './GitHubConnect.tsx';
 import { useSessions } from './hooks.ts';
 import { useNotificationCenter } from './Notifications.tsx';
@@ -14,6 +14,8 @@ interface Props {
   viewing?: string;
 }
 
+const go = (path: string) => location.assign(path);
+
 /**
  * The nav bar every page shares, with the notifications bell. It also raises the toasts,
  * desktop notifications and the tab's title.
@@ -23,6 +25,7 @@ export function Nav({ page, connected, viewing }: Props) {
   const live = useSessions();
   const needs = live.sessions.filter((s) => s.state === 'needs').length;
   const center = useNotificationCenter(viewing);
+  const github = auth.status === 'signedIn' ? auth.github : undefined;
 
   return (
     <>
@@ -39,6 +42,21 @@ export function Nav({ page, connected, viewing }: Props) {
         machine={connected === undefined ? undefined : connected ? 'Connected' : 'Reconnecting'}
         machineOffline={connected === false}
         user={auth.status === 'signedIn' ? auth.user?.login : undefined}
+        userMenu={[
+          { id: 'settings', label: 'Settings', icon: 'settings', onSelect: () => go('/settings') },
+          { id: 'machines', label: 'Machines', icon: 'terminal', onSelect: () => go('/link') },
+          ...(github === 'reconnect'
+            ? [
+                {
+                  id: 'reconnect',
+                  label: 'Reconnect GitHub',
+                  icon: 'plug' as const,
+                  onSelect: reconnect,
+                },
+              ]
+            : []),
+          { id: 'signout', label: 'Sign out', onSelect: () => void signOut() },
+        ]}
       />
       <GitHubConnect />
       <Updates />
