@@ -312,6 +312,8 @@ interface Props {
   session?: Session;
   /** A line across the thread, after the items up to `at` (at the end without one). */
   divider?: { text: string; at?: string };
+  /** Shown after the transcript's items, e.g. a review's verdict. */
+  after?: ReactNode;
 }
 
 /** A session's conversation, kept pinned to the newest message while you're at the bottom. */
@@ -324,6 +326,7 @@ export function Conversation({
   state,
   session,
   divider,
+  after,
 }: Props) {
   const at = divider?.at;
   const insert = divider
@@ -405,6 +408,7 @@ export function Conversation({
               insert={insert}
               settled={settled}
             />
+            {after}
             {pending.map((view) => (
               <UserMessage
                 key={view.prompt.id}
