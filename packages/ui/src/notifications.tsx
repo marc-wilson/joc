@@ -20,7 +20,7 @@ import { StateDot } from './state.tsx';
 const ROW = 'article.jn-row';
 
 /** Clicks the focused row's control marked `data-row`, as the panel's keys do. */
-function press(row: Element | null, which: 'action' | 'read' | 'clear') {
+function press(row: Element | null, which: 'open' | 'dismiss') {
   row?.querySelector<HTMLElement>(`[data-row="${which}"]:not(:disabled)`)?.click();
 }
 
@@ -31,10 +31,8 @@ export interface NotificationPanelProps {
   tabs: TabItem[];
   tab: string;
   onTabChange: (id: string) => void;
-  /** Disabled when nothing is unread. */
-  onMarkAllRead?: () => void;
-  /** Disabled when nothing read is left to clear. */
-  onClearRead?: () => void;
+  /** Dismisses every row but the sessions waiting on you. Disabled when there's none. */
+  onClearAll?: () => void;
   onSettings: () => void;
   historyHref: string;
   /** Escape, or a press outside the panel and its bell. Focus goes back to the bell. */
@@ -53,7 +51,7 @@ export interface NotificationPanelProps {
 /**
  * The notifications popover, under the nav bar's bell: never a page of its own. It fades in,
  * takes focus, and closes on Escape or a press outside it. Keys: ↑ ↓ move between rows, Enter
- * runs a row's action, e marks it read, Backspace clears it, 1–9 pick a needs row's answer.
+ * opens a row, Backspace (or e) dismisses it, 1–9 pick a needs row's answer.
  */
 export function NotificationPanel({
   id,
@@ -61,8 +59,7 @@ export function NotificationPanel({
   tabs,
   tab,
   onTabChange,
-  onMarkAllRead,
-  onClearRead,
+  onClearAll,
   onSettings,
   historyHref,
   onClose,
@@ -122,9 +119,8 @@ export function NotificationPanel({
     }
     // The rest act on the focused row itself, not a button inside it.
     if (!target.matches(ROW)) return;
-    if (e.key === 'Enter') press(target, 'action');
-    else if (e.key === 'e') press(target, 'read');
-    else if (e.key === 'Backspace') press(target, 'clear');
+    if (e.key === 'Enter') press(target, 'open');
+    else if (e.key === 'e' || e.key === 'Backspace') press(target, 'dismiss');
     else if (/^[1-9]$/.test(e.key)) {
       // A needs row's numbered answer.
       target.querySelector<HTMLElement>(`[data-answer="${e.key}"]:not(:disabled)`)?.click();
@@ -148,14 +144,8 @@ export function NotificationPanel({
         <h2 className="jn-panel__title">Notifications</h2>
         <span className="jn-panel__sub">{summary}</span>
         <span className="jn-spacer" />
-        <Button
-          variant="ghost"
-          size="sm"
-          icon="check"
-          disabled={!onMarkAllRead}
-          onClick={onMarkAllRead}
-        >
-          Mark all read
+        <Button variant="ghost" size="sm" disabled={!onClearAll} onClick={onClearAll}>
+          Clear all
         </Button>
         <Button
           variant="ghost"
@@ -174,9 +164,7 @@ export function NotificationPanel({
         {children}
       </div>
       <div className="jn-panel__foot">
-        <Button variant="ghost" size="sm" disabled={!onClearRead} onClick={onClearRead}>
-          Clear all read
-        </Button>
+        <span />
         <a className="jn-link" href={historyHref}>
           View history
           <Icon name="chevronRight" size={12} />
@@ -220,17 +208,6 @@ function Lead({ lead }: { lead: NotificationLead }) {
   return <Icon name={lead.icon} size={14} />;
 }
 
-export interface NotificationAction {
-  label: string;
-  /** Secondary for the action the row is for, ghost for just opening it. */
-  variant?: 'secondary' | 'ghost';
-  /** A link, opened in a new tab when `external`. */
-  href?: string;
-  external?: boolean;
-  onClick?: () => void;
-  disabled?: boolean;
-}
-
 export interface NotificationRowProps {
   lead: NotificationLead;
   title: string;
@@ -242,50 +219,28 @@ export interface NotificationRowProps {
   unread: boolean;
   /**
    * A session waiting on you: the needs rail and tint, a taller row with `answers` under it, and
-   * no clear. It leaves when the session stops waiting.
+   * no dismiss. It leaves when the session stops waiting.
    */
   needs?: boolean;
-  /** The needs row's lower line, before its action. */
+  /** The needs row's lower line. */
   answers?: ReactNode;
-  action?: NotificationAction;
-  onMarkRead?: () => void;
-  onClear?: () => void;
-  /** Cleared or resolved: a blank slot keeps its space until the pointer leaves the panel. */
-  gone?: boolean;
+  /** Where the row goes: the whole row opens it, in a new tab when `external`. */
+  href: string;
+  external?: boolean;
+  /** Runs as the row opens, before the browser follows the link. */
+  onOpen?: () => void;
+  /** The hover ✕. Left out for a needs row: it goes when answered. */
+  onDismiss?: () => void;
+  /** Going: it fades out (opacity only), takes no pointer or focus, then is dropped. */
+  leaving?: boolean;
   /** Its accessible name, e.g. "Fix auth redirect needs you, 2 minutes ago". */
   label?: string;
 }
 
-function ActionControl({ action, link }: { action: NotificationAction; link?: boolean }) {
-  if (action.href) {
-    return (
-      <a
-        className={
-          link ? 'jn-link' : cx('joc-btn', `joc-btn--${action.variant ?? 'ghost'}`, 'joc-btn--sm')
-        }
-        href={action.href}
-        data-row="action"
-        onClick={action.onClick}
-        {...(action.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-      >
-        {link ? action.label : <span className="joc-btn__content">{action.label}</span>}
-      </a>
-    );
-  }
-  return (
-    <Button
-      variant={action.variant ?? 'ghost'}
-      size="sm"
-      data-row="action"
-      disabled={action.disabled}
-      onClick={action.onClick}
-    >
-      {action.label}
-    </Button>
-  );
-}
-
-/** One notification: lead glyph, title, source and detail, time, and one inline action. */
+/**
+ * One notification, with one action: the row opens what it's about. Lead glyph, title, source
+ * and detail, time; on hover, a single ✕ dismisses it.
+ */
 export function NotificationRow({
   lead,
   title,
@@ -295,24 +250,44 @@ export function NotificationRow({
   unread,
   needs,
   answers,
-  action,
-  onMarkRead,
-  onClear,
-  gone,
+  href,
+  external,
+  onOpen,
+  onDismiss,
+  leaving,
   label,
 }: NotificationRowProps) {
-  const className = cx('jn-row', needs && 'jn-row--needs', unread && 'is-unread');
-  if (gone) return <div className={cx(className, 'is-gone')} aria-hidden="true" />;
+  const className = cx(
+    'jn-row',
+    needs && 'jn-row--needs',
+    unread && 'is-unread',
+    leaving && 'is-leaving',
+  );
   return (
-    // biome-ignore lint/a11y/noNoninteractiveTabindex: rows take focus for the panel's keys
-    <article className={className} aria-label={label ?? title} tabIndex={0}>
+    // Rows take focus for the panel's keys.
+    <article
+      className={className}
+      aria-label={label ?? title}
+      tabIndex={leaving ? -1 : 0}
+      aria-hidden={leaving || undefined}
+      inert={leaving || undefined}
+    >
       <span className="jn-row__lead" aria-hidden="true">
         <Lead lead={lead} />
       </span>
       <div className="jn-row__main">
         <div className="jn-row__title">
-          {unread && !needs ? <span className="joc-sr">Unread: </span> : null}
-          {title}
+          <a
+            className="jn-row__open"
+            href={href}
+            data-row="open"
+            tabIndex={-1}
+            onClick={onOpen}
+            {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+          >
+            {unread && !needs ? <span className="joc-sr">Unread: </span> : null}
+            {title}
+          </a>
         </div>
         <div className="jn-row__detail">
           <span className="jn-src">{source}</span>
@@ -321,42 +296,23 @@ export function NotificationRow({
       </div>
       <div className="jn-row__side">
         <span className="jn-time">{time}</span>
-        {action && !needs ? (
-          <span className="jn-row__act">
-            <ActionControl action={action} />
-          </span>
-        ) : null}
       </div>
       {needs ? (
-        <div className="jn-answers">
-          {answers}
-          <span className="jn-spacer" />
-          {action ? <ActionControl action={action} link /> : null}
-        </div>
-      ) : onMarkRead || onClear ? (
+        answers ? (
+          <div className="jn-answers">{answers}</div>
+        ) : null
+      ) : onDismiss ? (
         <div className="jn-row__hover">
-          {onMarkRead && unread ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              icon="check"
-              aria-label={`Mark read: ${title}`}
-              title="Mark read (e)"
-              data-row="read"
-              onClick={onMarkRead}
-            />
-          ) : null}
-          {onClear ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              icon="x"
-              aria-label={`Clear: ${title}`}
-              title="Clear (Backspace)"
-              data-row="clear"
-              onClick={onClear}
-            />
-          ) : null}
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="x"
+            aria-label={`Dismiss: ${title}`}
+            title="Dismiss (Backspace)"
+            data-row="dismiss"
+            tabIndex={-1}
+            onClick={onDismiss}
+          />
         </div>
       ) : null}
     </article>
@@ -499,7 +455,7 @@ export function ToastStack({ more = 0, onOpenMore, children }: ToastStackProps) 
   );
 }
 
-export type NotificationChannel = 'panel' | 'toast' | 'desktop';
+export type NotificationChannel = 'panel' | 'toast' | 'sound' | 'desktop';
 
 export interface NotificationMatrixKind {
   id: string;
@@ -513,17 +469,22 @@ export interface NotificationMatrixKind {
 
 export interface NotificationMatrixProps {
   groups: { label: string; kinds: NotificationMatrixKind[] }[];
+  soundOff?: boolean;
   onChange: (kind: string, channel: NotificationChannel, on: boolean) => void;
 }
 
 const CHANNELS: { id: NotificationChannel; label: string; aria: string }[] = [
   { id: 'panel', label: 'Panel', aria: 'in panel' },
   { id: 'toast', label: 'Toast', aria: 'as toast' },
+  { id: 'sound', label: 'Sound', aria: 'with a sound' },
   { id: 'desktop', label: 'Desktop', aria: 'on desktop' },
 ];
 
-/** Where each kind shows up: Panel, Toast, Desktop. All off keeps it in the history only. */
-export function NotificationMatrix({ groups, onChange }: NotificationMatrixProps) {
+/**
+ * Where each kind shows up: Panel, Toast, Sound, Desktop. All off keeps it in the history only.
+ * `soundOff` greys the Sound column out while the master switch is off.
+ */
+export function NotificationMatrix({ groups, soundOff, onChange }: NotificationMatrixProps) {
   return (
     // biome-ignore lint/a11y/useSemanticElements: a grid of checkboxes, laid out by notif.css
     <div className="jn-matrix" role="group" aria-label="Where each kind shows up">
@@ -537,7 +498,7 @@ export function NotificationMatrix({ groups, onChange }: NotificationMatrixProps
         <div key={g.label} role="presentation">
           <div className="jn-mx__group">{g.label}</div>
           {g.kinds.map((k) => {
-            const off = !k.channels.panel && !k.channels.toast && !k.channels.desktop;
+            const off = CHANNELS.every((c) => !k.channels[c.id]);
             const note = k.locked
               ? 'Always in the panel until answered'
               : off
@@ -555,7 +516,7 @@ export function NotificationMatrix({ groups, onChange }: NotificationMatrixProps
                       type="checkbox"
                       className="jn-check"
                       checked={k.channels[c.id] || (c.id === 'panel' && !!k.locked)}
-                      disabled={c.id === 'panel' && k.locked}
+                      disabled={(c.id === 'panel' && k.locked) || (c.id === 'sound' && soundOff)}
                       aria-label={`${k.label} ${c.aria}`}
                       onChange={(e) => onChange(k.id, c.id, e.target.checked)}
                     />

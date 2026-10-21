@@ -137,7 +137,6 @@ export {
   type ArrivalsPillProps,
   NeedsAnswers,
   type NeedsAnswersProps,
-  type NotificationAction,
   type NotificationChannel,
   NotificationGroup,
   type NotificationGroupProps,

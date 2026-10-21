@@ -115,9 +115,19 @@
 
 /* ---------- JOC additions, not in the design yet. Tokens only. ---------- */
 
-/* A cleared or resolved row: a blank slot that keeps its space until the pointer leaves. */
-.jn-row.is-gone { background: none; transition: background-color var(--duration-fade) linear; }
-.jn-row--needs.is-gone::before { opacity: 0; transition: opacity var(--duration-fade) linear; }
+/* A dismissed or resolved row fades out, then goes: no blank slot is held. */
+.jn-row { transition: background-color var(--duration-instant) linear, opacity var(--duration-fast) linear; }
+.jn-row.is-leaving { opacity: 0; pointer-events: none; }
+/* One action: the title's link covers the row; the ✕ and a needs row's answers sit above it. */
+.jn-row { cursor: pointer; }
+.jn-row__open { color: inherit; text-decoration: none; }
+.jn-row__open::after { content: ""; position: absolute; inset: 0; }
+.jn-row__hover, .jn-answers { position: relative; z-index: 1; }
+.jn-row__hover { position: absolute; }
+/* A new arrival: the bell's chip fades in, and pulses once. */
+.jn-chip--arrived { animation: jn-arrive calc(var(--duration-fade) * 3) var(--ease-standard) both; }
+@keyframes jn-arrive { 0% { opacity: 0; } 25% { opacity: 1; } 50% { opacity: .35; } 100% { opacity: 1; } }
+.jn-mx__row { grid-template-columns: minmax(0, 1fr) 72px 72px 72px 72px; }
 a.joc-btn { text-decoration: none; }
 /* The panel takes focus when it opens so its keys work; its rows show the ring. */
 .jn-panel:focus { outline: none; }
@@ -129,5 +139,5 @@ a.joc-btn { text-decoration: none; }
 .jn-toasts { max-width: calc(100vw - 2 * var(--space-4)); }
 .jn-toasts .joc-toast { width: auto; max-width: 100%; box-sizing: border-box; }
 @media (prefers-reduced-motion: reduce) {
-  .jn-bar, .jn-row.is-gone, .jn-row--needs.is-gone::before { animation: none; transition: none; }
+  .jn-bar, .jn-row, .jn-chip--arrived { animation: none; transition: none; }
 }

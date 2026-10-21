@@ -9,6 +9,11 @@ export interface NotificationBellProps {
   needs: number;
   open: boolean;
   onToggle: () => void;
+  /**
+   * Counts arrivals: each time it goes up, the chip pulses once (opacity only, and not at all
+   * under reduced motion). 0 or left out for none yet.
+   */
+  arrivals?: number;
   /** The panel it opens, for aria-controls. */
   controls?: string;
   buttonRef?: Ref<HTMLButtonElement>;
@@ -34,6 +39,7 @@ export function NotificationBell({
   needs,
   open,
   onToggle,
+  arrivals = 0,
   controls,
   buttonRef,
 }: NotificationBellProps) {
@@ -52,10 +58,15 @@ export function NotificationBell({
     >
       <Icon name="bell" />
       {count ? (
-        // Keyed by its text, so a new count fades in where the old one was.
+        // Keyed by its text and the arrivals, so a new count fades in where the old one was, and
+        // an arrival pulses it once.
         <span
-          key={`${needs ? 'n' : 'u'}${count}`}
-          className={cx('jn-chip', needs > 0 && 'jn-chip--needs', 'joc-fade-in')}
+          key={`${needs ? 'n' : 'u'}${count}:${arrivals}`}
+          className={cx(
+            'jn-chip',
+            needs > 0 && 'jn-chip--needs',
+            arrivals > 0 ? 'jn-chip--arrived' : 'joc-fade-in',
+          )}
           aria-hidden="true"
         >
           {capped(count)}
