@@ -70,6 +70,17 @@ interface SessionDoc {
   team?: TeamDraft[];
   /** The folder and branch each teammate works in, as its steps last said. */
   teamFolders?: TeamFolder[];
+  /** The first line of what Claude said when its last turn finished. */
+  lastWords?: string;
+}
+
+/** What an idle report says when Claude said nothing: not Claude's words. */
+const NOT_SAID = new Set(['Done', 'Resumed', 'Waiting for your first message']);
+
+/** Claude's closing words from an idle report, if it has any. */
+function lastWordsOf(fields: Pick<SessionReport, 'state' | 'activity'>): string | undefined {
+  const said = fields.state === 'idle' ? fields.activity?.trim() : undefined;
+  return said && !NOT_SAID.has(said) ? said.slice(0, 500) : undefined;
 }
 
 const sessions = () => getDb().collection<SessionDoc>('sessions');
@@ -190,6 +201,8 @@ export async function applyReport(
   // A turn that ended (or the session going quiet after one) saying how a review went: kept, so
   // the outcome outlasts the session's end.
   const outcome = fields.state === 'idle' ? reviewOutcome(fields.activity) : undefined;
+  // Kept for when the session has ended and its activity only says so.
+  const lastWords = lastWordsOf(fields);
   // $literal keeps reported strings like "$ pnpm test" from being read as field paths. A report
   // that names no plugin version keeps the one stored.
   const set = Object.fromEntries(
@@ -245,6 +258,7 @@ export async function applyReport(
             // An empty worktree says the session is back in the repo's main checkout.
             ...(fields.worktree === '' ? { worktree: '$$REMOVE' } : {}),
             ...(outcome ? { reviewOutcome: { $literal: outcome } } : {}),
+            ...(lastWords ? { lastWords: { $literal: lastWords } } : {}),
           },
         },
       ],
