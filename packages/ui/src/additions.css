@@ -731,6 +731,13 @@ h4.joc-taskd__label { margin: 0; }
 /* As the session list pass draws the rail: "joc", "refused", not two-letter codes. A longer
    name is cut off with an ellipsis inside the rail; the group's tooltip has it whole. */
 .joc-rail__repo { display: block; max-width: 100%; padding: 0 var(--space-0\.5); box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+/* A mark around one message, e.g. the call a background task's "Open in conversation" goes to:
+   it draws no box, so the thread's layout is the same with or without it. */
+.joc-anchor { display: contents; }
+
+/* ---------- Background: a shell's whole output, in a dialog ---------- */
+/* "Full output" past the 240px box: the dialog's body scrolls it, so no cap and no frame. */
+.joc-taskd__output--full { max-height: none; overflow: visible; border: 0; border-radius: 0; padding: var(--space-3) var(--space-4); }
 /* ===== End design gaps (#92) ============================================================== */
 
 /* ===== PR review session (#88) =========================================================== */
