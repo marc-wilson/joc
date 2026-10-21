@@ -92,4 +92,7 @@ test("a PR's reviews: command-started and button-started sessions, live or past,
   // An ended review without Claude's word on it just ended.
   const ended = reviewing('offline', { activity: 'Session ended' });
   assert.equal(prReviewRows(review, [], [ended], [], now)[0]?.status, 'Session ended');
+  // One that said something before it ended keeps those words.
+  const said = { ...ended, lastWords: 'Posted 2 comments.' };
+  assert.equal(prReviewRows(review, [], [said], [], now)[0]?.status, 'Posted 2 comments.');
 });
