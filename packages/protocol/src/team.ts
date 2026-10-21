@@ -165,6 +165,7 @@ export function teamDrafts(items: ConversationItem[]): TeamDraft[] {
     } else if (item.kind === 'agent_message') {
       const t = find(item.from);
       if (!t) continue;
+      if (item.report) continue;
       t.mateAt = item.at;
       if (asks(item.text)) t.mateAsks = firstLine(item.text);
       else delete t.mateAsks;

@@ -523,15 +523,17 @@ export const ConversationItem = z.discriminatedUnion('kind', [
     output: z.string().max(20_000).optional(),
   }),
   /**
-   * A teammate's message to the session while it works (its final report comes as a
-   * `task_update`). Plugins before 0.14.0 leave these out.
+   * A teammate's message to the session: one it sent while it works, or the final report it
+   * handed back. Plugins before 0.14.0 leave these out.
    */
   z.object({
     ...itemBase,
     kind: z.literal('agent_message'),
     /** The teammate's agent id. */
     from: z.string().min(1).max(200),
-    text: z.string().max(20_000),
+    text: z.string().max(50_000),
+    /** Set on its hand-back: its final report, which its task notification only points to. */
+    report: z.boolean().optional(),
   }),
 ]);
 export type ConversationItem = z.infer<typeof ConversationItem>;
