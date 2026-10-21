@@ -5,7 +5,14 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { GitHubReport, PullRequest, PullRequestCheck, PullRequestFile } from '@joc/protocol';
+import type {
+  GitHubReport,
+  PullRequest,
+  PullRequestCheck,
+  PullRequestFile,
+  PullRequestPerson,
+  PullRequestReview,
+} from '@joc/protocol';
 
 /**
  * The most checks sent per pull request: @joc/protocol's MAX_PR_CHECKS, copied because an installed
@@ -30,13 +37,35 @@ export function githubDue(now = Date.now(), file = stampFile()): boolean {
   return true;
 }
 
+/**
+ * The most kept of a description, and of each list a review shows: @joc/protocol's limits, copied
+ * for the same reason (github.test.ts keeps them equal).
+ */
+export const MAX_PR_BODY = 20_000;
+export const MAX_PR_REVIEWS = 50;
+export const MAX_PR_REVIEWERS = 50;
+export const MAX_PR_LABELS = 50;
+export const MAX_PR_CLOSES = 20;
+
+const ACTOR = '__typename login avatarUrl ... on User { name }';
+
 const PR_FIELDS = `
   ... on PullRequest {
     number title url isDraft additions deletions reviewDecision updatedAt headRefName baseRefName
+    state createdAt body headRefOid mergeable
     changedFiles files(first: 100) { nodes { path additions deletions changeType } }
     repository { nameWithOwner }
-    author { login }
-    commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: ${MAX_PR_CHECKS}) {
+    author { ${ACTOR} }
+    reviews(last: ${MAX_PR_REVIEWS}) { nodes { state submittedAt author { ${ACTOR} } } }
+    reviewRequests(first: ${MAX_PR_REVIEWERS}) { nodes { requestedReviewer {
+      __typename ... on User { login name avatarUrl } ... on Team { slug name }
+    } } }
+    labels(first: ${MAX_PR_LABELS}) { nodes { name color } }
+    milestone { title number url dueOn }
+    closingIssuesReferences(first: ${MAX_PR_CLOSES}) {
+      nodes { number title url repository { nameWithOwner } }
+    }
+    commits(last: 1) { totalCount nodes { commit { statusCheckRollup { state contexts(first: ${MAX_PR_CHECKS}) {
       totalCount
       checkRunCountsByState { state count }
       statusContextCountsByState { state count }
@@ -86,6 +115,14 @@ export interface GraphFile {
   changeType?: string;
 }
 
+/** A user, bot or other account, as GitHub's GraphQL API names it. */
+export interface GraphActor {
+  __typename?: string;
+  login?: string;
+  name?: string | null;
+  avatarUrl?: string;
+}
+
 export interface GraphNode {
   number?: number;
   title?: string;
@@ -97,11 +134,32 @@ export interface GraphNode {
   updatedAt?: string;
   headRefName?: string;
   baseRefName?: string;
+  state?: string;
+  createdAt?: string;
+  body?: string | null;
+  headRefOid?: string;
+  mergeable?: string;
   changedFiles?: number;
   files?: { nodes?: GraphFile[] } | null;
   repository?: { nameWithOwner?: string };
-  author?: { login?: string } | null;
-  commits?: { nodes?: { commit?: { statusCheckRollup?: Rollup } }[] };
+  author?: GraphActor | null;
+  reviews?: {
+    nodes?: ({ state?: string; submittedAt?: string | null; author?: GraphActor | null } | null)[];
+  } | null;
+  reviewRequests?: {
+    nodes?: ({ requestedReviewer?: (GraphActor & { slug?: string }) | null } | null)[];
+  } | null;
+  labels?: { nodes?: ({ name?: string; color?: string } | null)[] } | null;
+  milestone?: { title?: string; number?: number; url?: string; dueOn?: string | null } | null;
+  closingIssuesReferences?: {
+    nodes?: ({
+      number?: number;
+      title?: string;
+      url?: string;
+      repository?: { nameWithOwner?: string };
+    } | null)[];
+  } | null;
+  commits?: { totalCount?: number; nodes?: { commit?: { statusCheckRollup?: Rollup } }[] };
 }
 
 const REVIEW = new Map<string, PullRequest['review']>([
@@ -173,6 +231,125 @@ function toFiles(nodes: GraphFile[] | undefined): PullRequestFile[] | undefined 
   );
 }
 
+// What a review shows. The server refuses a whole report over one bad field, so each is checked
+// here as @joc/protocol checks it, and one that doesn't fit is left out.
+
+/** Leaves out what's undefined. */
+const clean = <T extends object>(o: T): T =>
+  Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
+
+const text = (v: unknown, max: number) =>
+  typeof v === 'string' && v ? v.slice(0, max) : undefined;
+
+const link = (v: unknown) =>
+  typeof v === 'string' && v.length <= 500 && /^https?:\/\//.test(v) && URL.canParse(v)
+    ? v
+    : undefined;
+
+const AVATAR = /^https:\/\/avatars\.githubusercontent\.com\//;
+const avatar = (v: unknown) => {
+  const url = link(v);
+  return url && AVATAR.test(url) ? url : undefined;
+};
+
+const time = (v: unknown) => {
+  const t = typeof v === 'string' ? Date.parse(v) : Number.NaN;
+  return Number.isFinite(t) ? new Date(t).toISOString() : undefined;
+};
+
+const positive = (v: unknown) =>
+  typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
+
+/** An account as a review shows it; undefined without a login. */
+export function toPerson(a: GraphActor | null | undefined): PullRequestPerson | undefined {
+  const login = text(a?.login, 100);
+  if (!a || !login) return undefined;
+  return clean({
+    login,
+    name: text(a.name, 200),
+    avatarUrl: avatar(a.avatarUrl),
+    bot: a.__typename === 'Bot' ? true : undefined,
+  });
+}
+
+/** A description cut to MAX_PR_BODY characters, never mid-character, saying when it was cut. */
+export function clipBody(body: unknown, max = MAX_PR_BODY) {
+  if (typeof body !== 'string' || !body) return {};
+  if (body.length <= max) return { body };
+  const end = /[\uD800-\uDBFF]/.test(body.charAt(max - 1)) ? max - 1 : max;
+  return { body: body.slice(0, end), bodyTruncated: true };
+}
+
+const REVIEW_STATE = new Map<string, PullRequestReview['state']>([
+  ['APPROVED', 'approved'],
+  ['CHANGES_REQUESTED', 'changes-requested'],
+  ['COMMENTED', 'commented'],
+  ['DISMISSED', 'dismissed'],
+]);
+
+const PR_STATE = new Map<string, PullRequest['state']>([
+  ['OPEN', 'open'],
+  ['CLOSED', 'closed'],
+  ['MERGED', 'merged'],
+]);
+
+const nodesOf = <T>(c: { nodes?: (T | null)[] } | null | undefined): T[] =>
+  Array.isArray(c?.nodes) ? c.nodes.filter((n): n is T => !!n && typeof n === 'object') : [];
+
+/** The details a review shows: who wrote it and was asked, its description, labels and more. */
+function toDetails(node: GraphNode, repo: string): Partial<PullRequest> {
+  const reviews = nodesOf(node.reviews).flatMap((r) => {
+    const by = toPerson(r.author);
+    const state = REVIEW_STATE.get(r.state ?? '');
+    return by && state ? [clean({ by, state, submittedAt: time(r.submittedAt) })] : [];
+  });
+  const asked = nodesOf(node.reviewRequests).map((r) => r.requestedReviewer);
+  const teams = asked.flatMap((t) => {
+    const slug = t?.__typename === 'Team' ? text(t.slug, 100) : undefined;
+    return slug ? [clean({ slug, name: text(t?.name, 200) })] : [];
+  });
+  const labels = nodesOf(node.labels).flatMap((l) => {
+    const name = text(l.name, 100);
+    return name && typeof l.color === 'string' && /^[0-9a-fA-F]{6}$/.test(l.color)
+      ? [{ name, color: l.color }]
+      : [];
+  });
+  const closes = nodesOf(node.closingIssuesReferences).flatMap((i) => {
+    const number = positive(i.number);
+    const from = text(i.repository?.nameWithOwner, 200) ?? repo;
+    return number
+      ? [clean({ repo: from, number, title: text(i.title, 500), url: link(i.url) })]
+      : [];
+  });
+  const m = node.milestone;
+  const title = text(m?.title, 300);
+  const sha = node.headRefOid;
+  return clean({
+    state: PR_STATE.get(node.state ?? ''),
+    authorProfile: toPerson(node.author),
+    ...clipBody(node.body),
+    createdAt: time(node.createdAt),
+    headSha: typeof sha === 'string' && /^[0-9a-f]{7,64}$/.test(sha) ? sha : undefined,
+    mergeable:
+      node.mergeable === 'MERGEABLE' ? true : node.mergeable === 'CONFLICTING' ? false : undefined,
+    commits:
+      typeof node.commits?.totalCount === 'number' ? count(node.commits.totalCount) : undefined,
+    reviews: node.reviews ? reviews.slice(-MAX_PR_REVIEWS) : undefined,
+    requestedReviewers: node.reviewRequests
+      ? asked
+          .flatMap((p) => (p?.__typename === 'User' ? (toPerson(p) ?? []) : []))
+          .slice(0, MAX_PR_REVIEWERS)
+      : undefined,
+    requestedTeams: node.reviewRequests ? teams.slice(0, MAX_PR_REVIEWERS) : undefined,
+    labels: node.labels ? labels.slice(0, MAX_PR_LABELS) : undefined,
+    milestone:
+      m && title
+        ? clean({ title, number: positive(m.number), url: link(m.url), dueOn: time(m.dueOn) })
+        : undefined,
+    closes: node.closingIssuesReferences ? closes.slice(0, MAX_PR_CLOSES) : undefined,
+  });
+}
+
 /** One search result as a PullRequest, or undefined when it isn't a whole pull request. */
 export function toPullRequest(node: GraphNode): PullRequest | undefined {
   const repo = node.repository?.nameWithOwner;
@@ -214,6 +391,7 @@ export function toPullRequest(node: GraphNode): PullRequest | undefined {
     base: node.baseRefName || undefined,
     files: toFiles(node.files?.nodes),
     changedFiles: typeof node.changedFiles === 'number' ? count(node.changedFiles) : undefined,
+    ...toDetails(node, repo),
   };
 }
 
