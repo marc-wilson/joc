@@ -14,9 +14,17 @@ export interface GitHubAppConfig {
   apiUrl?: string;
 }
 
+/** The App as GitHub names it: `slug` makes its URLs (`github.com/apps/<slug>`). */
+export interface GitHubAppAbout {
+  slug: string;
+  name: string;
+}
+
 export interface GitHubAppApi {
   /** A GET against the API as the installation; undefined when GitHub didn't answer with JSON. */
   get(installationId: number, path: string): Promise<unknown>;
+  /** The App's own slug and name, read once with its JWT; undefined while GitHub can't say. */
+  about(): Promise<GitHubAppAbout | undefined>;
 }
 
 /** Reads the private key however it was pasted into the environment. */
@@ -67,7 +75,31 @@ export function githubAppApi(config: GitHubAppConfig): GitHubAppApi {
     return body.token;
   }
 
+  let about: GitHubAppAbout | undefined;
+
   return {
+    async about() {
+      if (about) return about;
+      const res = await doFetch(`${api}/app`, {
+        headers: { ...HEADERS, authorization: `Bearer ${appJwt(config.appId, key)}` },
+        signal: AbortSignal.timeout(10_000),
+        // Unreachable: no answer, handled as GitHub saying nothing.
+      }).catch(() => undefined);
+      if (!res?.ok) return undefined;
+      const body: unknown = await res.json().catch(() => null);
+      if (
+        body &&
+        typeof body === 'object' &&
+        'slug' in body &&
+        typeof body.slug === 'string' &&
+        /^[\w-]+$/.test(body.slug)
+      ) {
+        const name = 'name' in body && typeof body.name === 'string' ? body.name : body.slug;
+        about = { slug: body.slug, name };
+      }
+      return about;
+    },
+
     async get(installationId, path) {
       const auth = await token(installationId);
       if (!auth) return undefined;

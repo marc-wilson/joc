@@ -31,6 +31,11 @@ interface UserDoc {
   lastSignInAt: Date;
   /** The JOC GitHub App's installations the user can reach: their account's, or an org's. */
   installations?: number[];
+  /**
+   * When they last signed in through the JOC GitHub App. Unset for someone whose session
+   * predates the App: JOC hasn't seen their installations, so they're asked to reconnect.
+   */
+  appSignInAt?: Date;
 }
 
 interface WebSessionDoc {
@@ -105,8 +110,20 @@ export interface GitHubProfile {
   login: string;
   name?: string;
   avatarUrl?: string;
+  /** Signed in through the JOC GitHub App (not an OAuth app). */
+  viaApp?: boolean;
   /** With the GitHub App: the installations the user can reach, as sign-in read them. */
   installations?: number[];
+  /** Those installations as the user sees them, when GitHub said. */
+  seen?: SeenInstallation[];
+}
+
+/** One of the App's installations, as the person's own `/user/installations` lists it. */
+export interface SeenInstallation {
+  id: number;
+  account: { id: number; login: string; type: string };
+  selection: string;
+  suspended: boolean;
 }
 
 /** Creates or refreshes the user GitHub vouched for; their owner id never changes. */
@@ -123,6 +140,7 @@ export async function signInGitHubUser(profile: GitHubProfile): Promise<Owner> {
         avatarUrl: profile.avatarUrl,
         lastSignInAt: now,
         ...(profile.installations ? { installations: profile.installations } : {}),
+        ...(profile.viaApp ? { appSignInAt: now } : {}),
       },
       $setOnInsert: { createdAt: now },
     },
@@ -137,6 +155,8 @@ export interface GitHubPerson {
   githubId: number;
   login: string;
   installations: number[];
+  /** When they last signed in through the App; unset when they never have. */
+  appSignInAt?: Date;
 }
 
 const toPerson = (doc: UserDoc): GitHubPerson => ({
@@ -144,6 +164,7 @@ const toPerson = (doc: UserDoc): GitHubPerson => ({
   githubId: doc.githubId,
   login: doc.login,
   installations: doc.installations ?? [],
+  appSignInAt: doc.appSignInAt ?? undefined,
 });
 
 /** The owner's GitHub identity, for routing webhooks to them. */

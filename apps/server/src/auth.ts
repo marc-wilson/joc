@@ -6,8 +6,11 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 const SESSION_COOKIE = 'joc_session';
 const STATE_COOKIE = 'joc_oauth_state';
 const RETURN_COOKIE = 'joc_return';
+const INSTALL_RETURN_COOKIE = 'joc_install_return';
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60;
 const STATE_MAX_AGE = 10 * 60;
+/** Installing can wait on an org owner's approval; an hour covers a person doing it themselves. */
+const INSTALL_MAX_AGE = 60 * 60;
 
 function isHttps(c: Context): boolean {
   return (
@@ -62,6 +65,30 @@ export function takeOAuthCookies(c: Context): { state?: string; returnTo: string
   deleteCookie(c, STATE_COOKIE, { path: '/auth' });
   deleteCookie(c, RETURN_COOKIE, { path: '/auth' });
   return { state, returnTo };
+}
+
+/** Where to come back to once GitHub returns from installing the App. */
+export function setInstallReturn(c: Context, returnTo: string) {
+  setCookie(c, INSTALL_RETURN_COOKIE, returnTo, {
+    httpOnly: true,
+    sameSite: 'Lax',
+    path: '/auth',
+    secure: isHttps(c),
+    maxAge: INSTALL_MAX_AGE,
+  });
+}
+
+export function takeInstallReturn(c: Context): string {
+  const returnTo = safeReturnPath(getCookie(c, INSTALL_RETURN_COOKIE));
+  deleteCookie(c, INSTALL_RETURN_COOKIE, { path: '/auth' });
+  return returnTo;
+}
+
+/** A path on this site with `github=<note>` added, saying how a sign-in went. */
+export function withNote(path: string, note: string): string {
+  const url = new URL(safeReturnPath(path), 'http://joc.invalid');
+  url.searchParams.set('github', note);
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 /** Only paths on this site: `//evil.example` and `/\evil.example` would leave it. */

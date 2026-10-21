@@ -30,7 +30,10 @@ const SECRET = 'webhook-test-secret';
 
 /** A stand-in for GitHub's API, as the App reads it: by path. */
 const answers = new Map<string, unknown>();
-const api: GitHubAppApi = { get: async (_installation, path) => answers.get(path) };
+const api: GitHubAppApi = {
+  get: async (_installation, path) => answers.get(path),
+  about: async () => ({ slug: 'joc-dashboard', name: 'JOC Dashboard' }),
+};
 const webhooks = createWebhooks(SECRET, { api });
 const github: GitHubAuth = {
   authorizeUrl: () => 'https://github.example/authorize',

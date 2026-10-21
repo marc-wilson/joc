@@ -58,6 +58,8 @@ const app = createApp({
         })
       : undefined,
   webhooks,
+  // Only needed when the server can't read the App's slug from GitHub (no App id and key).
+  appSlug: process.env.JOC_GITHUB_APP_SLUG || undefined,
 });
 
 // Hear live updates written through the other server processes (pods), until shutdown.
