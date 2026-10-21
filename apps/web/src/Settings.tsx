@@ -9,9 +9,11 @@ import {
   SettingsSection,
   TextArea,
   TextInput,
+  TextLink,
 } from '@joc/ui';
 import { useState } from 'react';
-import { apiFetch } from './auth.ts';
+import { apiFetch, installApp, reconnect, useAuth } from './auth.ts';
+import { appNameOf, UNTIL_COVERED, useGitHubConnection } from './GitHubConnect.tsx';
 import { useReviewSettings, useSessionSettings, useSessions } from './hooks.ts';
 import { Nav } from './Nav.tsx';
 import { NotificationSettingsForm, resetNotificationSettings } from './NotificationSettings.tsx';
@@ -22,6 +24,74 @@ const SECTIONS = [
   { id: 'review', label: 'Review instructions' },
   { id: 'notifications', label: 'Notifications' },
 ];
+const GITHUB_SECTION = { id: 'github', label: 'GitHub' };
+
+const signedInDate = (iso: string) =>
+  new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+
+/** How the person's GitHub reaches JOC through the GitHub App, and what to do about it. */
+function GitHubConnectionRows() {
+  const connection = useGitHubConnection();
+  if (!connection || connection.state === 'off') return null;
+  const name = appNameOf(connection);
+  const reconnectButton = (
+    <Button variant="secondary" size="sm" onClick={reconnect}>
+      Reconnect
+    </Button>
+  );
+  if (connection.state === 'reconnect') {
+    return (
+      <SettingRow
+        label={`Not connected through ${name} yet`}
+        hint={`You signed in before JOC used it. Reconnect to get live updates. ${UNTIL_COVERED}`}
+      >
+        {reconnectButton}
+      </SettingRow>
+    );
+  }
+  return (
+    <>
+      <SettingRow
+        label={`Connected through ${name}`}
+        hint={
+          connection.signedInAt
+            ? `Signed in through it on ${signedInDate(connection.signedInAt)}.`
+            : undefined
+        }
+      >
+        {reconnectButton}
+      </SettingRow>
+      {connection.accounts.map((a) => (
+        <SettingRow
+          key={a.login}
+          label={`@${a.login}`}
+          hint={`${a.type === 'Organization' ? 'Organization' : 'Your account'}${a.suspended ? ', suspended: no live updates' : ''}`}
+        >
+          <TextLink href={a.manageUrl}>Manage</TextLink>
+        </SettingRow>
+      ))}
+      <SettingRow
+        label={
+          connection.accounts.length ? 'Another account or org' : 'Not installed where you are'
+        }
+        hint={
+          connection.accounts.length
+            ? `Install ${name} there to get its pull requests live.`
+            : `Install ${name} on your account or org to get live GitHub updates. ${UNTIL_COVERED}`
+        }
+      >
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!connection.installUrl}
+          onClick={installApp}
+        >
+          Install
+        </Button>
+      </SettingRow>
+    </>
+  );
+}
 
 /** The longest review instructions the server takes. */
 const MAX_INSTRUCTIONS = 20_000;
@@ -142,6 +212,9 @@ function ReviewInstructions({ value, track }: { value: string; track: Track }) {
 export function SettingsPage() {
   const { connected } = useSessions();
   const review = useReviewSettings();
+  const auth = useAuth();
+  const withApp = auth.status === 'signedIn' && !!auth.github && auth.github !== 'off';
+  const sections = withApp ? [...SECTIONS, GITHUB_SECTION] : SECTIONS;
   const [current, setCurrent] = useState(() => location.hash.slice(1) || 'sessions');
   const [status, setStatus] = useState<SaveStatus>();
   const track: Track = (saving) => {
@@ -153,7 +226,7 @@ export function SettingsPage() {
       <Nav page="settings" connected={connected} />
       <main className="joc-app__main app-settings-page">
         <SettingsLayout
-          sections={SECTIONS}
+          sections={sections}
           current={current}
           onNavigate={setCurrent}
           status={status}
@@ -184,6 +257,15 @@ export function SettingsPage() {
           >
             <NotificationSettingsForm />
           </SettingsSection>
+          {withApp ? (
+            <SettingsSection
+              id="github"
+              title="GitHub"
+              description="Pull requests, reviews, CI and comments arrive live from the accounts the GitHub App is installed on."
+            >
+              <GitHubConnectionRows />
+            </SettingsSection>
+          ) : null}
         </SettingsLayout>
       </main>
     </div>
