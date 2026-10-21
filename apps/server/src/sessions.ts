@@ -173,6 +173,15 @@ export async function getLiveSession(
   return doc ? toSession(doc) : undefined;
 }
 
+/** The PR the owner's session reviews (live or not), or undefined when it isn't a review. */
+export async function getSessionReview(
+  owner: Owner,
+  sessionId: string,
+): Promise<SessionReview | undefined> {
+  const doc = await sessions().findOne({ _id: sessionKey(owner, sessionId), owner });
+  return doc ? toSession(doc).review : undefined;
+}
+
 /** Every session the owner has had, most recently active first, with message counts. */
 export async function listHistory(owner: Owner, limit = 200): Promise<HistorySession[]> {
   const docs = await sessions().find({ owner }).sort({ updatedAt: -1 }).limit(limit).toArray();

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createHmac, createPublicKey, createVerify, generateKeyPairSync } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { closeClient } from '@joc/db';
-import { Alert, GitHubSnapshot } from '@joc/protocol';
+import { Alert, GitHubSnapshot, ReviewedPullRequest } from '@joc/protocol';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { z } from 'zod';
 import { createApp } from './app.ts';
@@ -243,6 +243,138 @@ test('signing in reads the open pull requests once', async () => {
     [mine?.number, mine?.review, mine?.ci, mine?.ciDetail],
     [12, 'Approved', 'pending', '1/2'],
   );
+});
+
+const avatar = (id: number) => `https://avatars.githubusercontent.com/u/${id}?v=4`;
+
+/** A session of `who`'s whose first prompt reviews `target`. */
+const reviewSession = (who: Who, sessionId: string, target: string) =>
+  app.request('/api/reports', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${tokens.get(who)}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sessionId,
+      at: Date.now(),
+      state: 'working',
+      repo: REPO,
+      title: `/code-review ${target}`,
+    }),
+  });
+
+const reviewed = async (who: Who, sessionId: string) => {
+  const res = await get(who, `/api/sessions/${sessionId}/review`);
+  assert.equal(res.status, 200);
+  return ReviewedPullRequest.parse(await res.json());
+};
+
+test('a review session shows the pull request it reviews, whole', async () => {
+  const body = [
+    'Moves the redirect after sign-in.',
+    '',
+    'Closes #12, fixes harbor-labs/atlas-api#3.',
+    '<img src="x" onerror="alert(1)">',
+  ].join('\n');
+  const extra = {
+    body,
+    created_at: '2026-10-19T08:00:00Z',
+    user: { ...PEOPLE.alice, avatar_url: avatar(1), type: 'User' },
+    labels: [
+      { name: 'bug', color: 'd73a4a' },
+      { name: 'odd', color: 'not-a-colour' },
+    ],
+    milestone: {
+      title: 'October',
+      number: 4,
+      html_url: `https://github.com/${REPO}/milestone/4`,
+      due_on: '2026-10-31T07:00:00Z',
+    },
+    commits: 3,
+    mergeable: true,
+    mergeable_state: 'blocked',
+    base: { ref: 'main', repo: { full_name: REPO, private: true } },
+    requested_reviewers: [
+      { ...PEOPLE.bob, avatar_url: avatar(2), type: 'User' },
+      { id: 77, login: 'harbor-bot', avatar_url: 'https://tracker.example/x.png', type: 'Bot' },
+    ],
+    requested_teams: [{ slug: 'web', name: 'Web' }],
+  };
+  await send('pull_request', pullEvent('opened', { number: 31, sha: 'd00d0031', extra }));
+  assert.equal((await reviewSession('bob', 'bob-review-31', '31')).status, 200);
+
+  const { review, pull, readAt } = await reviewed('bob', 'bob-review-31');
+  assert.deepEqual(review, { repo: REPO, number: 31 });
+  assert.ok(readAt);
+  assert.equal(pull?.state, 'open');
+  // The description as written: the web renders it as markdown, never its HTML.
+  assert.equal(pull?.body, body);
+  assert.equal(pull?.bodyTruncated, undefined);
+  assert.deepEqual(pull?.authorProfile, { login: 'alice', avatarUrl: avatar(1) });
+  assert.equal(pull?.createdAt, '2026-10-19T08:00:00.000Z');
+  assert.deepEqual(
+    [pull?.headSha, pull?.base, pull?.branch, pull?.mergeable, pull?.mergeState, pull?.commits],
+    ['d00d0031', 'main', 'fix/31', true, 'blocked', 3],
+  );
+  assert.deepEqual(pull?.labels, [{ name: 'bug', color: 'd73a4a' }]);
+  assert.deepEqual(pull?.milestone, {
+    title: 'October',
+    number: 4,
+    url: `https://github.com/${REPO}/milestone/4`,
+    dueOn: '2026-10-31T07:00:00.000Z',
+  });
+  assert.deepEqual(
+    pull?.closes?.map((i) => `${i.repo}#${i.number}`),
+    [`${REPO}#12`, 'harbor-labs/atlas-api#3'],
+  );
+  // An avatar from anywhere but GitHub's image host is left out.
+  assert.deepEqual(pull?.requestedReviewers, [
+    { login: 'bob', avatarUrl: avatar(2) },
+    { login: 'harbor-bot', bot: true },
+  ]);
+  assert.deepEqual(pull?.requestedTeams, [{ slug: 'web', name: 'Web' }]);
+  assert.equal(pull?.reviews?.length ?? 0, 0);
+
+  // The lists carry the same details, but not the description.
+  const listed = (await lists('bob')).reviewRequested.find((p) => p.number === 31);
+  assert.deepEqual([listed?.body, listed?.labels?.length], [undefined, 1]);
+
+  // Bob reviews: his review is listed, he's no longer asked, and the details stay.
+  await send(
+    'pull_request_review',
+    reviewEvent('submitted', PEOPLE.bob, 'approved', { number: 31, sha: 'd00d0031' }),
+  );
+  const after = (await reviewed('bob', 'bob-review-31')).pull;
+  assert.deepEqual(
+    after?.reviews?.map((r) => [r.by.login, r.state, !!r.submittedAt]),
+    [['bob', 'approved', true]],
+  );
+  assert.deepEqual(after?.requestedReviewers, []);
+  assert.deepEqual([after?.body, after?.labels?.length, after?.commits], [body, 1, 3]);
+  assert.equal(after?.review, 'Approved');
+});
+
+test("a review session doesn't show a private pull request its person isn't on", async () => {
+  const extra = { base: { ref: 'main', repo: { full_name: REPO, private: true } } };
+  await send('pull_request', pullEvent('opened', { number: 32, sha: 'd00d0032', extra }));
+  await reviewSession('dana', 'dana-review-32', '32');
+  assert.equal((await reviewed('dana', 'dana-review-32')).pull, undefined);
+  // Alice wrote it: hers to see.
+  await reviewSession('alice', 'alice-review-32', '32');
+  assert.equal((await reviewed('alice', 'alice-review-32')).pull?.number, 32);
+});
+
+test('a reviewed pull request no event brought is read from GitHub once', async () => {
+  const extra = { base: { ref: 'main', repo: { full_name: REPO, private: false } } };
+  answers.set(
+    `/repos/harbor-labs/Atlas-Web/pulls/33`,
+    pull({ number: 33, author: PEOPLE.bob, sha: 'd00d0033', extra }),
+  );
+  await reviewSession('dana', 'dana-review-33', 'https://github.com/harbor-labs/Atlas-Web/pull/33');
+  const { review, pull: read } = await reviewed('dana', 'dana-review-33');
+  assert.deepEqual([review.repo, review.number], ['harbor-labs/Atlas-Web', 33]);
+  assert.deepEqual([read?.repo, read?.number, read?.headSha], [REPO, 33, 'd00d0033']);
+  // Not a review session: nothing to show.
+  await reviewSession('dana', 'dana-plain', '');
+  assert.equal((await get('dana', '/api/sessions/dana-plain/review')).status, 404);
 });
 
 test('uninstalling hands GitHub back to the plugins', async () => {
