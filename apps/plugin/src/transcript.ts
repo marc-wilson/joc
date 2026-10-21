@@ -321,18 +321,30 @@ export function taskNotification(
   };
 }
 
+const HANDBACK = '[Subagent hand-back]';
+
 /**
  * A teammate's message to the session, which Claude Code hands it as
  * `<agent-message from="<agent id>">…</agent-message>`. Its final report comes that way too,
- * marked as a hand-back, and again as a task notification, which is the one kept.
+ * framed as a hand-back with every line indented; its task notification then only points here.
  */
-export function agentMessage(text: string): { from: string; text: string } | undefined {
+export function agentMessage(
+  text: string,
+): { from: string; text: string; report?: true } | undefined {
   const found = text.match(
     /^\s*<agent-message from="([\w-]{1,200})">([\s\S]*?)(?:<\/agent-message>\s*)?$/,
   );
   const body = found?.[2]?.trim();
-  if (!found?.[1] || !body || body.startsWith('[Subagent hand-back]')) return undefined;
-  return { from: found[1], text: cut(body, 20_000) };
+  if (!found?.[1] || !body) return undefined;
+  if (!body.startsWith(HANDBACK)) return { from: found[1], text: cut(body, 20_000) };
+  // The frame ends at its first line; the report follows, two spaces in.
+  const report = body
+    .split('\n')
+    .slice(1)
+    .map((l) => l.replace(/^ {2}/, ''))
+    .join('\n')
+    .trim();
+  return report ? { from: found[1], text: cut(report, 50_000), report: true } : undefined;
 }
 
 /** Who a `SendMessage` call writes to and what it says. */
