@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { PullRequest, Session } from '@joc/protocol';
-import { REVIEW_LINGER_MS, reviewGone, reviewRowText } from './review-rows.ts';
+import type { Launch, PullRequest, Session } from '@joc/protocol';
+import { prReviewRows, REVIEW_LINGER_MS, reviewGone, reviewRowText } from './review-rows.ts';
 
 const now = Date.parse('2026-10-18T10:00:00.000Z');
 const ago = (ms: number) => new Date(now - ms).toISOString();
@@ -52,4 +52,44 @@ test('a finished review leaves after a while, or once cleared; a live one stays'
   assert.equal(reviewGone(reviewing('idle', old), [], now), true);
   assert.equal(reviewGone(reviewing('idle'), ['rv1'], now), true);
   assert.equal(reviewGone(reviewing('working', old), ['rv1'], now), false);
+});
+
+test("a PR's reviews: command-started and button-started sessions, live or past, newest first", () => {
+  const byCommand = reviewing('working', {
+    id: 'rv-cmd',
+    title: 'Review #512 by command',
+    activity: 'Reading 9 of 14 files',
+    startedAt: ago(5 * 60_000),
+  });
+  const past = reviewing('idle', {
+    id: 'rv-past',
+    title: 'First pass',
+    review: { ...review, outcome: 'Approved' },
+    activity: 'Approved: 1 nit left inline.',
+    startedAt: ago(3 * 3_600_000),
+    activeAt: ago(2 * 3_600_000),
+  });
+  const other = reviewing('working', { id: 'rv-other', review: { ...review, number: 9 } });
+  const launch: Launch = {
+    id: 'l1',
+    from: 's1',
+    review: { ...review, url: 'https://github.com/harbor-labs/atlas-web/pull/512' },
+    status: 'failed',
+    detail: 'No session on harbor-mbp could start it.',
+    createdAt: ago(60_000),
+  };
+  // The launch whose session reported shows once, as that session.
+  const started: Launch = { ...launch, id: 'l2', status: 'started', sessionId: 'rv-cmd' };
+  const rows = prReviewRows(review, [byCommand, other], [past, byCommand], [launch, started], now);
+  assert.deepEqual(
+    rows.map((r) => [r.key, r.state, r.result, r.status, r.time]),
+    [
+      ['l1', 'idle', 'fail', 'No session on harbor-mbp could start it.', '1m'],
+      ['rv-cmd', 'working', undefined, 'Reading 9 of 14 files', 'now'],
+      ['rv-past', 'idle', 'pass', 'Approved · 1 nit left inline.', '2h'],
+    ],
+  );
+  // An ended review without Claude's word on it just ended.
+  const ended = reviewing('offline', { activity: 'Session ended' });
+  assert.equal(prReviewRows(review, [], [ended], [], now)[0]?.status, 'Session ended');
 });

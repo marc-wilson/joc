@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react';
 import {
   startLaunch,
   useGitHub,
+  useHistory,
   useLaunches,
   useNow,
   useReviewSettings,
@@ -28,8 +29,9 @@ import {
 import { launched, launchFrom, launchStatus } from './launches.ts';
 import { sessionFor } from './links.ts';
 import { Nav } from './Nav.tsx';
+import { type PRReviewRow, prReviewRows } from './review-rows.ts';
 import { findPR, prFromSearch } from './reviews.ts';
-import { age, ago } from './time.ts';
+import { ago } from './time.ts';
 
 const UNTITLED = 'New session';
 
@@ -129,30 +131,22 @@ function Review({ pr, sessions, launches }: ReviewProps) {
   );
 }
 
-/** The reviews JOC started here: the session's state while it runs, a cross if it couldn't start. */
-function ReviewList({
-  launches,
-  sessions,
-  now,
-}: {
-  launches: Launch[];
-  sessions: Session[];
-  now: number;
-}) {
-  return launches.map((launch) => {
-    const session = launched(launch, sessions);
-    return (
-      <ReviewRow
-        key={launch.id}
-        session={session?.title ?? `Review #${launch.review?.number ?? ''}`}
-        href={session ? sessionHref(session.id) : undefined}
-        state={session?.state ?? 'idle'}
-        result={launch.status === 'failed' ? 'fail' : undefined}
-        status={launchStatus(launch, session)}
-        time={age(launch.createdAt, now)}
-      />
-    );
-  });
+/**
+ * Every review of the PR: the session's state while it runs, a check once Claude said how it went,
+ * a cross if it couldn't start.
+ */
+function ReviewList({ rows }: { rows: PRReviewRow[] }) {
+  return rows.map((r) => (
+    <ReviewRow
+      key={r.key}
+      session={r.title}
+      href={r.sessionId ? sessionHref(r.sessionId) : undefined}
+      state={r.state}
+      result={r.result}
+      status={r.status}
+      time={r.time}
+    />
+  ));
 }
 
 /** /pr?repo=&number=: one of the person's pull requests, and reviewing it in a new session. */
@@ -161,7 +155,10 @@ export function PullRequestPage() {
   const github = useGitHub();
   const { sessions, connected } = useSessions();
   const launches = useLaunches(target);
+  // Review sessions that left the live list are still this PR's reviews.
+  const history = useHistory(!!target);
   const now = useNow();
+  const reviews = target ? prReviewRows(target, sessions, history ?? [], launches, now) : [];
   const pr =
     github?.state === 'reported' && target
       ? findPR([github.reviewRequested, github.mine], target)
@@ -234,9 +231,9 @@ export function PullRequestPage() {
           <Card label="Review">
             <Review pr={pr} sessions={sessions} launches={launches} />
           </Card>
-          {launches.length ? (
-            <Card title="Reviews from JOC" count={launches.length}>
-              <ReviewList launches={launches} sessions={sessions} now={now} />
+          {reviews.length ? (
+            <Card title="Reviews from JOC" count={reviews.length}>
+              <ReviewList rows={reviews} />
             </Card>
           ) : null}
         </aside>
