@@ -1,4 +1,6 @@
-import type { PullRequest, Session } from '@joc/protocol';
+import type { Launch, PullRequest, Session } from '@joc/protocol';
+import { launchStatus } from './launches.ts';
+import { plain } from './plain.ts';
 import { activeAt, reviewDone } from './sessions.ts';
 import { age } from './time.ts';
 
@@ -58,4 +60,73 @@ export function reviewRowText(
     time: done ? `Done ${age(doneAt, now)}` : age(s.updatedAt, now),
     activity: done ? (s.state === 'offline' ? undefined : afterOutcome(activity)) : activity,
   };
+}
+
+/** One row of a PR page's "Reviews from JOC": a review session, or a launch still without one. */
+export interface PRReviewRow {
+  key: string;
+  title: string;
+  /** The session, once there is one. */
+  sessionId?: string;
+  state: Session['state'];
+  /** A cross when it couldn't start, a check once Claude said how the review went. */
+  result?: 'pass' | 'fail';
+  status: string;
+  time: string;
+  /** For the order: newest first. */
+  at: number;
+}
+
+/**
+ * Every review of one PR JOC knows of, newest first: the sessions that review it (started with the
+ * Review button or a review command such as `/code-review 512`), live or in the history, and the
+ * Review-button launches that haven't reported a session yet or couldn't start one.
+ */
+export function prReviewRows(
+  pr: { repo: string; number: number },
+  sessions: Session[],
+  history: Session[],
+  launches: Launch[],
+  now: number,
+): PRReviewRow[] {
+  const ofPR = (s: Session) => s.review?.repo === pr.repo && s.review.number === pr.number;
+  const byId = new Map<string, Session>();
+  // A live copy is newer than the history's.
+  for (const s of [...history, ...sessions]) if (ofPR(s)) byId.set(s.id, s);
+  const rows: PRReviewRow[] = [...byId.values()].map((s) => {
+    const done = reviewDone(s);
+    const said = s.activity ? plain(s.activity) : undefined;
+    const outcome = s.review?.outcome;
+    // Once it ended, the last activity is how it ended, not what Claude said.
+    const words = done ? (s.state === 'offline' ? undefined : afterOutcome(said)) : said;
+    return {
+      key: s.id,
+      title: s.title ?? `Review #${pr.number}`,
+      sessionId: s.id,
+      state: s.state,
+      ...(done && outcome ? { result: 'pass' as const } : {}),
+      status:
+        [outcome, words].filter(Boolean).join(' · ') ||
+        (s.state === 'offline' ? 'Session ended' : done ? 'Finished' : 'Reviewing'),
+      time: age(new Date(done ? activeAt(s) : Date.parse(s.updatedAt)).toISOString(), now),
+      at: Date.parse(s.startedAt),
+    };
+  });
+  for (const launch of launches) {
+    if (launch.review?.repo !== pr.repo || launch.review.number !== pr.number) continue;
+    if (launch.sessionId && byId.has(launch.sessionId)) continue;
+    // Its session, should that not say it reviews (a server from before #65).
+    const session = [...sessions, ...history].find((s) => s.id === launch.sessionId);
+    rows.push({
+      key: launch.id,
+      title: session?.title ?? `Review #${pr.number}`,
+      ...(session ? { sessionId: session.id } : {}),
+      state: session?.state ?? 'idle',
+      ...(launch.status === 'failed' ? { result: 'fail' as const } : {}),
+      status: launchStatus(launch, session),
+      time: age(launch.createdAt, now),
+      at: Date.parse(launch.createdAt),
+    });
+  }
+  return rows.sort((a, b) => b.at - a.at);
 }
