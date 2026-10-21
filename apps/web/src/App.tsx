@@ -4,6 +4,7 @@ import {
   MAX_IMAGE_BYTES,
   MAX_IMAGES_PER_MESSAGE,
   MAX_PREF_ITEMS,
+  PromptQueued,
   type Session,
 } from '@joc/protocol';
 import {
@@ -13,6 +14,7 @@ import {
   EmptyState,
   NewSessionButton,
   OverflowMenu,
+  QueueNote,
   RepoGroupHeader,
   ReviewSessionRow,
   SessionHeader,
@@ -42,6 +44,7 @@ import {
   useGitHub,
   useHistory,
   useNow,
+  usePromptStatuses,
   useReadWhileViewing,
   useResumes,
   useSessionSettings,
@@ -50,7 +53,13 @@ import {
 import { Nav } from './Nav.tsx';
 import { NewSessionDialog } from './NewSession.tsx';
 import { useNoteData } from './note-data.ts';
-import { delivered, type PendingPrompt } from './pending.ts';
+import {
+  arrived,
+  type PendingPrompt,
+  type PendingView,
+  pendingViews,
+  queueLine,
+} from './pending.ts';
 import { plain } from './plain.ts';
 import { updatePrefs, usePrefs } from './prefs.ts';
 import { useResumeView } from './Resuming.tsx';
@@ -300,8 +309,29 @@ export default function App() {
   const dismiss = (ids: string[]) =>
     updatePrefs({ dismissedReviews: [...dismissed, ...ids].slice(-MAX_PREF_ITEMS) });
   const [pending, setPending] = useState<PendingPrompt[]>([]);
-  // A sent prompt shows until the session's own transcript has it.
-  const waiting = pending.filter((p) => p.sessionId === selected?.id && !delivered(items, p));
+  // Where the selected session's prompts stand on the server: in JOC, with Claude Code, failed.
+  const promptStatuses = usePromptStatuses(selected?.id);
+  // Pending prompts Claude Code had when JOC tried to change them: said on the bubble.
+  const [locked, setLocked] = useState<ReadonlySet<string>>(new Set());
+  // A message taken back to edit, for the composer.
+  const [fill, setFill] = useState<{ text: string; seq: number }>();
+  // A sent prompt shows at the bottom until the session's own transcript has it; that copy then
+  // takes its place, as it's the newest item there too.
+  const sessionPending = pending.filter((p) => p.sessionId === selected?.id);
+  const landed = arrived(items, sessionPending);
+  const settled = new Set(landed.values());
+  const waiting = selected
+    ? pendingViews(
+        sessionPending.filter((p) => !landed.has(p.id)),
+        promptStatuses,
+        selected.state,
+      ).map((v) =>
+        locked.has(v.prompt.id) && v.phase !== 'failed'
+          ? { ...v, line: `${v.line} · In Claude Code's queue, can't be changed from JOC` }
+          : v,
+      )
+    : [];
+  const queued = selected ? queueLine(waiting, selected.state) : undefined;
   // An ended session's Resume, and how starting it back up goes.
   const resumes = useResumes();
   const messages = items.filter((i) => i.kind === 'user' || i.kind === 'claude').length;
@@ -314,28 +344,87 @@ export default function App() {
     return text ? { text, failed: deletion?.status === 'failed' } : undefined;
   }
 
-  async function send(sessionId: string, text: string, files: File[] = []) {
-    const prompt: PendingPrompt = { id: crypto.randomUUID(), sessionId, text, images: [] };
-    const update = (change: Partial<PendingPrompt>) =>
-      setPending((list) => list.map((p) => (p.id === prompt.id ? { ...p, ...change } : p)));
+  function send(sessionId: string, text: string, files: File[] = []) {
+    // Sent while this session's conversation shows: its copy comes after the newest item.
+    const after = sessionId === selected?.id ? items.at(-1)?.id : undefined;
+    const prompt: PendingPrompt = {
+      id: crypto.randomUUID(),
+      sessionId,
+      text,
+      images: [],
+      files,
+      after,
+    };
     setPending((list) => [...list, prompt]);
+    void post(prompt);
+  }
+
+  const updatePending = (id: string, change: Partial<PendingPrompt>) =>
+    setPending((list) => list.map((p) => (p.id === id ? { ...p, ...change } : p)));
+
+  /** Hands the prompt to the server: its images first, then the prompt naming them. */
+  async function post(prompt: PendingPrompt) {
+    const { id, sessionId, text, files = [] } = prompt;
     try {
       // The images first: the prompt refers to them by the ids the server gives them.
-      const images = await Promise.all(files.map(uploadImage));
-      const uploaded = images.filter((i) => i !== undefined);
-      update({ images: uploaded });
-      if (uploaded.length < files.length) return update({ failed: true });
+      let images = prompt.images;
+      if (files.length) {
+        const uploaded = (await Promise.all(files.map(uploadImage))).filter((i) => i !== undefined);
+        if (uploaded.length < files.length) {
+          return updatePending(id, { images: uploaded, failed: "an image didn't upload" });
+        }
+        images = uploaded;
+        updatePending(id, { images, files: undefined });
+      }
       const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text, images: uploaded.map((i) => i.id) }),
+        body: JSON.stringify({ text, images: images.map((i) => i.id) }),
       });
-      if (!res.ok) update({ failed: true });
+      if (!res.ok) return updatePending(id, { failed: 'JOC refused it' });
+      const { id: serverId } = PromptQueued.parse(await res.json());
+      updatePending(id, { serverId });
     } catch {
       // The server is unreachable: the prompt shows as not sent.
-      update({ failed: true });
+      updatePending(id, { failed: "the server couldn't be reached" });
     }
   }
+
+  /** Sends a failed prompt again, in the same place. */
+  function retry({ prompt }: PendingView) {
+    const again = { ...prompt, serverId: undefined, failed: undefined };
+    updatePending(prompt.id, { serverId: undefined, failed: undefined });
+    void post(again);
+  }
+
+  /**
+   * Takes a prompt back while it's still in JOC. False when the plugin took it first: Claude Code
+   * has it, and JOC can't change it.
+   */
+  async function withdraw({ prompt }: PendingView): Promise<boolean> {
+    if (!prompt.serverId) return false;
+    const res = await apiFetch(
+      `/api/sessions/${encodeURIComponent(prompt.sessionId)}/prompts/${encodeURIComponent(prompt.serverId)}`,
+      { method: 'DELETE' },
+      // Unreachable: the message stays, as if it couldn't be taken back.
+    ).catch(() => undefined);
+    if (res?.ok || res?.status === 404) {
+      setPending((list) => list.filter((p) => p.id !== prompt.id));
+      return true;
+    }
+    if (res?.status === 409) setLocked((was) => new Set([...was, prompt.id]));
+    return false;
+  }
+
+  const pendingActions = {
+    onCancel: (view: PendingView) => void withdraw(view),
+    onEdit: async (view: PendingView) => {
+      if (await withdraw(view)) {
+        setFill((was) => ({ text: view.prompt.text, seq: (was?.seq ?? 0) + 1 }));
+      }
+    },
+    onRetry: retry,
+  };
 
   return (
     <div className="joc-app app">
@@ -574,7 +663,7 @@ export default function App() {
                   sessionId={selected.id}
                   changes={changes}
                   onSend={(text) => {
-                    void send(selected.id, text);
+                    send(selected.id, text);
                     setTab('conversation');
                   }}
                 />
@@ -585,11 +674,14 @@ export default function App() {
                     sessionId={selected.id}
                     items={items}
                     pending={waiting}
+                    pendingActions={pendingActions}
+                    settled={settled}
                     state={selected.state}
                     session={selected}
                     divider={resuming?.divider}
                   />
                   <div className="app-main__dock" ref={dockRef}>
+                    {queued ? <QueueNote key={selected.id}>{queued}</QueueNote> : null}
                     {/* One composer whether or not the session is online, so going offline keeps
                         what you typed. */}
                     <Composer
@@ -606,7 +698,8 @@ export default function App() {
                       imageLimits={IMAGE_LIMITS}
                       suggestions={slash?.suggestions}
                       commandsStatus={slash?.status}
-                      onSubmit={(text, images) => void send(selected.id, text, images)}
+                      fill={fill}
+                      onSubmit={(text, images) => send(selected.id, text, images)}
                     />
                   </div>
                 </>
