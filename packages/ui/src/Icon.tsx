@@ -5,6 +5,7 @@ const PATHS = {
   chevronRight: 'M6 4l4 4-4 4',
   chevronDown: 'M4 6l4 4 4-4',
   chevronLeft: 'M10 4L6 8l4 4',
+  arrowDown: 'M8 3v10M4 9l4 4 4-4',
   at: 'M10.5 8a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0zM10.5 8v1a1.75 1.75 0 003.5 0V8a6 6 0 10-2.4 4.8',
   person: 'M10.5 5.5a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0zM3 13.5c.6-2.4 2.6-4 5-4s4.4 1.6 5 4',
   check: 'M3.5 8.5l3 3 6-7',

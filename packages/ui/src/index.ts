@@ -115,6 +115,8 @@ export {
 } from './history.tsx';
 export { Icon, type IconName, type IconProps } from './Icon.tsx';
 export { Branch, Code, Emph, Tag, TextLink, type TextLinkProps, WorktreeTag } from './inline.tsx';
+export { JumpToLatest, type JumpToLatestProps } from './jump.tsx';
+export { jumpLabel } from './jump-label.ts';
 export { LogoMark, type LogoMarkProps } from './Logo.tsx';
 export {
   EmptyState,

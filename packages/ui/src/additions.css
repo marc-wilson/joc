@@ -516,3 +516,12 @@ h4.joc-taskd__label { margin: 0; }
 .joc-queue-note > svg { flex: none; color: var(--text-tertiary); }
 .joc-queue-note__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* ===== End Pending messages (#77) ======================================================== */
+
+/* ===== Jump to latest (#89) ============================================================== */
+/* Floats over the bottom of a conversation while you read further up. It fades (opacity only)
+   and is out of reach while hidden; nothing under it moves. The count keeps fixed figures. */
+.joc-jump { position: absolute; left: 0; right: 0; bottom: var(--space-3); z-index: 2; display: flex; justify-content: center; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity var(--duration-fast) var(--ease-standard), visibility 0s linear var(--duration-fast); }
+.joc-jump.is-shown { opacity: 1; visibility: visible; transition: opacity var(--duration-fast) var(--ease-standard), visibility 0s; }
+.joc-jump__btn { pointer-events: auto; border-radius: var(--radius-full); box-shadow: var(--shadow-2); padding: 0 var(--space-3); }
+.joc-jump__label { font-variant-numeric: tabular-nums; }
+/* ===== End Jump to latest (#89) ========================================================== */
