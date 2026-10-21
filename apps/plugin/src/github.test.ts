@@ -8,6 +8,7 @@ import {
   clipBody,
   type GraphNode,
   githubDue,
+  MAX_CHECK_DETAIL,
   MAX_PR_BODY,
   MAX_PR_CHECKS,
   MAX_PR_CLOSES,
@@ -120,30 +121,41 @@ test("a pull request lists its last commit's checks, each with its outcome", () 
       startedAt: '2026-10-18T10:00:00Z',
       completedAt: '2026-10-18T10:02:10Z',
     },
-    { name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' },
+    { name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', title: '\n2 failed in auth\nmore' },
     { name: 'e2e', status: 'IN_PROGRESS', conclusion: null, startedAt: '2026-10-18T10:00:00Z' },
-    { name: 'preview', status: 'COMPLETED', conclusion: 'SKIPPED' },
-    { context: 'ci/lint', state: 'SUCCESS' },
-    { context: 'ci/deploy', state: 'PENDING' },
+    { name: 'preview', status: 'COMPLETED', conclusion: 'SKIPPED', title: '  ' },
+    { context: 'ci/lint', state: 'SUCCESS', description: 'No problems' },
+    { context: 'ci/deploy', state: 'PENDING', description: 'x'.repeat(300) },
     {},
   ]);
-  assert.deepEqual(checks, [
+  assert.deepEqual(checks?.slice(0, 5), [
     { name: 'build', status: 'pass', seconds: 130 },
-    { name: 'test', status: 'fail' },
+    { name: 'test', status: 'fail', detail: '2 failed in auth' },
     { name: 'e2e', status: 'pending' },
     { name: 'preview', status: 'skipped' },
-    { name: 'ci/lint', status: 'pass' },
-    { name: 'ci/deploy', status: 'pending' },
+    { name: 'ci/lint', status: 'pass', detail: 'No problems' },
   ]);
+  // A long one is cut to the protocol's limit.
+  assert.equal(checks?.[5]?.detail?.length, MAX_CHECK_DETAIL);
+  assert.equal(checks?.length, 6);
   assert.equal(toChecks(undefined), undefined);
   assert.equal(toPullRequest(node(null))?.checks, undefined);
 });
 
 test("the limits match the protocol's", () => {
   assert.deepEqual(
-    [MAX_PR_CHECKS, MAX_PR_BODY, MAX_PR_REVIEWS, MAX_PR_REVIEWERS, MAX_PR_LABELS, MAX_PR_CLOSES],
+    [
+      MAX_PR_CHECKS,
+      MAX_CHECK_DETAIL,
+      MAX_PR_BODY,
+      MAX_PR_REVIEWS,
+      MAX_PR_REVIEWERS,
+      MAX_PR_LABELS,
+      MAX_PR_CLOSES,
+    ],
     [
       protocol.MAX_PR_CHECKS,
+      protocol.MAX_CHECK_DETAIL,
       protocol.MAX_PR_BODY,
       protocol.MAX_PR_REVIEWS,
       protocol.MAX_PR_REVIEWERS,
