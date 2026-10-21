@@ -54,6 +54,19 @@ spec:
                 secretKeyRef:
                   name: joc-secrets
                   key: JOC_GITHUB_CLIENT_SECRET
+            # The GitHub App (docs/github-app.md). Empty values leave GitHub to the plugins.
+            - name: JOC_GITHUB_APP_ID
+              value: {{ .Values.github_app_id | default "" | quote }}
+            - name: JOC_GITHUB_APP_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: joc-secrets
+                  key: JOC_GITHUB_APP_PRIVATE_KEY
+            - name: JOC_GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: joc-secrets
+                  key: JOC_GITHUB_WEBHOOK_SECRET
             - name: JOC_PUBLIC_URL
               value: {{ required "public_url is required" .Values.public_url | quote }}
           resources:
