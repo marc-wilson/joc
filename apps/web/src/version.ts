@@ -7,6 +7,13 @@ export const UPDATE_COMMAND =
 /** Loads the installed plugin into a session that still runs an old copy. */
 export const RELOAD_COMMAND = '/reload-plugins';
 
+/**
+ * What changed in the plugin: its commits in JOC's public repo, newest first. Releases aren't
+ * tagged, so there's no range between two versions to link to; each commit bumps the version it
+ * ships in.
+ */
+export const WHATS_NEW_URL = 'https://github.com/marc-wilson/joc/commits/main/apps/plugin';
+
 /** "harbor-mbp", "harbor-mbp and studio-mini", "harbor-mbp, studio-mini and ci-box". */
 function names(list: string[]): string {
   return list.length < 2 ? (list[0] ?? '') : `${list.slice(0, -1).join(', ')} and ${list.at(-1)}`;

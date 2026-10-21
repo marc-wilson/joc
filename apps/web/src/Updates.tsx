@@ -1,5 +1,5 @@
 import { Device, ServerVersion, type StaleSession } from '@joc/protocol';
-import { Banner, BannerSessions, Button } from '@joc/ui';
+import { Banner, BannerSessions, Button, TextLink } from '@joc/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { apiFetch } from './auth.ts';
@@ -15,6 +15,7 @@ import {
   staleName,
   staleTitle,
   UPDATE_COMMAND,
+  WHATS_NEW_URL,
 } from './version.ts';
 
 // Version skew, both ways: a machine whose plugin is behind what the server expects (or sessions
@@ -127,6 +128,7 @@ export function Updates() {
           title={`${behindTitle(behind, plugin)}. Update it there with`}
           icon="update"
           command={UPDATE_COMMAND}
+          actions={<TextLink href={WHATS_NEW_URL}>What's new</TextLink>}
           onDismiss={() => updatePrefs({ dismissedPluginBanner: plugin })}
         />
       ) : null}
