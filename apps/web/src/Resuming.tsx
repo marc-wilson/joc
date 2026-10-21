@@ -171,14 +171,14 @@ export function historyResume(
         Try again
       </Button>
     );
-  } else if (!cantResume(session, now)) {
+  } else if (!cantResume(session, now) && hasEnded(session, sessions, now)) {
     action = (
       <Button variant="secondary" size="md" onClick={onResume}>
         Resume
       </Button>
     );
-  } else if (cantResume(session, now) === STILL_RUNNING) {
-    // Running, or back: open it in the dashboard instead.
+  } else if (cantResume(session, now) === STILL_RUNNING || !hasEnded(session, sessions, now)) {
+    // Running, back, or quiet without being known to have ended: open it in the dashboard.
     action = (
       <SessionLink
         title="Open session"
