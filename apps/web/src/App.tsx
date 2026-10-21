@@ -681,7 +681,7 @@ export default function App() {
                     divider={resuming?.divider}
                   />
                   <div className="app-main__dock" ref={dockRef}>
-                    {queued ? <QueueNote key={selected.id}>{queued}</QueueNote> : null}
+                    {queued ? <QueueNote>{queued}</QueueNote> : null}
                     {/* One composer whether or not the session is online, so going offline keeps
                         what you typed. */}
                     <Composer
