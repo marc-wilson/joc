@@ -3,10 +3,13 @@ import { test } from 'node:test';
 import {
   applyPrefsPatch,
   channelsOf,
+  chimes,
   combinePrefsPatches,
   DEFAULT_NOTIFICATION_CHANNELS,
   DEFAULT_PREFS,
   MAX_PREF_SESSIONS,
+  NOTIFYING_KINDS,
+  Prefs,
   PrefsPatch,
 } from './prefs.ts';
 
@@ -77,13 +80,61 @@ test('a patch with an unbounded list is refused', () => {
 
 test('a kind never set has its default, and a session waiting on you stays in the panel', () => {
   assert.deepEqual(channelsOf(DEFAULT_PREFS, 'review'), DEFAULT_NOTIFICATION_CHANNELS.review);
-  const off = { panel: false, toast: false, desktop: false };
+  const off = { panel: false, toast: false, desktop: false, sound: false };
   const prefs = applyPrefsPatch(
     DEFAULT_PREFS,
-    { notificationKinds: { github: off, question: off } },
+    { notificationKinds: { mention: off, question: off } },
     1,
   );
-  assert.deepEqual(channelsOf(prefs, 'github'), off);
+  assert.deepEqual(channelsOf(prefs, 'mention'), off);
   assert.deepEqual(channelsOf(prefs, 'question'), { ...off, panel: true });
   assert.equal(PrefsPatch.safeParse({ notificationKinds: { pager: off } }).success, false);
+});
+
+test('only the defined kinds notify, and the long-turn kind is off until chosen', () => {
+  for (const kind of ['finished', 'github'] as const) {
+    const on = { panel: true, toast: true, desktop: true, sound: true };
+    const prefs = applyPrefsPatch(DEFAULT_PREFS, { notificationKinds: { [kind]: on } }, 1);
+    assert.deepEqual(channelsOf(prefs, kind), {
+      panel: false,
+      toast: false,
+      desktop: false,
+      sound: false,
+    });
+  }
+  assert.deepEqual(channelsOf(DEFAULT_PREFS, 'long-turn'), {
+    panel: false,
+    toast: false,
+    desktop: false,
+    sound: false,
+  });
+});
+
+test('sound is on for needs-you and review requests, under the master switch', () => {
+  const on = NOTIFYING_KINDS.filter((k) => chimes(DEFAULT_PREFS, k));
+  assert.deepEqual(on, ['question', 'permission', 'review']);
+  const quiet = applyPrefsPatch(DEFAULT_PREFS, { notificationSound: false }, 1);
+  assert.deepEqual(
+    NOTIFYING_KINDS.filter((k) => chimes(quiet, k)),
+    [],
+  );
+});
+
+test('a kind stored before sound existed keeps its sound default', () => {
+  const stored = Prefs.parse({
+    ...DEFAULT_PREFS,
+    notificationKinds: { review: { panel: true, toast: false, desktop: false } },
+  });
+  assert.deepEqual(channelsOf(stored, 'review'), {
+    panel: true,
+    toast: false,
+    desktop: false,
+    sound: true,
+  });
+  const muted = applyPrefsPatch(
+    stored,
+    { notificationKinds: { review: { panel: true, toast: false, desktop: false, sound: false } } },
+    2,
+  );
+  assert.equal(chimes(muted, 'review'), false);
 });

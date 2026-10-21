@@ -31,39 +31,73 @@ export const SessionPrefs = z.object({
 export type SessionPrefs = z.infer<typeof SessionPrefs>;
 
 /**
- * A kind of notification, as the settings name it. `question` and `permission` are a session
- * waiting on you; the rest are JOC's alerts and the person's GitHub notifications.
+ * A kind of notification, as the settings name it. Only these notify:
+ *
+ * - `question`, `permission`: a session waits on you. Resolves when it's answered anywhere.
+ * - `review`: your review is requested on a pull request. Resolves when the pull request leaves
+ *   your review-requested list (you reviewed it, the request was removed, it closed).
+ * - `mention`: a mention, or a comment on your pull request. Resolves when you open it.
+ * - `ci-failed`: CI failed on your pull request. Resolves when CI passes again or you open it.
+ * - `long-turn`: a session finished a turn that took over LONG_TURN_MS. Off by default;
+ *   resolves when you open the session.
+ *
+ * `finished` (every turn's end) and `github` (other GitHub activity) no longer notify; they stay
+ * in the enum only so prefs stored before still parse.
  */
 export const NotificationKind = z.enum([
   'question',
   'permission',
-  'finished',
   'review',
   'mention',
   'ci-failed',
+  'long-turn',
+  'finished',
   'github',
 ]);
 export type NotificationKind = z.infer<typeof NotificationKind>;
 
-/** Where one kind shows up. All off keeps it in the history only. */
+/** The kinds that notify, in the settings' order. */
+export const NOTIFYING_KINDS: readonly NotificationKind[] = [
+  'question',
+  'permission',
+  'long-turn',
+  'review',
+  'mention',
+  'ci-failed',
+];
+
+/** A turn longer than this raises a `long-turn` notification when it ends. */
+export const LONG_TURN_MS = 5 * 60_000;
+
+/**
+ * Where one kind shows up, and whether its arrival chimes. All off keeps it in the history only.
+ * `sound` was added later: a stored choice without it has the kind's default.
+ */
 export const NotificationChannels = z.object({
   panel: z.boolean(),
   toast: z.boolean(),
   desktop: z.boolean(),
+  sound: z.boolean().optional(),
 });
 export type NotificationChannels = z.infer<typeof NotificationChannels>;
+
+/** NotificationChannels with every channel spelt out. */
+export type Channels = Required<NotificationChannels>;
 
 /** Kinds always in the panel: a session waiting on you never hides. */
 export const PINNED_KINDS: readonly NotificationKind[] = ['question', 'permission'];
 
-export const DEFAULT_NOTIFICATION_CHANNELS: Record<NotificationKind, NotificationChannels> = {
-  question: { panel: true, toast: true, desktop: true },
-  permission: { panel: true, toast: true, desktop: true },
-  finished: { panel: true, toast: false, desktop: false },
-  review: { panel: true, toast: true, desktop: false },
-  mention: { panel: true, toast: false, desktop: false },
-  'ci-failed': { panel: true, toast: true, desktop: true },
-  github: { panel: true, toast: false, desktop: false },
+const OFF: Channels = { panel: false, toast: false, desktop: false, sound: false };
+
+export const DEFAULT_NOTIFICATION_CHANNELS: Record<NotificationKind, Channels> = {
+  question: { panel: true, toast: true, desktop: true, sound: true },
+  permission: { panel: true, toast: true, desktop: true, sound: true },
+  review: { panel: true, toast: true, desktop: false, sound: true },
+  mention: { panel: true, toast: false, desktop: false, sound: false },
+  'ci-failed': { panel: true, toast: false, desktop: true, sound: false },
+  'long-turn': OFF,
+  finished: OFF,
+  github: OFF,
 };
 
 /**
@@ -85,6 +119,8 @@ export const Prefs = z.object({
   browserNotifications: z.boolean(),
   /** Only while JOC isn't the focused window. */
   desktopWhenAway: z.boolean(),
+  /** The arrival chime, for the kinds set to Sound. */
+  notificationSound: z.boolean(),
   /** Where each kind of notification shows up; a kind left out has its default. */
   notificationKinds: z.partialRecord(NotificationKind, NotificationChannels),
   /** The panel's last filter. */
@@ -113,6 +149,7 @@ export type Prefs = z.infer<typeof Prefs>;
 export const DEFAULT_PREFS: Prefs = {
   browserNotifications: false,
   desktopWhenAway: true,
+  notificationSound: true,
   notificationKinds: {},
   notificationTab: 'all',
   pinned: [],
@@ -172,11 +209,21 @@ export function applyPrefsPatch(prefs: Prefs, patch: PrefsPatch, now: number): P
   return { ...prefs, ...given(top), sessions: kept };
 }
 
-/** Where a kind shows up: the person's choice or the default; pinned kinds always in the panel. */
-export function channelsOf(prefs: Prefs, kind: NotificationKind): NotificationChannels {
-  const chosen = prefs.notificationKinds[kind] ?? DEFAULT_NOTIFICATION_CHANNELS[kind];
-  return PINNED_KINDS.includes(kind) ? { ...chosen, panel: true } : chosen;
+/**
+ * Where a kind shows up: the person's choice or the default; pinned kinds always in the panel.
+ * The kinds that no longer notify are off whatever was stored for them.
+ */
+export function channelsOf(prefs: Prefs, kind: NotificationKind): Channels {
+  if (!NOTIFYING_KINDS.includes(kind)) return OFF;
+  const fallback = DEFAULT_NOTIFICATION_CHANNELS[kind];
+  const chosen = prefs.notificationKinds[kind];
+  const channels = chosen ? { ...chosen, sound: chosen.sound ?? fallback.sound } : fallback;
+  return PINNED_KINDS.includes(kind) ? { ...channels, panel: true } : channels;
 }
+
+/** Whether a kind's arrival chimes: its Sound choice, under the master switch. */
+export const chimes = (prefs: Prefs, kind: NotificationKind) =>
+  prefs.notificationSound && channelsOf(prefs, kind).sound;
 
 /** Two pending patches as one, the later winning field by field and session by session. */
 export function combinePrefsPatches(first: PrefsPatch, later: PrefsPatch): PrefsPatch {
