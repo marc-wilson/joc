@@ -1,9 +1,14 @@
 import type { ReactNode } from 'react';
 import { usePrefsLoaded, usePrefsSync } from './prefs.ts';
+import { useTheme } from './theme.ts';
 
-/** Keeps the prefs in step with other tabs. Mounted with the page, so both hear its snapshot. */
+/**
+ * Keeps the prefs in step with other tabs, and the page's theme with them. Mounted with the
+ * page, so both hear its snapshot.
+ */
 function PrefsSync() {
   usePrefsSync();
+  useTheme();
   return null;
 }
 
