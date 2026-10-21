@@ -4,6 +4,7 @@ import {
   DROP_AFTER_MS,
   type DropAfter,
   type HistorySession,
+  MAX_TEAMMATES,
   type PluginVersion,
   QUIET_AFTER_MS,
   type ReviewOutcome,
@@ -13,6 +14,9 @@ import {
   type SessionReport,
   type SessionReview,
   type StaleSession,
+  settleTeam,
+  type TeamDraft,
+  type TeamFolder,
   type Waiting,
 } from '@joc/protocol';
 import { alertOnSession } from './alerts.ts';
@@ -62,6 +66,10 @@ interface SessionDoc {
   review?: Omit<SessionReview, 'outcome'>;
   /** How its review ended, from the last turn whose closing words said. */
   reviewOutcome?: ReviewOutcome;
+  /** Its teammates as its conversation tells (see `teamDrafts`); settled as it's read. */
+  team?: TeamDraft[];
+  /** The folder and branch each teammate works in, as its steps last said. */
+  teamFolders?: TeamFolder[];
 }
 
 const sessions = () => getDb().collection<SessionDoc>('sessions');
@@ -81,13 +89,26 @@ function toSession({
   title,
   review: launched,
   reviewOutcome: outcome,
+  team: drafts,
+  teamFolders: folders,
   ...rest
 }: SessionDoc): Session {
   // `title` is the first prompt's first line: a review command names the PR it reviews.
   const review = launched ?? reviewOfPrompt(title, rest.repo);
+  // Where its teammates stand depends on what the session says now: its state, its wait and
+  // Claude Code's list of what runs.
+  const team = drafts?.length
+    ? settleTeam(drafts, {
+        state: rest.state,
+        background: rest.background,
+        waiting: rest.waiting,
+        folders,
+      })
+    : undefined;
   return {
     id: sessionId,
     ...rest,
+    ...(team ? { team } : {}),
     // Claude Code's own name beats the first-prompt fallback.
     title: name ?? title,
     ...(review ? { review: outcome ? { ...review, outcome } : review } : {}),
@@ -311,6 +332,43 @@ export async function endWaiting(
   if (!doc) return false;
   publish(owner, { type: 'session', session: toSession(doc) });
   return true;
+}
+
+/**
+ * Keeps the teammates the session's conversation tells of, and tells its owner's dashboards when
+ * that changed. A session not reported yet gets them with a later change.
+ */
+export async function setTeam(owner: Owner, sessionId: string, team: TeamDraft[]): Promise<void> {
+  const doc = await sessions().findOneAndUpdate(
+    { _id: sessionKey(owner, sessionId), owner },
+    { $set: { team } },
+    { returnDocument: 'before' },
+  );
+  if (!doc || JSON.stringify(doc.team ?? []) === JSON.stringify(team)) return;
+  publish(owner, { type: 'session', session: toSession({ ...doc, team }) });
+}
+
+/** Notes the folder and branch a teammate works in, and tells the owner's dashboards if new. */
+export async function setTeamFolder(
+  owner: Owner,
+  sessionId: string,
+  folder: TeamFolder,
+): Promise<void> {
+  const _id = sessionKey(owner, sessionId);
+  const doc = await sessions().findOne({ _id, owner }, { projection: { teamFolders: 1 } });
+  if (!doc) return;
+  const was = doc.teamFolders?.find((f) => f.task === folder.task);
+  if (was && JSON.stringify(was) === JSON.stringify(folder)) return;
+  const teamFolders = [
+    ...(doc.teamFolders ?? []).filter((f) => f.task !== folder.task),
+    folder,
+  ].slice(-MAX_TEAMMATES);
+  const after = await sessions().findOneAndUpdate(
+    { _id, owner },
+    { $set: { teamFolders } },
+    { returnDocument: 'after' },
+  );
+  if (after?.team?.length) publish(owner, { type: 'session', session: toSession(after) });
 }
 
 function isDuplicateKey(error: unknown): boolean {

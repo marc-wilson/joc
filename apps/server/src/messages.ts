@@ -36,12 +36,15 @@ export async function listMessages(
   return docs.reverse().map(toItem);
 }
 
-/** Saves items it hasn't seen (hooks can send the same lines twice) and publishes only those. */
+/**
+ * Saves items it hasn't seen (hooks can send the same lines twice), publishes only those and
+ * returns them.
+ */
 export async function addMessages(
   owner: Owner,
   { sessionId, items }: MessagesReport,
-): Promise<number> {
-  if (!items.length) return 0;
+): Promise<ConversationItem[]> {
+  if (!items.length) return [];
   await ensureIndex();
   const result = await messages().bulkWrite(
     items.map((item) => ({
@@ -55,7 +58,53 @@ export async function addMessages(
   );
   const fresh = Object.keys(result.upsertedIds).map((i) => items[Number(i)] as ConversationItem);
   if (fresh.length) publish(owner, { type: 'messages', sessionId, items: fresh });
-  return fresh.length;
+  return fresh;
+}
+
+/** Whether an item of the session's own conversation can change where its teammates stand. */
+export function movesTeam(item: ConversationItem): boolean {
+  if (item.task) return false;
+  if (item.kind === 'tool_call') return !!item.subagent || !!item.to;
+  return (
+    item.kind === 'tool_result' || item.kind === 'task_update' || item.kind === 'agent_message'
+  );
+}
+
+/** The most items a team is worked out from: the latest. */
+const TEAM_ITEMS = 5000;
+
+/**
+ * The items of the session's own conversation that say where its teammates stand (see
+ * `teamDrafts`), oldest first: Agent and SendMessage calls, the Agent calls' results, stops,
+ * task notifications and the teammates' messages.
+ */
+export async function teamItems(owner: Owner, sessionId: string): Promise<ConversationItem[]> {
+  await ensureIndex();
+  const main = { owner, sessionId, task: { $exists: false } };
+  const calls = await messages()
+    .find(
+      { ...main, kind: 'tool_call', subagent: { $exists: true } },
+      { projection: { toolUseId: 1 } },
+    )
+    .sort({ at: -1, id: -1 })
+    .limit(TEAM_ITEMS)
+    .toArray();
+  const agents = calls.flatMap((c) => ('toolUseId' in c ? [c.toolUseId] : []));
+  const docs = await messages()
+    .find({
+      ...main,
+      $or: [
+        { kind: 'tool_call', subagent: { $exists: true } },
+        { kind: 'tool_call', to: { $exists: true } },
+        { kind: { $in: ['task_update', 'agent_message'] } },
+        { kind: 'tool_result', toolUseId: { $in: agents } },
+        { kind: 'tool_result', text: { $regex: '^Successfully stopped task: ' } },
+      ],
+    })
+    .sort({ at: -1, id: -1 })
+    .limit(TEAM_ITEMS)
+    .toArray();
+  return docs.reverse().map(toItem);
 }
 
 /** How many messages each of the owner's sessions has. */

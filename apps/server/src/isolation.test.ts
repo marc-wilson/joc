@@ -284,6 +284,56 @@ test("a subagent's steps stay with their owner and out of the conversation", asy
   assert.deepEqual(await read(await call('bob', '/api/sessions/task-id/messages'), Items), []);
 });
 
+test('teammates stay with their owner', async () => {
+  const at = new Date().toISOString();
+  const agent = (who: Who) => ({
+    id: `${who}-call`,
+    at,
+    kind: 'tool_call',
+    toolUseId: 'toolu_team',
+    name: 'Agent',
+    summary: `${who} teammate`,
+    description: `${who} teammate #81`,
+    subagent: 'general-purpose',
+    background: true,
+  });
+  for (const who of ['alice', 'bob'] as const) {
+    await call(who, '/api/reports', report('team-id'));
+    await call(who, '/api/messages', { sessionId: 'team-id', items: [agent(who)] });
+  }
+  // Bob's teammate's steps, naming the same task, give only his teammate a branch.
+  await call('bob', '/api/messages', {
+    sessionId: 'team-id',
+    items: [{ id: 'bob-step', at, kind: 'claude', text: 'On it', task: 'toolu_team' }],
+    teammate: { task: 'toolu_team', branch: 'fix/81-bob' },
+  });
+  // And his notification ends only his.
+  await call('bob', '/api/messages', {
+    sessionId: 'team-id',
+    items: [
+      {
+        id: 'bob-done',
+        at,
+        kind: 'task_update',
+        taskId: 'x',
+        toolUseId: 'toolu_team',
+        status: 'completed',
+        summary: 'Done',
+      },
+    ],
+  });
+  const team = async (who: Who) =>
+    (await read(await call(who, '/api/sessions'), Sessions)).find((s) => s.id === 'team-id')?.team;
+  assert.deepEqual(
+    (await team('alice'))?.map((t) => [t.title, t.issue, t.status, t.branch]),
+    [['alice teammate', 81, 'working', undefined]],
+  );
+  assert.deepEqual(
+    (await team('bob'))?.map((t) => [t.title, t.issue, t.status, t.branch]),
+    [['bob teammate', 81, 'done', 'fix/81-bob']],
+  );
+});
+
 test('diffs stay with their owner', async () => {
   await call('alice', '/api/changes', {
     sessionId: 'alice-diff',
