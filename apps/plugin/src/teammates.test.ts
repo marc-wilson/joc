@@ -24,19 +24,27 @@ const attach = (uuid: string, prompt: string) =>
 const assistant = (uuid: string, content: unknown[]) =>
   JSON.stringify({ type: 'assistant', uuid, timestamp: at, message: { content } });
 
-test('a teammate message becomes an agent_message; its hand-back is left to the notification', () => {
+test('a teammate message becomes an agent_message, and its hand-back its report', () => {
   const { items } = parseLines(
     [
       attach('m1', '<agent-message from="a84">\nKeep the wrap toggle per file?\n</agent-message>'),
       attach(
         'm2',
-        '<agent-message from="a84">\n[Subagent hand-back] The report follows:\n  Done.\n</agent-message>',
+        '<agent-message from="a84">\n[Subagent hand-back] The report follows:\n  Done.\n  - Wrapped lines\n</agent-message>',
       ),
     ],
     '/work',
   );
   assert.deepEqual(items, [
     { id: 'm1', at, kind: 'agent_message', from: 'a84', text: 'Keep the wrap toggle per file?' },
+    {
+      id: 'm2',
+      at,
+      kind: 'agent_message',
+      from: 'a84',
+      text: 'Done.\n- Wrapped lines',
+      report: true,
+    },
   ]);
   assert.equal(agentMessage('<task-notification></task-notification>'), undefined);
 });
