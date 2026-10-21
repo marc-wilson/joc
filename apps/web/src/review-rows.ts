@@ -95,10 +95,11 @@ export function prReviewRows(
   for (const s of [...history, ...sessions]) if (ofPR(s)) byId.set(s.id, s);
   const rows: PRReviewRow[] = [...byId.values()].map((s) => {
     const done = reviewDone(s);
-    const said = s.activity ? plain(s.activity) : undefined;
+    // Once the session ended, its activity only says so: Claude's last words are kept apart.
+    const text = s.state === 'offline' ? s.lastWords : s.activity;
+    const said = text ? plain(text) : undefined;
     const outcome = s.review?.outcome;
-    // Once it ended, the last activity is how it ended, not what Claude said.
-    const words = done ? (s.state === 'offline' ? undefined : afterOutcome(said)) : said;
+    const words = done ? afterOutcome(said) : said;
     return {
       key: s.id,
       title: s.title ?? `Review #${pr.number}`,
