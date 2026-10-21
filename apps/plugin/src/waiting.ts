@@ -82,10 +82,13 @@ export function waitingFor(
   tool: string,
   input: unknown,
   cwd?: string,
+  /** The teammate that asks, by its agent id. */
+  agent?: string,
 ): Waiting | undefined {
+  const by = agent ? { agent } : {};
   if (tool === ASK_TOOL) {
     const questions = questionsOf(input);
-    return questions.length ? { kind: 'question', id, questions } : undefined;
+    return questions.length ? { kind: 'question', id, questions, ...by } : undefined;
   }
   const description = str(record(input).description);
   return {
@@ -94,6 +97,7 @@ export function waitingFor(
     tool: cut(tool, 200),
     summary: callSummary(tool, input, cwd),
     ...(description ? { description: cut(description, 500) } : {}),
+    ...by,
   };
 }
 

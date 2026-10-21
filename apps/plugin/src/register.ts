@@ -560,9 +560,10 @@ async function answerFromJoc(
   tool: string,
   input: unknown,
   cwd: string,
+  agent?: string,
 ): Promise<Decision | undefined> {
   const waitingId = newWaitingId();
-  const waiting = waitingFor(waitingId, tool, input, cwd);
+  const waiting = waitingFor(waitingId, tool, input, cwd, agent);
   if (!waiting) return undefined;
   const ended = callFor(tool, input)?.ended ?? new Promise<void>(() => {});
   const over = ended.then(() => 'over' as const);
@@ -1199,7 +1200,15 @@ export const register: Register = (on) => {
     // Another hook decided, or nobody is there to answer from JOC.
     if (below.decision || !interactive) return below;
     try {
-      const decision = await answerFromJoc($, e.tool_name, e.tool_input, e.cwd);
+      // A teammate's request names it, so the dashboard can say which one asks.
+      const { agent_id: agent } = e as { agent_id?: unknown };
+      const decision = await answerFromJoc(
+        $,
+        e.tool_name,
+        e.tool_input,
+        e.cwd,
+        typeof agent === 'string' && agent ? agent.slice(0, 200) : undefined,
+      );
       return decision ? { ...below, decision } : below;
     } catch (error) {
       log.note(crash('module', errorDetail(error)));
