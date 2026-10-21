@@ -336,6 +336,8 @@ export const PullRequestReview = z.object({
   by: PullRequestPerson,
   state: z.enum(['approved', 'changes-requested', 'commented', 'dismissed']),
   submittedAt: z.iso.datetime().optional(),
+  /** The review on GitHub. */
+  url: z.url().max(500).optional(),
 });
 export type PullRequestReview = z.infer<typeof PullRequestReview>;
 
