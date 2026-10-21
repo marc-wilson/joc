@@ -1,6 +1,7 @@
 import type { SessionState } from '@joc/protocol';
 import {
   type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
   type RefObject,
   type UIEvent,
@@ -227,8 +228,8 @@ export interface NotificationRowProps {
   /** Where the row goes: the whole row opens it, in a new tab when `external`. */
   href: string;
   external?: boolean;
-  /** Runs as the row opens, before the browser follows the link. */
-  onOpen?: () => void;
+  /** Runs as the row opens, before the browser follows the link (which it may prevent). */
+  onOpen?: (e: MouseEvent<HTMLAnchorElement>) => void;
   /** The hover ✕. Left out for a needs row: it goes when answered. */
   onDismiss?: () => void;
   /** Going: it fades out (opacity only), takes no pointer or focus, then is dropped. */
