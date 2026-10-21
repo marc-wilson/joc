@@ -8,7 +8,9 @@ import {
   formatBytes,
   ImageViewer,
   Message,
+  MessageStatus,
   SlashPill,
+  TextLink,
   Thread,
 } from '@joc/ui';
 import { isValidElement, type ReactNode, useLayoutEffect, useRef, useState } from 'react';
@@ -16,7 +18,7 @@ import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { WaitingCards } from './Answering.tsx';
 import { commandLine } from './commands.ts';
-import type { PendingPrompt } from './pending.ts';
+import type { PendingView } from './pending.ts';
 import { plain } from './plain.ts';
 import { updateSessionPrefs, useSessionPrefs } from './prefs.ts';
 import { toggled } from './toggled.ts';
@@ -66,10 +68,18 @@ interface Viewing {
 
 /** A message's images after it on the right: one large, several as a row of smaller ones. Each
  * opens full size in the viewer. Served by the API, never inlined. */
-function Images({ images, onOpen }: { images: ImageRef[]; onOpen: (index: number) => void }) {
+function Images({
+  images,
+  pending,
+  onOpen,
+}: {
+  images: ImageRef[];
+  pending?: boolean;
+  onOpen: (index: number) => void;
+}) {
   const one = images.length === 1;
   return (
-    <div className="app-msg-images">
+    <div className={pending ? 'app-msg-images joc-msg-images--pending' : 'app-msg-images'}>
       {images.map((image, i) => (
         <Attachment
           key={image.id}
@@ -91,30 +101,68 @@ function UserMessage({
   text,
   command,
   images,
+  pending,
+  footer,
+  fade,
   onOpen,
 }: {
-  time: string;
+  time?: string;
   text: string;
   command?: string;
   images: ImageRef[];
+  /** Sent from JOC and not in the transcript yet (see `Message`). */
+  pending?: PendingView['phase'];
+  /** In place of the time: where a pending one stands. */
+  footer?: ReactNode;
+  fade?: boolean;
   onOpen: (viewing: Viewing) => void;
 }) {
   const words = Boolean(text || command);
   return (
     <>
       {words ? (
-        <Message from="user" time={time}>
+        <Message from="user" time={time} pending={pending} footer={footer} fade={fade}>
           {command ? <SlashPill command={command} /> : null} {text}
         </Message>
       ) : null}
       {images.length ? (
         <div>
-          <Images images={images} onOpen={(index) => onOpen({ images, index })} />
+          <Images
+            images={images}
+            pending={!!pending}
+            onOpen={(index) => onOpen({ images, index })}
+          />
           {/* Images alone still say when they were sent. */}
-          {words ? null : <div className="joc-msg__time joc-msg__time--user">{time}</div>}
+          {words
+            ? null
+            : (footer ?? <div className="joc-msg__time joc-msg__time--user">{time}</div>)}
         </div>
       ) : null}
     </>
+  );
+}
+
+/** What a pending message offers, by where it stands. */
+export interface PendingActions {
+  onCancel: (view: PendingView) => void;
+  onEdit: (view: PendingView) => void;
+  onRetry: (view: PendingView) => void;
+}
+
+/** The line under a pending message: where it stands, then what can still be done with it. */
+function PendingLine({ view, actions }: { view: PendingView; actions: PendingActions }) {
+  const failed = view.phase === 'failed';
+  // Edit puts the words back in the box; images can't go back, so then only Cancel.
+  const editable = view.changeable && !view.prompt.images.length;
+  return (
+    <MessageStatus failed={failed}>
+      <span>{view.line}</span>
+      {failed && !view.changeable ? (
+        <TextLink onClick={() => actions.onRetry(view)}>Retry</TextLink>
+      ) : null}
+      {editable ? <TextLink onClick={() => actions.onEdit(view)}>Edit</TextLink> : null}
+      {view.changeable ? <TextLink onClick={() => actions.onCancel(view)}>Cancel</TextLink> : null}
+    </MessageStatus>
   );
 }
 
@@ -142,6 +190,8 @@ interface ThreadItemsProps {
   onOpen?: (viewing: Viewing) => void;
   /** Something drawn between the items, before the item at `index`, such as a divider. */
   insert?: { index: number; node: ReactNode };
+  /** Items that took a pending message's place: they show at once, without fading in. */
+  settled?: ReadonlySet<string>;
 }
 
 /** Conversation items as messages, for a `Thread`: a session's, or a subagent's own steps. */
@@ -152,6 +202,7 @@ export function ThreadItems({
   onFold,
   onOpen = () => {},
   insert,
+  settled,
 }: ThreadItemsProps) {
   const results = new Map(
     items.flatMap((i) => (i.kind === 'tool_result' ? [[i.toolUseId, i] as const] : [])),
@@ -170,12 +221,13 @@ export function ThreadItems({
             text={item.text}
             command={item.command}
             images={item.images ?? []}
+            fade={!settled?.has(item.id)}
             onOpen={onOpen}
           />
         );
       case 'command':
         return (
-          <Message key={item.id} from="user" time={time(item.at)}>
+          <Message key={item.id} from="user" time={time(item.at)} fade={!settled?.has(item.id)}>
             <Code>{commandLine(item)}</Code>
           </Message>
         );
@@ -234,7 +286,11 @@ export function ThreadItems({
 interface Props {
   sessionId: string;
   items: ConversationItem[];
-  pending: PendingPrompt[];
+  /** Messages sent from JOC that the transcript doesn't have yet, in the order sent. */
+  pending: PendingView[];
+  pendingActions: PendingActions;
+  /** Items that took a pending message's place. */
+  settled?: ReadonlySet<string>;
   state: SessionState;
   /** The session, for answering what it waits on from here. */
   session?: Session;
@@ -243,7 +299,16 @@ interface Props {
 }
 
 /** A session's conversation, kept pinned to the newest message while you're at the bottom. */
-export function Conversation({ sessionId, items, pending, state, session, divider }: Props) {
+export function Conversation({
+  sessionId,
+  items,
+  pending,
+  pendingActions,
+  settled,
+  state,
+  session,
+  divider,
+}: Props) {
   const at = divider?.at;
   const insert = divider
     ? {
@@ -286,13 +351,15 @@ export function Conversation({ sessionId, items, pending, state, session, divide
             }
             onOpen={setViewing}
             insert={insert}
+            settled={settled}
           />
-          {pending.map((p) => (
+          {pending.map((view) => (
             <UserMessage
-              key={p.id}
-              time={p.failed ? 'Not sent' : 'Waiting for the session'}
-              text={p.text}
-              images={p.images}
+              key={view.prompt.id}
+              text={view.prompt.text}
+              images={view.prompt.images}
+              pending={view.phase}
+              footer={<PendingLine view={view} actions={pendingActions} />}
               onOpen={setViewing}
             />
           ))}

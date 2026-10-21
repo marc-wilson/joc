@@ -7,10 +7,12 @@ import {
   HistorySession,
   Launch,
   type LaunchRequest,
+  type PromptStatus,
   Resume,
   ReviewSettings,
   Session,
   SessionCommands,
+  SessionPrompts,
   SessionSettings,
   type SlashCommand,
 } from '@joc/protocol';
@@ -201,6 +203,49 @@ export function useCommands(sessionId: string | undefined): SlashCommand[] | und
 
   // Another session's list never shows, not even for a moment after switching.
   return commands && commands.sessionId === sessionId ? commands.list : undefined;
+}
+
+/**
+ * Where the session's prompts from the dashboard stand on the server (`PromptStatus`), kept
+ * current as they move on. Undefined until the first answer.
+ */
+export function usePromptStatuses(sessionId: string | undefined): PromptStatus[] | undefined {
+  const [statuses, setStatuses] = useState<{ sessionId: string; list: PromptStatus[] }>();
+
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    // Only the newest answer counts: an older one arriving late never rolls a prompt back.
+    let asked = 0;
+    const load = () => {
+      const ask = ++asked;
+      return (
+        apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`)
+          .then(async (r) => {
+            if (cancelled || !r.ok) return;
+            const body = SessionPrompts.parse(await r.json());
+            if (ask === asked) setStatuses({ sessionId, list: body.prompts });
+          })
+          // Unreachable for now: the next prompts event or reconnect snapshot loads them again.
+          .catch(() => {})
+      );
+    };
+    const unsubscribe = subscribe((event) => {
+      if (
+        (event.type === 'prompts' && event.sessionId === sessionId) ||
+        event.type === 'snapshot'
+      ) {
+        void load();
+      }
+    });
+    void load();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [sessionId]);
+
+  return statuses && statuses.sessionId === sessionId ? statuses.list : undefined;
 }
 
 /**
