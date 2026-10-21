@@ -144,6 +144,7 @@ interface ReviewLogDoc {
   by: PullRequestPerson;
   state: PullRequestReview['state'];
   submittedAt?: string;
+  url?: string;
 }
 
 export interface PullDoc {
@@ -413,6 +414,7 @@ function logEntry(
   user: User | null | undefined,
   state: string,
   submittedAt: string | null | undefined,
+  url?: string | null,
 ): ReviewLogDoc | undefined {
   const s = REVIEW_STATE.get(state.toUpperCase());
   if (!user || !s) return undefined;
@@ -422,6 +424,7 @@ function logEntry(
     by: profile(user),
     state: s,
     submittedAt: iso(submittedAt),
+    url: valid(z.url().max(500), url),
   });
 }
 
@@ -471,7 +474,7 @@ export function toPullRequest(
       commits: pull.commits,
       reviews: pull.log
         ?.slice(-MAX_PR_REVIEWS)
-        .map(({ by, state, submittedAt }) => defined({ by, state, submittedAt })),
+        .map(({ by, state, submittedAt, url }) => defined({ by, state, submittedAt, url })),
       requestedReviewers: pull.requestedProfiles ?? pull.requested.map((p) => ({ login: p.login })),
       requestedTeams: pull.teamProfiles ?? pull.teams.map((slug) => ({ slug })),
       labels: pull.labels,
@@ -684,7 +687,7 @@ async function onReview(ctx: Context, payload: unknown) {
   const state = action === 'dismissed' ? 'DISMISSED' : review.state.toUpperCase();
   // A comment-only review leaves the reviewer's decision as it was.
   const by = review.user;
-  const entry = logEntry(review.id, by, state, review.submitted_at);
+  const entry = logEntry(review.id, by, state, review.submitted_at, review.html_url);
   if (after && entry) {
     const set: Partial<PullDoc> = { log: logReview(after.log, entry), keptAt: new Date() };
     if (by && state !== 'COMMENTED') {
@@ -1012,6 +1015,7 @@ const ApiReview = z.object({
   user: User.nullish(),
   state: z.string(),
   submitted_at: z.string().nullish(),
+  html_url: z.string().nullish(),
 });
 const ApiRuns = z.object({
   check_runs: z.array(Check.omit({ head_sha: true, pull_requests: true })),
@@ -1062,7 +1066,9 @@ async function readPull(ctx: Context, installationId: number, repo: string, numb
           x.user ? [{ id: x.user.id, login: x.user.login, state: x.state.toUpperCase() }] : [],
         ),
         log: (r.success ? r.data : [])
-          .flatMap((x) => (x.id && logEntry(x.id, x.user, x.state, x.submitted_at)) || [])
+          .flatMap(
+            (x) => (x.id && logEntry(x.id, x.user, x.state, x.submitted_at, x.html_url)) || [],
+          )
           .slice(-MAX_PR_REVIEWS),
         keptAt: new Date(),
         checks: [...new Map(checks.map((k) => [k.key, k])).values()].slice(0, MAX_PR_CHECKS),

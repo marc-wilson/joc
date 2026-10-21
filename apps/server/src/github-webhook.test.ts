@@ -344,8 +344,8 @@ test('a review session shows the pull request it reviews, whole', async () => {
   );
   const after = (await reviewed('bob', 'bob-review-31')).pull;
   assert.deepEqual(
-    after?.reviews?.map((r) => [r.by.login, r.state, !!r.submittedAt]),
-    [['bob', 'approved', true]],
+    after?.reviews?.map((r) => [r.by.login, r.state, !!r.submittedAt, !!r.url]),
+    [['bob', 'approved', true, true]],
   );
   assert.deepEqual(after?.requestedReviewers, []);
   assert.deepEqual([after?.body, after?.labels?.length, after?.commits], [body, 1, 3]);
