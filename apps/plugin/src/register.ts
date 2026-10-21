@@ -17,7 +17,7 @@
 // It also tells the server which slash commands this session has (src/commands.ts), so the
 // dashboard's composer can suggest them: when the session starts, and again whenever the list
 // changes, such as after /reload-plugins.
-import type { MessagesReport } from '@joc/protocol';
+import type { MessagesReport, PromptHandoff } from '@joc/protocol';
 import type { EngineInterface, HttpResponse, ProcessRunResult, Register } from 'claude-code';
 import {
   type DescribedCommand,
@@ -62,6 +62,10 @@ const DEFAULT_SERVER = 'https://joc.marcswilson.com';
 const CREDENTIALS = '.claude/joc/credentials.json';
 /** The prompt poll's path in the problem log, the same for every session. */
 const CLAIM_PATH = '/api/sessions/{id}/prompts/claim';
+/** Where the plugin says Claude Code took a prompt, in the problem log. */
+const HANDOFF_PATH = '/api/sessions/{id}/prompts/{prompt}/handoff';
+/** How long telling the server about a handoff may take before the next prompt goes on. */
+const HANDOFF_TIMEOUT_MS = 5_000;
 /** The launch poll's: new sessions, such as a PR review, to start beside this one. */
 const LAUNCH_PATH = '/api/sessions/{id}/launches/claim';
 const LAUNCH_POLL_MS = 5000;
@@ -992,15 +996,63 @@ export const register: Register = (on) => {
       if (!res.ok) return;
       const prompts = field(JSON.parse(res.text), 'prompts');
       if (!Array.isArray(prompts)) return;
-      // Each starts its own turn once the session is idle, in the order they were sent.
+      // Each starts its own turn once the session is idle, in the order they were sent. Claude
+      // Code queues one sent while a turn runs; the dashboard hears that it has it (a handoff),
+      // so it can say the prompt waits for the turn to end rather than look stuck.
       for (const prompt of prompts) {
         const lines = [text(field(prompt, 'text')) ?? '', ...(await saveImages(prompt))];
         const promptText = lines.filter(Boolean).join('\n\n');
         // A command carries no images; with them, the text is a prompt.
         const command = lines.length === 1 ? slashCommand(promptText) : undefined;
-        const id = text(field(prompt, 'id')) ?? String(Date.now());
-        if (command) await runCommand($, command, id);
-        else if (promptText) await $.prompt.submit({ text: promptText, asUser: true });
+        const id = text(field(prompt, 'id'));
+        if (command) {
+          // A command runs once the session is idle, and only then resolves: Claude Code has it
+          // from here. One that can't run says why in the conversation (runCommand).
+          const running = runCommand($, command, id ?? String(Date.now()));
+          if (id) await handOff(sessionId, id, { ok: true });
+          await running;
+        } else if (promptText) {
+          const entered = await $.prompt
+            .submit({ text: promptText, asUser: true })
+            .catch((error: unknown) => ({ drop: errorDetail(error) }));
+          if (id) {
+            await handOff(
+              sessionId,
+              id,
+              entered.drop === undefined
+                ? { ok: true }
+                : { ok: false, reason: entered.drop.slice(0, 200) },
+            );
+          }
+        } else if (id) {
+          await handOff(sessionId, id, { ok: false, reason: 'it had nothing to send' });
+        }
+      }
+    }
+
+    /** Tells the server whether Claude Code took a prompt this plugin claimed. */
+    async function handOff(sessionId: string, promptId: string, outcome: PromptHandoff) {
+      const { url, headers } = await connection($);
+      const path = `/api/sessions/${encodeURIComponent(sessionId)}/prompts/${encodeURIComponent(promptId)}/handoff`;
+      const res = await fetchWithin($, HANDOFF_TIMEOUT_MS, `${url}${path}`, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify(outcome),
+      }).catch((error: unknown) => {
+        log.note({
+          ok: false,
+          kind: 'unreachable',
+          where: url,
+          detail: errorDetail(error),
+          at: Date.now(),
+        });
+        return undefined;
+      });
+      // The dashboard then shows the prompt as sent until the transcript has it.
+      if (res) {
+        log.note(
+          responseOutcome({ status: res.status, body: res.text }, HANDOFF_PATH, url, Date.now()),
+        );
       }
     }
 
