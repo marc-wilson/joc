@@ -32,3 +32,32 @@ export function clock(iso: string, now = Date.now()): string {
   if (at < midnight) return '00:00';
   return at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
+
+/**
+ * The day and time, as History shows when a session ended: "Today 09:12", "Yesterday 17:40",
+ * "Oct 9 11:02", "Dec 30 2025 09:48".
+ */
+export function stamp(iso: string, now = Date.now()): string {
+  const at = new Date(iso);
+  const today = new Date(now);
+  const yesterday = new Date(now);
+  yesterday.setDate(today.getDate() - 1);
+  const date =
+    at.toDateString() === today.toDateString()
+      ? 'Today'
+      : at.toDateString() === yesterday.toDateString()
+        ? 'Yesterday'
+        : at
+            .toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              ...(at.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }),
+            })
+            .replace(',', '');
+  const time = at.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  return `${date} ${time}`;
+}

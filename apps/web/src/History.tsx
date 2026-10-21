@@ -1,4 +1,4 @@
-import type { HistorySession } from '@joc/protocol';
+import type { HistorySession, Session } from '@joc/protocol';
 import {
   Button,
   CIMark,
@@ -7,6 +7,7 @@ import {
   HistoryRow,
   OverflowMenu,
   RepoGroupHeader,
+  resumeCommand,
   SectionHeader,
 } from '@joc/ui';
 import { Fragment, useState } from 'react';
@@ -23,8 +24,43 @@ import {
 } from './hooks.ts';
 import { prFor } from './links.ts';
 import { Nav } from './Nav.tsx';
+import { plain } from './plain.ts';
 import { historyResume } from './Resuming.tsx';
-import { ago, duration } from './time.ts';
+import { duration, stamp } from './time.ts';
+
+/**
+ * A row's middle column: Claude's last words once the session ended (its activity then only says
+ * it ended), or what it's doing while it still runs. Empty keeps the column.
+ */
+function summaryOf(s: Session): string {
+  const said = s.state === 'offline' ? s.lastWords : s.activity;
+  return said ? plain(said) : '';
+}
+
+// A refused clipboard (no permission, not a secure context) just leaves nothing copied.
+const copy = (text: string) => navigator.clipboard?.writeText(text).catch(() => {});
+
+/** The row menu's copies: the resume command with its `cd`, without it, and the bare id. */
+function copyItems(s: HistorySession) {
+  return [
+    {
+      id: 'copy',
+      label: 'Copy resume command',
+      icon: 'copy' as const,
+      onSelect: () => void copy(resumeCommand(s.id, s.cwd)),
+    },
+    ...(s.cwd
+      ? [
+          {
+            id: 'copy-no-cd',
+            label: 'Copy without cd',
+            onSelect: () => void copy(resumeCommand(s.id)),
+          },
+        ]
+      : []),
+    { id: 'copy-id', label: 'Copy session ID', onSelect: () => void copy(s.id) },
+  ];
+}
 
 // Repos in the order their latest session appears: the list is already newest first.
 function groupByRepo(list: HistorySession[]): [string, HistorySession[]][] {
@@ -122,13 +158,14 @@ export function HistoryPage() {
                         key={s.id}
                         title={s.title ?? 'New session'}
                         branch={s.branch ?? ''}
-                        ended={ago(s.updatedAt, now)}
+                        ended={stamp(s.updatedAt, now)}
                         duration={duration(s.startedAt, s.updatedAt)}
                         messages={s.messages}
                         pr={pr ? `#${pr.number}` : undefined}
                         sessionId={s.id}
                         path={s.cwd}
                         removed={isGone(s.id) ? removedLine(s.machine) : undefined}
+                        summary={summaryOf(current)}
                         select={{
                           checked: chosen.some((c) => c.id === s.id),
                           onChange: (on) => pick(s.id, on),
@@ -166,6 +203,7 @@ export function HistoryPage() {
                             label={`Actions for ${s.title ?? 'New session'}`}
                             size="md"
                             items={[
+                              ...copyItems(s),
                               {
                                 id: 'delete',
                                 label: 'Delete session…',
