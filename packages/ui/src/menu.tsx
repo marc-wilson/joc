@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
+import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { Button } from './controls.tsx';
 import { cx } from './cx.ts';
 import { Icon, type IconName } from './Icon.tsx';
@@ -26,13 +26,25 @@ export interface OverflowMenuProps {
   trigger?: string;
   /** Opens above the button, for one near the bottom of the window such as the composer's. */
   above?: boolean;
+  /** Drawn as the button in place of the "more" glyph, e.g. the person's avatar. */
+  face?: ReactNode;
+  /** A line above the items that isn't one of them, e.g. who is signed in. */
+  header?: ReactNode;
 }
 
 /**
  * A "more" button that opens a short list of actions below it. Arrow keys move, Enter chooses,
  * Escape or a click elsewhere closes, and focus goes back to the button.
  */
-export function OverflowMenu({ label, items, size = 'sm', trigger, above }: OverflowMenuProps) {
+export function OverflowMenu({
+  label,
+  items,
+  size = 'sm',
+  trigger,
+  above,
+  face,
+  header,
+}: OverflowMenuProps) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const id = useId();
@@ -72,25 +84,41 @@ export function OverflowMenu({ label, items, size = 'sm', trigger, above }: Over
 
   return (
     <div className="joc-menu" ref={root}>
-      <Button
-        className="joc-menu__button"
-        variant="ghost"
-        size={size}
-        icon={trigger ? undefined : 'more'}
-        aria-label={label}
-        title={label}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? id : undefined}
-        onClick={() => setOpen(!open)}
-        onKeyDown={onKeyDown}
-      >
-        {trigger ? (
-          <>
-            {trigger} <Icon name="chevronDown" size={12} />
-          </>
-        ) : null}
-      </Button>
+      {face ? (
+        <button
+          type="button"
+          className="joc-menu__button joc-menu__face"
+          aria-label={label}
+          title={label}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-controls={open ? id : undefined}
+          onClick={() => setOpen(!open)}
+          onKeyDown={onKeyDown}
+        >
+          {face}
+        </button>
+      ) : (
+        <Button
+          className="joc-menu__button"
+          variant="ghost"
+          size={size}
+          icon={trigger ? undefined : 'more'}
+          aria-label={label}
+          title={label}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-controls={open ? id : undefined}
+          onClick={() => setOpen(!open)}
+          onKeyDown={onKeyDown}
+        >
+          {trigger ? (
+            <>
+              {trigger} <Icon name="chevronDown" size={12} />
+            </>
+          ) : null}
+        </Button>
+      )}
       {open ? (
         <div
           className={cx('joc-menu__list', above && 'is-above')}
@@ -99,6 +127,7 @@ export function OverflowMenu({ label, items, size = 'sm', trigger, above }: Over
           aria-label={label}
           onKeyDown={onKeyDown}
         >
+          {header ? <div className="joc-menu__header">{header}</div> : null}
           {items.map((item) => (
             <button
               key={item.id}

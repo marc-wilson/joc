@@ -7,6 +7,7 @@ import { Button } from './controls.tsx';
 import { cx } from './cx.ts';
 import { Icon, type IconName } from './Icon.tsx';
 import { LogoMark } from './Logo.tsx';
+import { type MenuItem, OverflowMenu } from './menu.tsx';
 import { StateDot } from './state.tsx';
 
 export interface NavItem {
@@ -26,6 +27,8 @@ export interface NavBarProps {
   machine?: string;
   machineOffline?: boolean;
   user?: string;
+  /** The account menu the avatar opens; without it the avatar is only a picture. */
+  userMenu?: MenuItem[];
   /** The notifications bell, first in the right-hand cluster. */
   notifications?: NotificationBellProps;
 }
@@ -36,6 +39,7 @@ export function NavBar({
   machine,
   machineOffline,
   user,
+  userMenu,
   notifications,
 }: NavBarProps) {
   return (
@@ -72,7 +76,20 @@ export function NavBar({
             {machine}
           </span>
         ) : null}
-        {user ? <Avatar name={user} size={24} /> : null}
+        {user && userMenu ? (
+          <OverflowMenu
+            label="Account"
+            items={userMenu}
+            face={<Avatar name={user} size={24} />}
+            header={
+              <>
+                Signed in as <span className="joc-menu__login">@{user}</span>
+              </>
+            }
+          />
+        ) : user ? (
+          <Avatar name={user} size={24} />
+        ) : null}
       </div>
     </header>
   );
