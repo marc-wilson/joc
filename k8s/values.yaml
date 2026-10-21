@@ -10,3 +10,8 @@ public_url: https://joc.marcswilson.com
 mongodb_uri: "${MONGODB_URI}"
 github_client_id: "${JOC_GITHUB_CLIENT_ID}"
 github_client_secret: "${JOC_GITHUB_CLIENT_SECRET}"
+# The JOC GitHub App (docs/github-app.md). Optional: left empty, each machine's plugin reads
+# GitHub through `gh`. The private key goes in base64-encoded (one line).
+github_app_id: "${JOC_GITHUB_APP_ID}"
+github_app_private_key: "${JOC_GITHUB_APP_PRIVATE_KEY}"
+github_webhook_secret: "${JOC_GITHUB_WEBHOOK_SECRET}"

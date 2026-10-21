@@ -147,6 +147,9 @@ jobs:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           JOC_GITHUB_CLIENT_ID: ${{ vars.JOC_GITHUB_CLIENT_ID }}
           JOC_GITHUB_CLIENT_SECRET: ${{ secrets.JOC_GITHUB_CLIENT_SECRET }}
+          JOC_GITHUB_APP_ID: ${{ vars.JOC_GITHUB_APP_ID }}
+          JOC_GITHUB_APP_PRIVATE_KEY: ${{ secrets.JOC_GITHUB_APP_PRIVATE_KEY }}
+          JOC_GITHUB_WEBHOOK_SECRET: ${{ secrets.JOC_GITHUB_WEBHOOK_SECRET }}
         run: |
           # Main may have moved on during the build: its run is queued behind this one and
           # deploys the newer commit.
