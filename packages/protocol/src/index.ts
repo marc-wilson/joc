@@ -209,17 +209,30 @@ export type Session = z.infer<typeof Session>;
 export const HistorySession = Session.extend({ messages: z.number().int().nonnegative() });
 export type HistorySession = z.infer<typeof HistorySession>;
 
-/** How long a session stays on the live list after it last reported. `never` keeps it there. */
-export const DropAfter = z.enum(['1h', '1d', '1w', '30d', 'never']);
+/**
+ * How long a session stays on the live list after it last reported: every value the settings
+ * offer now or ever stored. `now` drops it at once; `never` keeps it there.
+ */
+export const DropAfter = z.enum(['now', '1h', '1d', '3d', '1w', '30d', 'never']);
 export type DropAfter = z.infer<typeof DropAfter>;
 
 /** The milliseconds each `DropAfter` stands for; `never` has none. */
 export const DROP_AFTER_MS: Record<Exclude<DropAfter, 'never'>, number> = {
+  now: 0,
   '1h': 60 * 60_000,
   '1d': 24 * 60 * 60_000,
+  '3d': 3 * 24 * 60 * 60_000,
   '1w': 7 * 24 * 60 * 60_000,
   '30d': 30 * 24 * 60 * 60_000,
 };
+
+/** How long a quiet session can stay: 1 day, 3 days, 1 week or 1 month. */
+export const QuietAfter = z.enum(['1d', '3d', '1w', '30d']);
+export type QuietAfter = z.infer<typeof QuietAfter>;
+
+/** How long an ended session can stay: right away, 1 day or 1 week. */
+export const EndedAfter = z.enum(['now', '1d', '1w']);
+export type EndedAfter = z.infer<typeof EndedAfter>;
 
 /**
  * Which sessions the live list keeps, per owner (`GET`/`PUT /api/settings/sessions`). A session
@@ -227,13 +240,36 @@ export const DROP_AFTER_MS: Record<Exclude<DropAfter, 'never'>, number> = {
  */
 export const SessionSettings = z.object({
   /** A session that went quiet without ending: the machine asleep, or Claude Code killed. */
-  quiet: DropAfter,
+  quiet: QuietAfter,
   /** A session that ended (`offline`, from Claude Code's SessionEnd). */
-  ended: DropAfter,
+  ended: EndedAfter,
 });
 export type SessionSettings = z.infer<typeof SessionSettings>;
 
+/** Settings as stored, or sent by a tab from before the choices changed: any `DropAfter`. */
+export const StoredSessionSettings = z.object({ quiet: DropAfter, ended: DropAfter });
+export type StoredSessionSettings = z.infer<typeof StoredSessionSettings>;
+
 export const DEFAULT_SESSION_SETTINGS: SessionSettings = { quiet: '1w', ended: '1d' };
+
+/** The choice nearest `value` among `options`; `never` is the longest there is. */
+function nearest<T extends DropAfter>(value: DropAfter, options: readonly T[]): T {
+  const ms = (v: DropAfter) => (v === 'never' ? Number.POSITIVE_INFINITY : DROP_AFTER_MS[v]);
+  const [first, ...rest] = options as [T, ...T[]];
+  if (value === 'never') return rest.at(-1) ?? first;
+  return rest.reduce(
+    (best, o) => (Math.abs(ms(o) - ms(value)) < Math.abs(ms(best) - ms(value)) ? o : best),
+    first,
+  );
+}
+
+/** Stored settings as today's choices: a value no longer offered moves to the nearest one. */
+export function settleSessionSettings(stored: StoredSessionSettings): SessionSettings {
+  return {
+    quiet: nearest(stored.quiet, QuietAfter.options),
+    ended: nearest(stored.ended, EndedAfter.options),
+  };
+}
 
 /** A live session syncs every 30s, so this much silence means it stopped reporting. */
 export const QUIET_AFTER_MS = 2 * 60_000;

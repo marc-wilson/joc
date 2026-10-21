@@ -1,20 +1,34 @@
-import { type DropAfter, QUIET_AFTER_MS, type Session, type SessionSettings } from '@joc/protocol';
+import {
+  type EndedAfter,
+  QUIET_AFTER_MS,
+  type QuietAfter,
+  type Session,
+  type SessionSettings,
+} from '@joc/protocol';
 
-/** The choices for how long a session stays, in the order the settings show them. */
-export const DROP_AFTER_OPTIONS: { id: DropAfter; label: string }[] = [
-  { id: '1h', label: '1 hour' },
+/** How long a quiet session stays, in the order the settings show the choices. */
+export const QUIET_OPTIONS: { id: QuietAfter; label: string }[] = [
   { id: '1d', label: '1 day' },
+  { id: '3d', label: '3 days' },
   { id: '1w', label: '1 week' },
-  { id: '30d', label: '30 days' },
-  { id: 'never', label: 'Never' },
+  { id: '30d', label: '1 month' },
 ];
 
-const LABEL = new Map(DROP_AFTER_OPTIONS.map((o) => [o.id, o.label.toLowerCase()]));
+/** How long an ended session stays, in the order the settings show the choices. */
+export const ENDED_OPTIONS: { id: EndedAfter; label: string }[] = [
+  { id: 'now', label: 'Right away' },
+  { id: '1d', label: '1 day' },
+  { id: '1w', label: '1 week' },
+];
+
+const LABEL = new Map<string, string>(
+  [...QUIET_OPTIONS, ...ENDED_OPTIONS].map((o) => [o.id, o.label.toLowerCase()]),
+);
 
 /** One line on what the live list leaves out, e.g. "Quiet sessions leave after 1 week, ...". */
 export function keepNote({ quiet, ended }: SessionSettings): string {
-  const part = (what: string, after: DropAfter) =>
-    after === 'never' ? `${what} stay` : `${what} leave after ${LABEL.get(after)}`;
+  const part = (what: string, after: string) =>
+    after === 'now' ? `${what} leave right away` : `${what} leave after ${LABEL.get(after)}`;
   if (quiet === ended) return `${part('Quiet and ended sessions', quiet)}.`;
   return `${part('Quiet sessions', quiet)}, ${part('ended ones', ended).toLowerCase()}.`;
 }
