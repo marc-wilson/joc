@@ -111,17 +111,23 @@ export async function markRead(owner: Owner, threadIds: string[]): Promise<Notif
     before.state === 'reported' ? before.threads.map((t) => [t.id, t.updatedAt]) : [],
   );
   const unique = [...new Set(threadIds)];
-  for (const threadId of unique) {
-    const version = seen.get(threadId);
-    await reads().updateOne(
-      { owner, threadId, claimedAt: { $exists: false } },
-      {
-        $set: { requestedAt, ...(version ? { seen: version } : {}) },
-        $setOnInsert: { _id: randomUUID() },
-      },
-      { upsert: true },
-    );
-  }
+  // One round trip for them all: clearing ninety at once is as quick as one.
+  await reads().bulkWrite(
+    unique.map((threadId) => {
+      const version = seen.get(threadId);
+      return {
+        updateOne: {
+          filter: { owner, threadId, claimedAt: { $exists: false } },
+          update: {
+            $set: { requestedAt, ...(version ? { seen: version } : {}) },
+            $setOnInsert: { _id: randomUUID() },
+          },
+          upsert: true,
+        },
+      };
+    }),
+    { ordered: false },
+  );
   if (unique.some((id) => seen.has(id))) changed(owner);
   return getNotifications(owner);
 }
