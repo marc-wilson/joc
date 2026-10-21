@@ -902,14 +902,58 @@ export const User = z.object({
 });
 export type User = z.infer<typeof User>;
 
+/**
+ * How the person's GitHub reaches JOC once the server runs the JOC GitHub App:
+ * - `off`: no App on this server; each machine's plugin reads GitHub through `gh`.
+ * - `reconnect`: signed in before the App, so JOC can't see their installations yet.
+ * - `install`: signed in through the App, but no installation of it covers them.
+ * - `covered`: an installation covers them; webhooks bring their GitHub live.
+ */
+export const GitHubConnectionState = z.enum(['off', 'reconnect', 'install', 'covered']);
+export type GitHubConnectionState = z.infer<typeof GitHubConnectionState>;
+
 /** `GET /api/auth`: whether this browser is signed in, and as whom. */
 export const AuthStatus = z.object({
   signedIn: z.boolean(),
   user: User.optional(),
   /** False only in local dev with no GitHub app configured, where everything is open. */
   required: z.boolean(),
+  /** How their GitHub reaches JOC (see `GitHubConnectionState`); absent when not signed in. */
+  github: GitHubConnectionState.optional(),
 });
 export type AuthStatus = z.infer<typeof AuthStatus>;
+
+/** An account (theirs or an org) the App is installed on that the person reaches. */
+export const GitHubInstallationAccount = z.object({
+  login: z.string(),
+  /** `User` or `Organization`, as GitHub says. */
+  type: z.string(),
+  suspended: z.boolean(),
+  /** The installation's settings page on GitHub. */
+  manageUrl: z.url(),
+});
+export type GitHubInstallationAccount = z.infer<typeof GitHubInstallationAccount>;
+
+/** `GET /api/github/connection`, for a signed-in person. */
+export const GitHubConnection = z.object({
+  state: GitHubConnectionState,
+  /** The App's name on GitHub, e.g. "JOC Dashboard", when known. */
+  appName: z.string().optional(),
+  /** When the person last signed in through the App. */
+  signedInAt: z.iso.datetime().optional(),
+  accounts: z.array(GitHubInstallationAccount),
+  /** Where the App is installed from, on GitHub; absent when the server doesn't know. */
+  installUrl: z.url().optional(),
+});
+export type GitHubConnection = z.infer<typeof GitHubConnection>;
+
+/**
+ * Why a GitHub sign-in came back without one, in the `github` query parameter of the page it
+ * returns to; `requested` is an install an org owner still has to approve. A session the browser
+ * already had is kept.
+ */
+export const GitHubSignInNote = z.enum(['failed', 'expired', 'denied', 'requested']);
+export type GitHubSignInNote = z.infer<typeof GitHubSignInNote>;
 
 // Linking a machine: its plugin starts a link and shows the code; the person enters the code at
 // /link while signed in; the plugin's poll then gets that machine's own token.
