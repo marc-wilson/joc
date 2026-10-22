@@ -1,23 +1,18 @@
-// Session titles: always the name Claude Code shows. Runs against an in-memory MongoDB.
+// Session titles: always the name Claude Code shows. Runs against the run's MongoDB.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { closeClient } from '@joc/db';
 import type { SessionReport } from '@joc/protocol';
-import { MongoMemoryServer } from 'mongodb-memory-server';
 import { ownerFrom } from './owner.ts';
 import { applyReport, listSessions } from './sessions.ts';
-
-let mongo: MongoMemoryServer;
+import { useTestDb } from './test-db.ts';
 
 before(async () => {
-  mongo = await MongoMemoryServer.create();
-  process.env.MONGODB_URI = mongo.getUri();
-  process.env.MONGODB_DB = 'joc_titles_test';
+  await useTestDb('joc_titles_test');
 });
 
 after(async () => {
   await closeClient();
-  await mongo.stop();
 });
 
 const owner = ownerFrom('titles');

@@ -1,11 +1,10 @@
-// The GitHub App's webhooks, end to end: signed fixture deliveries into the app, against an
-// in-memory MongoDB replica set, and what each person then sees.
+// The GitHub App's webhooks, end to end: signed fixture deliveries into the app, against
+// the run's MongoDB replica set, and what each person then sees.
 import assert from 'node:assert/strict';
 import { createHmac, createPublicKey, createVerify, generateKeyPairSync } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { closeClient } from '@joc/db';
 import { Alert, GitHubSnapshot, ReviewedPullRequest, SessionChanges } from '@joc/protocol';
-import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { z } from 'zod';
 import { createApp } from './app.ts';
 import type { GitHubAuth } from './github.ts';
@@ -25,6 +24,7 @@ import {
 import { createWebhooks, verifySignature } from './github-webhook.ts';
 import { createDeviceToken, signInGitHubUser } from './identity.ts';
 import type { Owner } from './owner.ts';
+import { useTestDb } from './test-db.ts';
 
 const SECRET = 'webhook-test-secret';
 
@@ -46,15 +46,12 @@ const github: GitHubAuth = {
 };
 const app = createApp({ github, publicUrl: 'http://joc.test', pluginVersion: '1.0.0', webhooks });
 
-let mongo: MongoMemoryReplSet;
 type Who = keyof typeof PEOPLE;
 const tokens = new Map<Who, string>();
 const owners = new Map<Who, Owner>();
 
 before(async () => {
-  mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
-  process.env.MONGODB_URI = mongo.getUri();
-  process.env.MONGODB_DB = 'joc_webhook_test';
+  await useTestDb('joc_webhook_test');
   for (const who of ['alice', 'bob', 'dana'] as const) {
     // They signed in before the App was installed: the install covers them.
     const owner = await signInGitHubUser(PEOPLE[who]);
@@ -77,7 +74,6 @@ before(async () => {
 after(async () => {
   await webhooks.idle();
   await closeClient();
-  await mongo.stop();
 });
 
 const send = async (event: string, payload: unknown, id?: string) => {

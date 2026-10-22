@@ -1,22 +1,17 @@
-// On shutdown, live streams end so browsers reconnect to the server taking over. Runs against an
-// in-memory MongoDB.
+// On shutdown, live streams end so browsers reconnect to the server taking over. Runs against
+// the run's MongoDB.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { closeClient } from '@joc/db';
-import { MongoMemoryServer } from 'mongodb-memory-server';
 import { createApp } from './app.ts';
-
-let mongo: MongoMemoryServer;
+import { useTestDb } from './test-db.ts';
 
 before(async () => {
-  mongo = await MongoMemoryServer.create();
-  process.env.MONGODB_URI = mongo.getUri();
-  process.env.MONGODB_DB = 'joc_shutdown_test';
+  await useTestDb('joc_shutdown_test');
 });
 
 after(async () => {
   await closeClient();
-  await mongo.stop();
 });
 
 // The timeout is well under the stream's 15s ping pause, so only the shutdown can end it in time.

@@ -1,25 +1,20 @@
-// Sign-in and machine linking through the routes, against an in-memory MongoDB, with GitHub
+// Sign-in and machine linking through the routes, against the run's MongoDB, with GitHub
 // replaced by a stand-in that knows two codes.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { closeClient } from '@joc/db';
 import { AuthStatus, Device, DeviceStart, DeviceToken, PendingDevice } from '@joc/protocol';
-import { MongoMemoryServer } from 'mongodb-memory-server';
 import { z } from 'zod';
 import { createApp } from './app.ts';
 import type { GitHubAuth } from './github.ts';
-
-let mongo: MongoMemoryServer;
+import { useTestDb } from './test-db.ts';
 
 before(async () => {
-  mongo = await MongoMemoryServer.create();
-  process.env.MONGODB_URI = mongo.getUri();
-  process.env.MONGODB_DB = 'joc_identity_test';
+  await useTestDb('joc_identity_test');
 });
 
 after(async () => {
   await closeClient();
-  await mongo.stop();
 });
 
 const people = new Map([

@@ -58,6 +58,7 @@ Run from the repo root.
 | `pnpm build` | Build packages that have a build (currently `@joc/web`) |
 
 - One package: `pnpm --filter @joc/server dev` (or `@joc/web`, etc.).
+- Server tests share one MongoDB per run (`apps/server/src/run-tests.ts` starts an in-memory replica set, or uses `JOC_TEST_MONGODB_URI` when set, as in CI; never `MONGODB_URI`). A test file that needs it calls `useTestDb('joc_<name>_test')` in its `before` and `closeClient()` in its `after`; it never starts a MongoDB of its own. Pure logic tests stay database-free.
 - Server secrets live in `apps/server/.env` (git-ignored; template in `.env.example`: `MONGODB_URI`, `PORT`, `JOC_GITHUB_CLIENT_ID`, `JOC_GITHUB_CLIENT_SECRET`, `JOC_PUBLIC_URL`). Never commit, print, log or paste their values.
 
 ## Definition of done
