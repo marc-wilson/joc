@@ -8,9 +8,11 @@ import {
   Launch,
   type LaunchRequest,
   type PromptStatus,
+  type PullDiffMissing,
   Resume,
   ReviewSettings,
   Session,
+  SessionChanges,
   SessionCommands,
   SessionPrompts,
   SessionSettings,
@@ -19,7 +21,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { apiFetch } from './auth.ts';
-import { type DiffFile, parseDiff } from './diff.ts';
+import { type DiffFile, parseDiff, pullFile } from './diff.ts';
 import { readAlerts } from './note-data.ts';
 import { subscribe } from './stream.ts';
 
@@ -302,10 +304,40 @@ export function useCmdlistMax() {
 export type Changes =
   | { status: 'loading' }
   | { status: 'none' }
-  | { status: 'ready'; base: string; files: DiffFile[]; truncated: boolean; updatedAt: string };
+  | { status: 'unavailable'; repo: string; number: number; reason: PullDiffMissing }
+  | {
+      status: 'ready';
+      base: string;
+      files: DiffFile[];
+      truncated: boolean;
+      updatedAt: string;
+      /** A review session's: the pull request the files are from, at its head commit. */
+      pull?: { repo: string; number: number; headSha: string };
+    };
 
-/** A session's latest diff, refetched whenever the plugin reports a new one. */
-export function useChanges(sessionId: string | undefined): Changes {
+/** What the Changes tab shows, from the server's answer. */
+export function toChanges(body: SessionChanges): Changes {
+  if (body.source === 'unavailable') return { status: 'unavailable', ...body };
+  if (body.source === 'branch') {
+    const { base, diff, truncated, updatedAt } = body;
+    return { status: 'ready', base, truncated, updatedAt, files: parseDiff(diff) };
+  }
+  const { repo, number, headSha, base, files, truncated, updatedAt } = body;
+  return {
+    status: 'ready',
+    base,
+    truncated,
+    updatedAt,
+    files: files.map(pullFile),
+    pull: { repo, number, headSha },
+  };
+}
+
+/**
+ * A session's latest diff, refetched whenever the plugin reports a new one; a review session's
+ * also when GitHub news comes, as a push to the pull request moves its head.
+ */
+export function useChanges(sessionId: string | undefined, review = false): Changes {
   const [changes, setChanges] = useState<Changes>({ status: 'loading' });
 
   useEffect(() => {
@@ -317,18 +349,15 @@ export function useChanges(sessionId: string | undefined): Changes {
         .then(async (r) => {
           if (cancelled) return;
           if (!r.ok) return setChanges({ status: 'none' });
-          const body = (await r.json()) as {
-            base: string;
-            diff: string;
-            truncated: boolean;
-            updatedAt: string;
-          };
-          setChanges({ status: 'ready', ...body, files: parseDiff(body.diff) });
+          const body = SessionChanges.safeParse(await r.json());
+          if (cancelled) return;
+          setChanges(body.success ? toChanges(body.data) : { status: 'none' });
         })
         .catch(() => {});
     const unsubscribe = subscribe((event) => {
       if (
         (event.type === 'changes' && event.sessionId === sessionId) ||
+        (review && event.type === 'github') ||
         event.type === 'snapshot'
       ) {
         void load();
@@ -339,7 +368,7 @@ export function useChanges(sessionId: string | undefined): Changes {
       cancelled = true;
       unsubscribe();
     };
-  }, [sessionId]);
+  }, [sessionId, review]);
 
   return changes;
 }

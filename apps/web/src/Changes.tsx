@@ -1,5 +1,7 @@
-import type { DiffMode } from '@joc/protocol';
+import type { DiffMode, PullDiffMissing } from '@joc/protocol';
 import {
+  ButtonLink,
+  Code,
   DiffFileHeader,
   DiffLine,
   DiffSplitRow,
@@ -62,6 +64,18 @@ function reviewPrompt(comments: Comment[]): string {
   return `Here's my review of your changes:\n\n${parts.join('\n\n')}`;
 }
 
+/** Why a review session's pull request diff can't show, in a sentence or two. */
+function missingBody(reason: PullDiffMissing, repo: string, number: number): string {
+  const org = repo.split('/')[0] ?? repo;
+  const lead =
+    reason === 'no-app'
+      ? "JOC reads a pull request's diff through its GitHub App, and this JOC has none."
+      : reason === 'not-reached'
+        ? `The JOC GitHub App doesn't reach #${number} for you, so JOC can't read its diff. Install it on ${org} to see it here.`
+        : `GitHub didn't answer when JOC asked for #${number}'s diff. It asks again when this tab next loads.`;
+  return `${lead} The branch checked out in this session's folder isn't what it reviews, so it isn't shown either.`;
+}
+
 interface Props {
   sessionId: string;
   changes: Changes;
@@ -89,7 +103,26 @@ export function ChangesView({ sessionId, changes, onSend }: Props) {
       />
     );
   }
-  const { files, base, truncated } = changes;
+  if (changes.status === 'unavailable') {
+    const { repo, number, reason } = changes;
+    return (
+      <EmptyState
+        title={`Can't show #${number}'s diff`}
+        body={missingBody(reason, repo, number)}
+        action={
+          <ButtonLink
+            href={`https://github.com/${repo}/pull/${number}/files`}
+            size="sm"
+            icon="pr"
+            external
+          >
+            Open on GitHub
+          </ButtonLink>
+        }
+      />
+    );
+  }
+  const { files, base, truncated, pull } = changes;
   if (!files.length) {
     return <EmptyState title="No changes" body={`Nothing differs from ${base}.`} />;
   }
@@ -162,6 +195,12 @@ export function ChangesView({ sessionId, changes, onSend }: Props) {
       />
       <div className="app-changes__main">
         <div className="app-changes__scroll">
+          {pull ? (
+            <p className="app-changes__note">
+              Pull request #{pull.number} against <Code>{base}</Code>, at{' '}
+              <Code>{pull.headSha.slice(0, 7)}</Code>, as GitHub has it. Not this session's folder.
+            </p>
+          ) : null}
           {truncated ? (
             <p className="app-changes__note">
               This diff is too large to show whole, so some files are left out.
@@ -183,6 +222,7 @@ export function ChangesView({ sessionId, changes, onSend }: Props) {
               {isFolded(file.path) ? null : (
                 <div className="joc-diff">
                   {file.binary ? <DiffLine kind="hunk">Binary file not shown</DiffLine> : null}
+                  {file.note ? <DiffLine kind="hunk">{file.note}</DiffLine> : null}
                   {file.hunks.map((hunk) => (
                     <Fragment key={hunk.header}>
                       <DiffLine kind="hunk">{hunk.header}</DiffLine>
