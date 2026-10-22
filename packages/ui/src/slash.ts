@@ -89,6 +89,29 @@ export function slashQuery(text: string): string | undefined {
   return /\s/.test(q) ? undefined : q;
 }
 
+/** A `/word` being typed somewhere in the message: what follows the `/`, and where it sits. */
+export interface SlashToken {
+  query: string;
+  /** Where the `/` is in the text. */
+  start: number;
+  /** Just past the word's end, where the caret is. */
+  end: number;
+}
+
+/**
+ * The `/word` the caret is at the end of, anywhere in the message (`don't /wor|` → `wor`): the
+ * `/` starts the text or a line or follows a space, and the word holds no other `/`, so a URL or
+ * a path such as `a/b` or `/usr/lo` isn't a command. Undefined with the caret inside a word.
+ */
+export function slashAt(text: string, caret: number): SlashToken | undefined {
+  const next = text[caret];
+  if (next !== undefined && !/\s/.test(next)) return undefined;
+  const match = /(^|\s)\/([^\s/]*)$/.exec(text.slice(0, caret));
+  if (!match) return undefined;
+  const query = match[2] ?? '';
+  return { query, start: caret - query.length - 1, end: caret };
+}
+
 /**
  * The rows for what's typed after `/`. Nothing typed: every command, grouped by source in a
  * fixed order. Typing: a flat list, prefix matches on the name first, then on `plugin:name`,

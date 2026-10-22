@@ -244,8 +244,10 @@ export {
   type CommandsStatus,
   type ComposerSuggestion,
   matchSuggestions,
+  type SlashToken,
   type SuggestionRow,
   type SuggestionSource,
+  slashAt,
   slashQuery,
   sourceLabel,
 } from './slash.ts';

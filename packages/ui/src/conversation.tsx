@@ -1,4 +1,5 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { caretText, selectBack } from './caret.ts';
 import { CIMark } from './ci.tsx';
 import { CommandList } from './cmdlist.tsx';
 import { CopyCommand } from './code.tsx';
@@ -11,7 +12,9 @@ import {
   type CommandsStatus,
   type ComposerSuggestion,
   matchSuggestions,
+  type SlashToken,
   type SuggestionRow,
+  slashAt,
   slashQuery,
 } from './slash.ts';
 import { StateDot } from './state.tsx';
@@ -111,7 +114,8 @@ export interface ComposerProps {
 /**
  * The message box. `value` is its starting text; once typed in, the box owns its text. Typing
  * `/` opens the session's slash commands above it (CommandList); picking one makes it a pill,
- * with its arguments hinted until you type them.
+ * with its arguments hinted until you type them. A `/word` typed later in the message opens the
+ * same list, and picking one there replaces just that word.
  */
 export function Composer({
   value,
@@ -139,11 +143,17 @@ export function Composer({
   const [picked, setPicked] = useState<SuggestionRow>();
   const [active, setActive] = useState(0);
   const [closed, setClosed] = useState(true);
+  // The `/word` at the caret later in the message, and the command just completed there, whose
+  // arguments the bar hints until you type on.
+  const [token, setToken] = useState<SlashToken>();
+  const [completed, setCompleted] = useState<SuggestionRow>();
   const composer = useRef<HTMLDivElement>(null);
   const listId = useId();
   const optionId = (i: number) => `${listId}-${i}`;
 
-  const query = picked ? undefined : slashQuery(text);
+  // The whole message being a command makes it a pill; a `/word` later on is completed in place.
+  const leading = picked ? undefined : slashQuery(text);
+  const query = picked ? undefined : (leading ?? token?.query);
   const open = query !== undefined && !closed;
   const rows = open ? matchSuggestions(suggestions, query) : [];
   const current = Math.max(0, Math.min(active, rows.length - 1));
@@ -158,6 +168,22 @@ export function Composer({
     document.addEventListener('mousedown', away);
     return () => document.removeEventListener('mousedown', away);
   }, [open]);
+
+  // Follows the caret, so the list opens for the `/word` it's at wherever it moves to.
+  useEffect(() => {
+    const follow = () => {
+      const el = box.current;
+      const at = el ? caretText(el) : undefined;
+      const next = at ? slashAt(at.text, at.caret) : undefined;
+      setToken((was) =>
+        was?.query === next?.query && was?.start === next?.start && was?.end === next?.end
+          ? was
+          : next,
+      );
+    };
+    document.addEventListener('selectionchange', follow);
+    return () => document.removeEventListener('selectionchange', follow);
+  }, []);
 
   // Previews hold object URLs; free whatever is left when the composer goes.
   const shown = useRef(images);
@@ -225,6 +251,15 @@ export function Composer({
   });
 
   function pick(row: SuggestionRow) {
+    const el = box.current;
+    if (leading === undefined && token && el) {
+      // Later in the message: the word becomes the command, then a space to type its arguments.
+      if (!selectBack(el, token.start)) return;
+      document.execCommand('insertText', false, `/${row.insert} `);
+      setActive(0);
+      setCompleted(row);
+      return;
+    }
     setPicked(row);
     setActive(0);
     setBox('');
@@ -254,6 +289,7 @@ export function Composer({
     setEmpty(true);
     setText('');
     setPicked(undefined);
+    setCompleted(undefined);
     setActive(0);
   }
 
@@ -293,7 +329,15 @@ export function Composer({
 
   const argHint = picked?.command.args;
   let barHint: ReactNode;
-  if (picked && argHint && empty) {
+  if (completed?.command.args && !open) {
+    barHint = (
+      <span className="joc-arghint">
+        <code>/{completed.shown}</code>
+        <code>{completed.command.args}</code>
+        <span>{completed.command.description}</span>
+      </span>
+    );
+  } else if (picked && argHint && empty) {
     barHint = (
       <span className="joc-arghint">
         <code>/{picked.shown}</code>
@@ -341,7 +385,7 @@ export function Composer({
           id={listId}
           rows={offline ? [] : rows}
           active={current}
-          typed={text}
+          typed={leading === undefined ? `/${query ?? ''}` : text}
           status={commandsStatus}
           optionId={optionId}
           onActive={setActive}
@@ -416,11 +460,13 @@ export function Composer({
             setText(now);
             setActive(0);
             setClosed(false);
+            setCompleted(undefined);
           }}
           onFocus={() => setClosed(false)}
           onBlur={() => {
             // Going offline takes the focus; the list then says why it has no rows.
             if (!disabled) setClosed(true);
+            setCompleted(undefined);
           }}
           onKeyDown={onKeyDown}
           onPaste={(e) => {

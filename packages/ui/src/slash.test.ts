@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { type ComposerSuggestion, matchSuggestions, slashQuery } from './slash.ts';
+import { type ComposerSuggestion, matchSuggestions, slashAt, slashQuery } from './slash.ts';
 
 const commands: ComposerSuggestion[] = [
   { name: 'clear', description: 'Clear the conversation', source: 'builtin' },
@@ -34,6 +34,24 @@ test('a command is being typed until a space', () => {
   assert.equal(slashQuery('/reload-p'), 'reload-p');
   assert.equal(slashQuery('/code-review 482'), undefined);
   assert.equal(slashQuery('fix /this'), undefined);
+});
+
+test('a /word at the caret anywhere in the message is a command being typed', () => {
+  const at = (marked: string) => {
+    const caret = marked.indexOf('|');
+    return slashAt(marked.replace('|', ''), caret);
+  };
+  assert.deepEqual(at("don't /wor|"), { query: 'wor', start: 6, end: 10 });
+  assert.deepEqual(at('/|'), { query: '', start: 0, end: 1 });
+  assert.deepEqual(at('first line\n/rev|'), { query: 'rev', start: 11, end: 15 });
+  assert.deepEqual(at('run /rev| then stop'), { query: 'rev', start: 4, end: 8 });
+  // Inside a URL or a path, or with the caret mid-word, it isn't.
+  assert.equal(at('see https://harbor-labs.dev/|'), undefined);
+  assert.equal(at('open a/b|'), undefined);
+  assert.equal(at('cd /usr/lo|'), undefined);
+  assert.equal(at('cd src/|'), undefined);
+  assert.equal(at('try /rev|iew'), undefined);
+  assert.equal(at('try /review done|'), undefined);
 });
 
 test('only a slash lists everything, grouped by source', () => {
