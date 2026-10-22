@@ -3,6 +3,7 @@ import { reconnect, signOut, useAuth } from './auth.ts';
 import { GitHubConnect } from './GitHubConnect.tsx';
 import { useSessions } from './hooks.ts';
 import { useNotificationCenter } from './Notifications.tsx';
+import { JOC_NEW_ISSUE_URL, JOC_REPO_URL } from './repo.ts';
 import { Updates } from './Updates.tsx';
 
 export type Page = 'sessions' | 'github' | 'history' | 'notifications' | 'machines' | 'settings';
@@ -15,6 +16,8 @@ interface Props {
 }
 
 const go = (path: string) => location.assign(path);
+/** A new tab that can't reach back into this one. */
+const openInNewTab = (url: string) => window.open(url, '_blank', 'noopener,noreferrer');
 
 /**
  * The nav bar every page shares, with the notifications bell. It also raises the toasts,
@@ -39,6 +42,7 @@ export function Nav({ page, connected, viewing }: Props) {
         ]}
         value={page}
         notifications={center.bell}
+        repo={{ href: JOC_REPO_URL, label: 'JOC on GitHub' }}
         machine={connected === undefined ? undefined : connected ? 'Connected' : 'Reconnecting'}
         machineOffline={connected === false}
         user={auth.status === 'signedIn' ? auth.user?.login : undefined}
@@ -55,6 +59,12 @@ export function Nav({ page, connected, viewing }: Props) {
                 },
               ]
             : []),
+          {
+            id: 'report',
+            label: 'Report a problem',
+            icon: 'github',
+            onSelect: () => openInNewTab(JOC_NEW_ISSUE_URL),
+          },
           { id: 'signout', label: 'Sign out', onSelect: () => void signOut() },
         ]}
       />
