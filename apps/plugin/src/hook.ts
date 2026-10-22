@@ -273,6 +273,7 @@ async function main() {
       contextLeft: ending ? undefined : contextLeft(input.transcript_path),
       ...fields,
       name: fields.name ?? conversation.aiTitle,
+      customName: conversation.customTitle,
     };
     const response = await post('/api/reports', report, timeout);
     if (response?.ok && fields.state) remember(input.session_id, fields, reportAt);

@@ -209,6 +209,7 @@ interface Entry {
   isMeta?: boolean;
   isSidechain?: boolean;
   aiTitle?: string;
+  customTitle?: string;
   message?: { content?: unknown };
   /** Claude Code's structured record of a tool's result, next to the tool_result block. */
   toolUseResult?: unknown;
@@ -411,6 +412,8 @@ export interface Parsed {
   images: TranscriptImage[];
   /** The latest title Claude Code generated, if one was in these lines. */
   aiTitle?: string;
+  /** The latest name you gave the session with `/rename`, if one was in these lines. */
+  customTitle?: string;
 }
 
 /**
@@ -430,6 +433,7 @@ function parseEntries(lines: string[], cwd: string, sidechain: boolean): Parsed 
   const subagentCalls = new Set<string>();
   const images: TranscriptImage[] = [];
   let aiTitle: string | undefined;
+  let customTitle: string | undefined;
   for (const line of lines) {
     let entry: Entry;
     try {
@@ -438,6 +442,7 @@ function parseEntries(lines: string[], cwd: string, sidechain: boolean): Parsed 
       continue;
     }
     if (entry.type === 'ai-title' && entry.aiTitle) aiTitle = entry.aiTitle;
+    if (entry.type === 'custom-title' && entry.customTitle) customTitle = entry.customTitle;
     // A teammate's message to a session that waits is a meta entry: "Another Claude session sent
     // a message: <agent-message …>". Other meta entries are Claude Code's own.
     const meta =
@@ -572,5 +577,10 @@ function parseEntries(lines: string[], cwd: string, sidechain: boolean): Parsed 
       images.push(...pasted.map((image) => ({ ...image, itemId })));
     }
   }
-  return { items, images, aiTitle: firstLine(aiTitle, 200) };
+  return {
+    items,
+    images,
+    aiTitle: firstLine(aiTitle, 200),
+    customTitle: firstLine(customTitle, 200),
+  };
 }
