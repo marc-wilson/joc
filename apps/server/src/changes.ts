@@ -1,5 +1,5 @@
 import { getDb } from '@joc/db';
-import type { ChangesReport } from '@joc/protocol';
+import type { ChangesReport, SessionChanges } from '@joc/protocol';
 import { publish } from './bus.ts';
 import { type Owner, sessionKey } from './owner.ts';
 
@@ -14,12 +14,8 @@ interface ChangesDoc {
   updatedAt: Date;
 }
 
-export interface SessionChanges {
-  base: string;
-  diff: string;
-  truncated: boolean;
-  updatedAt: string;
-}
+/** The session's own changes, as its plugin read them. */
+export type BranchChanges = Extract<SessionChanges, { source: 'branch' }>;
 
 const changes = () => getDb().collection<ChangesDoc>('changes');
 
@@ -50,10 +46,11 @@ export async function saveChanges(
 export async function getChanges(
   owner: Owner,
   sessionId: string,
-): Promise<SessionChanges | undefined> {
+): Promise<BranchChanges | undefined> {
   const doc = await changes().findOne({ _id: sessionKey(owner, sessionId), owner });
   if (!doc) return undefined;
   return {
+    source: 'branch',
     base: doc.base,
     diff: doc.diff,
     truncated: doc.truncated,

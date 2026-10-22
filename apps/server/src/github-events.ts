@@ -1171,6 +1171,30 @@ export async function reviewedPull(
   return pull && defined({ pull, readAt: found.keptAt?.toISOString() });
 }
 
+/** Where a reviewed pull request's files can be read for the person: only one they may be shown. */
+export interface ReviewedHead {
+  installationId: number;
+  /** GitHub's own spelling of the repo. */
+  repo: string;
+  number: number;
+  headSha: string;
+  base: string;
+  changedFiles?: number;
+}
+
+/** The head of the pull request a person's review session reviews, as the App keeps it. */
+export async function reviewedHead(
+  owner: Owner,
+  repo: string,
+  number: number,
+): Promise<ReviewedHead | undefined> {
+  const person = await githubPerson(owner);
+  const found = person && (await findPull(person, repo, number));
+  if (!person || !found || !mayShow(found, person)) return undefined;
+  const { installationId, headSha, base, changedFiles } = found;
+  return { installationId, repo: found.repo, number, headSha, base, changedFiles };
+}
+
 /** Reads tried lately, so a page left open can't send JOC to GitHub again and again. */
 const tried = new Map<string, number>();
 const TRIED_MS = 10 * 60_000;

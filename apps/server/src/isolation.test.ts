@@ -30,6 +30,7 @@ import {
   ReviewedPullRequest,
   ReviewSettings,
   Session,
+  SessionChanges,
   SessionCommands,
   SessionPrompts,
   SessionSettings,
@@ -344,8 +345,29 @@ test('diffs stay with their owner', async () => {
     diff: 'diff --git a/x b/x\n',
     truncated: false,
   });
-  assert.equal((await call('alice', '/api/sessions/alice-diff/changes')).status, 200);
+  const own = await call('alice', '/api/sessions/alice-diff/changes');
+  assert.equal(own.status, 200);
+  assert.equal((await read(own, SessionChanges)).source, 'branch');
   assert.equal((await call('bob', '/api/sessions/alice-diff/changes')).status, 404);
+});
+
+test("a review session's diff is never its folder's, and stays with its owner", async () => {
+  await call('alice', '/api/reports', report('alice-cr-diff', { title: '/code-review 41' }));
+  await call('alice', '/api/changes', {
+    sessionId: 'alice-cr-diff',
+    at: ++clock,
+    base: 'origin/main',
+    diff: 'diff --git a/x b/x\n',
+    truncated: false,
+  });
+  // No GitHub App here: the tab says so, rather than show the branch in her folder.
+  assert.deepEqual(await (await call('alice', '/api/sessions/alice-cr-diff/changes')).json(), {
+    source: 'unavailable',
+    repo: 'harbor-labs/atlas-web',
+    number: 41,
+    reason: 'no-app',
+  });
+  assert.equal((await call('bob', '/api/sessions/alice-cr-diff/changes')).status, 404);
 });
 
 test('slash commands stay with their owner', async () => {
@@ -1974,4 +1996,68 @@ test('where each person stands with the GitHub App is their own, and shown only 
   // Without the App, there's nothing to reconnect.
   const plain = await read(await app.request('/api/auth', { headers: { cookie: g } }), AuthStatus);
   assert.equal(plain.github, 'off');
+});
+
+const changesIn = async (res: Response) => SessionChanges.parse(await res.json());
+
+test("a pull request's diff is read and kept per owner, and only for whom the App reaches", async () => {
+  const secret = 'isolation-diff-secret';
+  const read: string[] = [];
+  const files = [{ filename: 'src/a.ts', status: 'modified', additions: 1, deletions: 0 }];
+  const webhooks = createWebhooks(secret, {
+    api: {
+      get: async (_installation, path) => {
+        if (path.includes('/files?')) read.push(path);
+        return path.includes('/files?') ? files : undefined;
+      },
+      about: async () => undefined,
+    },
+  });
+  const hooked = createApp({
+    github,
+    publicUrl: 'http://joc.test',
+    pluginVersion: '1.0.0',
+    webhooks,
+  });
+  await signInGitHubUser({ ...PEOPLE.alice, installations: [INSTALLATION] });
+  await signInGitHubUser({ ...PEOPLE.bob, installations: [INSTALLATION] });
+  const carol = await signInGitHubUser(PEOPLE.carol);
+  const carolToken = await createDeviceToken(carol, 'carol-diff-laptop');
+  const as = (token: string | undefined, path: string, body?: unknown) =>
+    hooked.request(path, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  await hooked.request(
+    '/api/github/webhook',
+    delivery(secret, 'installation', installationEvent('created')),
+  );
+  const extra = {
+    base: { ref: 'main', repo: { full_name: 'harbor-labs/atlas-web', private: false } },
+  };
+  await hooked.request(
+    '/api/github/webhook',
+    delivery(secret, 'pull_request', pullEvent('opened', { number: 43, sha: 'd00d0043', extra })),
+  );
+  await webhooks.idle();
+  read.length = 0;
+
+  // Alice and Bob review the same pull request from sessions of the same id; Carol does too.
+  for (const token of [tokens.get('alice'), tokens.get('bob'), carolToken]) {
+    await as(token, '/api/reports', report('same-review', { title: '/code-review 43' }));
+  }
+  const changesOf = async (token: string | undefined) =>
+    changesIn(await as(token, '/api/sessions/same-review/changes'));
+  const alice = await changesOf(tokens.get('alice'));
+  assert.deepEqual(alice.source === 'pull' && alice.files.map((f) => f.path), ['src/a.ts']);
+  // Bob's copy is his own read, never Alice's.
+  const bob = await changesOf(tokens.get('bob'));
+  assert.equal(bob.source, 'pull');
+  assert.equal(read.length, 2);
+  // The App doesn't reach Carol: nothing of theirs shows.
+  const carols = await changesOf(carolToken);
+  assert.equal(carols.source === 'unavailable' && carols.reason, 'not-reached');
+  // A session someone doesn't have isn't a review of theirs.
+  assert.equal((await as(carolToken, '/api/sessions/nobody/changes')).status, 404);
 });

@@ -41,6 +41,7 @@ import {
   ReviewSettings,
   reviewPrompt,
   type ServerVersion,
+  type SessionChanges,
   type SessionPrompts,
   SessionReport,
   StoredSessionSettings,
@@ -111,6 +112,7 @@ import { listProblems, saveProblems } from './problems.ts';
 import { cancelPrompt, claimPrompts, handOffPrompt, listPrompts, queuePrompt } from './prompts.ts';
 import { RateLimit } from './rate-limit.ts';
 import { cancelResume, claimResumes, finishResume, listResumes, requestResume } from './resumes.ts';
+import { reviewChanges } from './review-diff.ts';
 import { newSecret, secretsEqual } from './secrets.ts';
 import {
   applyReport,
@@ -600,9 +602,19 @@ export function createApp({
       : c.body(null, 202);
   });
 
+  // A review session shows the pull request it reviews, never the branch in its folder.
   app.get('/api/sessions/:id/changes', async (c) => {
-    const changes = await getChanges(c.get('owner'), c.req.param('id'));
-    return changes ? c.json(changes) : c.json({ error: 'No changes reported yet' }, 404);
+    const owner = c.get('owner');
+    const review = await getSessionReview(owner, c.req.param('id'));
+    if (review) {
+      return c.json(
+        (await reviewChanges(webhooks?.context, owner, review)) satisfies SessionChanges,
+      );
+    }
+    const changes = await getChanges(owner, c.req.param('id'));
+    return changes
+      ? c.json(changes satisfies SessionChanges)
+      : c.json({ error: 'No changes reported yet' }, 404);
   });
 
   // The pull request a review session reviews: the App's copy when it covers the owner (read
