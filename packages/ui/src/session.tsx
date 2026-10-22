@@ -172,8 +172,11 @@ function PinGlyph() {
 
 export interface RepoGroupHeaderProps {
   repo: string;
-  count: number;
+  /** How many it holds: a number, or words such as "7 in flight". */
+  count: number | string;
   needs?: number;
+  /** Words for the needs pill in place of the bare number, e.g. "2 needs you". */
+  needsLabel?: string;
   collapsed?: boolean;
   /** Heads the Pinned group: a pin glyph, and it doesn't fold. */
   pinned?: boolean;
@@ -188,6 +191,7 @@ export function RepoGroupHeader({
   repo,
   count,
   needs,
+  needsLabel,
   collapsed,
   pinned,
   kind = 'repo',
@@ -200,7 +204,7 @@ export function RepoGroupHeader({
         <PinGlyph />
         <span className="joc-rgh__name">{repo}</span>
         <span className="joc-rgh__count">{count}</span>
-        {needs ? <StateBadge state="needs" label={String(needs)} /> : null}
+        {needs ? <StateBadge state="needs" label={needsLabel ?? String(needs)} /> : null}
       </h3>
     );
   }
@@ -209,7 +213,7 @@ export function RepoGroupHeader({
       <Icon name={collapsed ? 'chevronRight' : 'chevronDown'} size={12} />
       <span className="joc-rgh__name">{repo}</span>
       <span className="joc-rgh__count">{count}</span>
-      {needs ? <StateBadge state="needs" label={String(needs)} /> : null}
+      {needs ? <StateBadge state="needs" label={needsLabel ?? String(needs)} /> : null}
     </>
   );
   if (kind === 'reviews' || action) {
