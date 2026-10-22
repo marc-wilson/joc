@@ -1,4 +1,4 @@
-import type { Launch, PullRequest, Session } from '@joc/protocol';
+import type { Launch, Session } from '@joc/protocol';
 import { launchStatus } from './launches.ts';
 import { plain } from './plain.ts';
 import { activeAt, reviewDone } from './sessions.ts';
@@ -42,19 +42,17 @@ export interface ReviewRowText {
 
 export function reviewRowText(
   s: Session,
-  prs: PullRequest[],
   activity: string | undefined,
   now: number,
 ): ReviewRowText | undefined {
   const review = s.review;
   if (!review) return undefined;
   const { short, full } = prLabels(review);
-  const pr = prs.find((p) => p.repo === review.repo && p.number === review.number);
   const done = reviewDone(s);
   const doneAt = new Date(activeAt(s)).toISOString();
   return {
     done,
-    title: pr?.title ?? s.title ?? `Review ${full}`,
+    title: s.title ?? `Review ${full}`,
     pr: short,
     prTitle: full,
     time: done ? `Done ${age(doneAt, now)}` : age(s.updatedAt, now),

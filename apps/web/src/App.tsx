@@ -399,7 +399,7 @@ export default function App() {
   const reviewGroup = groups.find((g) => g.id === REVIEWS_GROUP);
   const finishedReviews = reviewGroup?.sessions.filter(reviewDone) ?? [];
   const reviewRow = (s: Session) => {
-    const text = reviewRowText(s, prs, activityOf(s, now), now);
+    const text = reviewRowText(s, activityOf(s, now), now);
     return text
       ? {
           id: s.id,
