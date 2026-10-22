@@ -441,6 +441,23 @@ export const PullRequestMergeState = z.enum([
 ]);
 export type PullRequestMergeState = z.infer<typeof PullRequestMergeState>;
 
+/**
+ * The latest deploy of a merged pull request's merge commit, as GitHub reported it: a deployment
+ * status for the commit, or a deploy workflow run on the default branch. Only the GitHub App
+ * hears these (its `deployment_status` and `workflow_run` events).
+ */
+export const PullRequestDeploy = z.object({
+  /** The deployment's environment (`production`), or the deploy workflow's name. */
+  environment: z.string().min(1).max(100),
+  /** `pass` deployed, `fail` failed, `pending` still deploying. */
+  status: CIStatus,
+  /** The deployment's log or the workflow run on GitHub. */
+  url: z.url().max(500).optional(),
+  /** When GitHub last said how it stands. */
+  at: z.iso.datetime(),
+});
+export type PullRequestDeploy = z.infer<typeof PullRequestDeploy>;
+
 /** An open pull request, as the GitHub App's webhooks have it, or the plugin reads it with `gh`. */
 export const PullRequest = z.object({
   number: z.number().int().positive(),
@@ -500,6 +517,16 @@ export const PullRequest = z.object({
   milestone: PullRequestMilestone.optional(),
   /** Issues it closes on merge: GitHub's closing references, or "Closes #N" in its description. */
   closes: z.array(PullRequestIssue).max(MAX_PR_CLOSES).optional(),
+  // Once it closed, as the GitHub App heard it; the plugin's reads leave these out.
+  closedAt: z.iso.datetime().optional(),
+  mergedAt: z.iso.datetime().optional(),
+  /** The commit its merge made on the base branch. */
+  mergeCommit: z
+    .string()
+    .regex(/^[0-9a-f]{7,64}$/)
+    .optional(),
+  /** How its merge commit's latest deploy went, once one is reported. */
+  deploy: PullRequestDeploy.optional(),
 });
 export type PullRequest = z.infer<typeof PullRequest>;
 
@@ -1447,3 +1474,98 @@ export const MachineProblem = z.object({
   resolvedAt: z.iso.datetime().optional(),
 });
 export type MachineProblem = z.infer<typeof MachineProblem>;
+
+// Operations (#111): every piece of work in flight, one row per piece of work. A row is a real
+// Claude Code session, a real pull request, or both when the pull request's repo and head branch
+// are the session's. The server builds the rows per owner from their live sessions and their
+// GitHub lists; the dashboard only lays them out.
+
+/** Why a row needs you, most pressing first. */
+export const OperationNeed = z.enum(['answer', 'ci', 'conflicts', 'review', 'deploy']);
+export type OperationNeed = z.infer<typeof OperationNeed>;
+
+/** A row's session, as its Claude cell shows it. */
+export const OperationSession = z.object({
+  id: z.string(),
+  state: SessionState,
+  /** What Claude is doing, or last said. */
+  activity: z.string().optional(),
+  /** Its machine stopped reporting without the session ending. */
+  quiet: z.boolean().optional(),
+});
+export type OperationSession = z.infer<typeof OperationSession>;
+
+/** A review decision, as the Review cell names it. */
+export const OperationReview = z.enum(['approved', 'changes', 'required', 'commented']);
+export type OperationReview = z.infer<typeof OperationReview>;
+
+/** A row's pull request, as its PR, CI, Review, Merged and Deployed cells show it. */
+export const OperationPull = z.object({
+  number: z.number().int().positive(),
+  url: z.url(),
+  state: z.enum(['open', 'draft', 'closed', 'merged']),
+  author: z.string(),
+  /** The owner wrote it: only then do its failures need them. */
+  mine: z.boolean(),
+  additions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+  base: z.string().optional(),
+  ci: CIStatus,
+  /** Checks on its head: how many, how many finished, and the failing ones' names. */
+  checks: z.object({
+    total: z.number().int().nonnegative(),
+    done: z.number().int().nonnegative(),
+    failing: z.array(z.string()).max(MAX_PR_CHECKS),
+  }),
+  review: OperationReview.optional(),
+  /** The people on the latest reviews, or the people asked while none came. */
+  reviewers: z.array(PullRequestPerson).max(MAX_PR_REVIEWERS),
+  /** The latest review on GitHub. */
+  reviewUrl: z.url().optional(),
+  /** It conflicts with its base. */
+  conflicts: z.boolean(),
+  mergedAt: z.iso.datetime().optional(),
+  closedAt: z.iso.datetime().optional(),
+  mergeCommit: z.string().optional(),
+  deploy: PullRequestDeploy.optional(),
+});
+export type OperationPull = z.infer<typeof OperationPull>;
+
+export const OperationRow = z.object({
+  /** `s:<session id>`, or `pr:<repo>#<number>` for a pull request no session works on. */
+  id: z.string(),
+  repo: z.string(),
+  /** The session's own name; the pull request's title only when there is no session. */
+  title: z.string(),
+  branch: z.string().optional(),
+  /** When it arrived: the session's start, or the pull request's opening. Rows keep this order. */
+  since: z.iso.datetime(),
+  /** When it last moved, for its age. */
+  activeAt: z.iso.datetime(),
+  session: OperationSession.optional(),
+  pull: OperationPull.optional(),
+  /** Why it needs you, most pressing first; empty when it doesn't. */
+  needs: z.array(OperationNeed),
+  /** Merged, and deployed or in a repo that reports no deploys: when it shipped. */
+  shippedAt: z.iso.datetime().optional(),
+});
+export type OperationRow = z.infer<typeof OperationRow>;
+
+/** `GET /api/operations`: the owner's rows, oldest first, and what GitHub says of their repos. */
+export const Operations = z.object({
+  rows: z.array(OperationRow),
+  /** Repos that reported a deploy lately: their rows have a Deployed stage. */
+  deployRepos: z.array(z.string()),
+  github: z.discriminatedUnion('state', [
+    z.object({ state: z.literal('none') }),
+    z.object({
+      state: z.literal('reported'),
+      status: GitHubReport.shape.status,
+      updatedAt: z.iso.datetime(),
+    }),
+  ]),
+});
+export type Operations = z.infer<typeof Operations>;
+
+/** How long a shipped or closed pull request stays on Operations, the same as an ended session. */
+export const OPERATIONS_KEEP_MS = 24 * 60 * 60_000;
