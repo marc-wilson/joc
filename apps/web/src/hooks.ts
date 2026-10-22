@@ -16,6 +16,7 @@ import {
   SessionCommands,
   SessionPrompts,
   SessionSettings,
+  SessionStatus,
   type SlashCommand,
 } from '@joc/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -205,6 +206,46 @@ export function useCommands(sessionId: string | undefined): SlashCommand[] | und
 
   // Another session's list never shows, not even for a moment after switching.
   return commands && commands.sessionId === sessionId ? commands.list : undefined;
+}
+
+/**
+ * A session's status (version, model, MCP servers) as its plugin last sent it, while `open`:
+ * undefined while it loads, null when the plugin hasn't sent one. Refetched when it sends again.
+ */
+export function useSessionStatus(
+  sessionId: string | undefined,
+  open: boolean,
+): SessionStatus | null | undefined {
+  const [status, setStatus] = useState<{ sessionId: string; status: SessionStatus | null }>();
+
+  useEffect(() => {
+    if (!sessionId || !open) return;
+    let cancelled = false;
+    const load = () =>
+      apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/status`)
+        .then(async (r) => {
+          if (cancelled) return;
+          if (r.status === 404) setStatus({ sessionId, status: null });
+          else if (r.ok) setStatus({ sessionId, status: SessionStatus.parse(await r.json()) });
+        })
+        // Unreachable for now: the dialog keeps what it shows, and the next status event loads it.
+        .catch(() => {});
+    const unsubscribe = subscribe((event) => {
+      if (
+        (event.type === 'session-status' && event.sessionId === sessionId) ||
+        event.type === 'snapshot'
+      ) {
+        void load();
+      }
+    });
+    void load();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [sessionId, open]);
+
+  return status && status.sessionId === sessionId ? status.status : undefined;
 }
 
 /**

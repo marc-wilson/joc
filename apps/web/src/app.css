@@ -1062,3 +1062,8 @@
     padding: var(--space-4);
   }
 }
+
+/* A session's Status (#104): the panel is @joc/ui's SessionStatusPanel. */
+.app-status-dialog .joc-dialog__panel {
+  max-width: calc(var(--sidebar) * 2);
+}
