@@ -44,6 +44,7 @@ import {
   type SessionChanges,
   type SessionPrompts,
   SessionReport,
+  SessionStatusReport,
   StoredSessionSettings,
   type StreamEvent,
   settleSessionSettings,
@@ -114,6 +115,7 @@ import { RateLimit } from './rate-limit.ts';
 import { cancelResume, claimResumes, finishResume, listResumes, requestResume } from './resumes.ts';
 import { reviewChanges } from './review-diff.ts';
 import { newSecret, secretsEqual } from './secrets.ts';
+import { getStatus, saveStatus } from './session-status.ts';
 import {
   applyReport,
   endWaiting,
@@ -651,6 +653,22 @@ export function createApp({
   app.get('/api/sessions/:id/commands', async (c) => {
     const commands = await getCommands(c.get('owner'), c.req.param('id'));
     return commands ? c.json(commands) : c.json({ error: 'No commands reported yet' }, 404);
+  });
+
+  // What the session runs on (version, model, MCP servers), from its plugin, for its Status view.
+  app.post('/api/status', async (c) => {
+    const parsed = SessionStatusReport.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+    if (await isDeleted(c.get('owner'), parsed.data.sessionId)) return ignored(c);
+    // 202 for a stale report: accepted, but a newer one already won.
+    return (await saveStatus(c.get('owner'), parsed.data))
+      ? c.json({ ok: true })
+      : c.body(null, 202);
+  });
+
+  app.get('/api/sessions/:id/status', async (c) => {
+    const status = await getStatus(c.get('owner'), c.req.param('id'));
+    return status ? c.json(status) : c.json({ error: 'No status reported yet' }, 404);
   });
 
   // From the dashboard: queue a prompt for the session.

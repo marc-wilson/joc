@@ -34,6 +34,7 @@ import {
   SessionCommands,
   SessionPrompts,
   SessionSettings,
+  SessionStatus,
 } from '@joc/protocol';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { z } from 'zod';
@@ -127,11 +128,13 @@ test('every API route needs an owner', async () => {
     ['GET', '/api/sessions/s/tasks/t/messages'],
     ['GET', '/api/sessions/s/changes'],
     ['GET', '/api/sessions/s/commands'],
+    ['GET', '/api/sessions/s/status'],
     ['GET', '/api/sessions/s/review'],
     ['POST', '/api/reports'],
     ['POST', '/api/messages'],
     ['POST', '/api/changes'],
     ['POST', '/api/commands'],
+    ['POST', '/api/status'],
     ['POST', '/api/sessions/s/prompts'],
     ['POST', '/api/sessions/s/prompts/claim'],
     ['GET', '/api/sessions/s/prompts'],
@@ -394,6 +397,41 @@ test('slash commands stay with their owner', async () => {
   const stale = { sessionId: 'shared-cmds', at: sent.at - 1, commands: commands('old') };
   assert.equal((await call('alice', '/api/commands', stale)).status, 202);
   assert.deepEqual(await listOf('alice', 'shared-cmds'), ['alice-review']);
+});
+
+test("a session's status stays with its owner", async () => {
+  const status = (who: Who) => ({
+    version: '2.1.300',
+    model: `claude-opus-5-5 for ${who}`,
+    cwd: `/Users/${who}/dev/atlas-web`,
+    mcp: [
+      { name: `${who}-linear`, state: 'connected', tools: 12 },
+      { name: 'harbor-docs', state: 'failed' },
+    ],
+  });
+  const statusOf = async (who: Who, id: string) =>
+    read(await call(who, `/api/sessions/${id}/status`), SessionStatus);
+  const sent = { sessionId: 'shared-status', at: ++clock };
+  assert.equal((await call('alice', '/api/status', { ...sent, ...status('alice') })).status, 200);
+  assert.equal((await call('bob', '/api/status', { ...sent, ...status('bob') })).status, 200);
+  const alices = await statusOf('alice', 'shared-status');
+  assert.deepEqual(
+    [alices.model, alices.cwd, alices.mcp.map((s) => s.name)],
+    ['claude-opus-5-5 for alice', '/Users/alice/dev/atlas-web', ['alice-linear', 'harbor-docs']],
+  );
+  assert.equal((await statusOf('bob', 'shared-status')).model, 'claude-opus-5-5 for bob');
+  assert.equal((await call('bob', '/api/sessions/alice-only-status/status')).status, 404);
+  // An older status than the stored one is dropped.
+  const stale = { sessionId: 'shared-status', at: sent.at - 1, ...status('bob'), mcp: [] };
+  assert.equal((await call('alice', '/api/status', stale)).status, 202);
+  assert.equal((await statusOf('alice', 'shared-status')).mcp.length, 2);
+  // Nothing about the login rides along: unknown fields are dropped.
+  const withEmail = { ...sent, at: ++clock, ...status('alice'), email: 'alice@harbor-labs.dev' };
+  assert.equal((await call('alice', '/api/status', withEmail)).status, 200);
+  const stored = (await (
+    await call('alice', '/api/sessions/shared-status/status')
+  ).json()) as object;
+  assert.equal('email' in stored, false);
 });
 
 test("prompts reach only their owner's plugin", async () => {
@@ -1609,6 +1647,8 @@ test('a session is deleted only by its owner, from a browser, and only once it e
   assert.equal((await call('alice', '/api/changes', firstDiff)).status, 200);
   const commands = { sessionId: GONE, at: ++clock, commands: [] };
   assert.equal((await call('alice', '/api/commands', commands)).status, 200);
+  const status = { sessionId: GONE, at: ++clock, version: '2.1.300', mcp: [] };
+  assert.equal((await call('alice', '/api/status', status)).status, 200);
   await call('alice', '/api/reports', report(GONE, { ...alice, state: 'offline' }));
   const pin = await app.request('/api/prefs', {
     method: 'PATCH',
@@ -1661,6 +1701,7 @@ test('a session is deleted only by its owner, from a browser, and only once it e
   assert.deepEqual(await read(await call('alice', `/api/sessions/${GONE}/messages`), Items), []);
   assert.equal((await call('alice', `/api/sessions/${GONE}/changes`)).status, 404);
   assert.equal((await call('alice', `/api/sessions/${GONE}/commands`)).status, 404);
+  assert.equal((await call('alice', `/api/sessions/${GONE}/status`)).status, 404);
   assert.equal((await call('alice', `/api/images/${image.id}`)).status, 404);
   assert.equal((await call('alice', `/api/images/${shared.id}`)).status, 200);
   const prefs = await read(await asPerson('alice', '/api/prefs'), PrefsSnapshot);

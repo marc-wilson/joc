@@ -23,6 +23,7 @@ import { type Owner, sessionKey } from './owner.ts';
 import { getPrefs, patchPrefs } from './prefs.ts';
 import { forgetPrompts, imagesSent } from './prompts.ts';
 import { forgetResumes, resumeUnderWay } from './resumes.ts';
+import { forgetStatus } from './session-status.ts';
 import { deletableSessions, forgetSession } from './sessions.ts';
 
 interface DeletionDoc {
@@ -288,6 +289,7 @@ async function forget(owner: Owner, sessionId: string, now: number): Promise<voi
   );
   await forgetChanges(owner, sessionId);
   await forgetCommands(owner, sessionId);
+  await forgetStatus(owner, sessionId);
   await forgetAnswers(owner, sessionId);
   await forgetAlerts(owner, sessionId);
   await forgetLaunches(owner, sessionId);
