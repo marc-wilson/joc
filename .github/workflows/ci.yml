@@ -20,10 +20,28 @@ jobs:
   # Lint, typecheck, test and build. The ruleset on main requires this job by name.
   check:
     runs-on: ubuntu-24.04
+    # A stuck run fails here instead of holding merges until GitHub's 6-hour limit.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # commitlint reads every commit in the PR
+
+      # One MongoDB for the server tests, as a single-node replica set: live updates need change
+      # streams. A step rather than a service container, since a service can't pass mongod
+      # `--replSet`.
+      - name: Start MongoDB
+        timeout-minutes: 2
+        run: |
+          docker run -d --name mongo -p 27017:27017 mongo:9.0.4 --replSet rs0 --bind_ip_all
+          until docker exec mongo mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' >/dev/null 2>&1; do
+            sleep 1
+          done
+          docker exec mongo mongosh --quiet --eval \
+            'rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "localhost:27017" }] })'
+          until docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary' | grep -q true; do
+            sleep 1
+          done
 
       - uses: pnpm/setup@v3
         with:
@@ -37,6 +55,9 @@ jobs:
       - run: pnpm check
       - run: pnpm typecheck
       - run: pnpm test
+        timeout-minutes: 10
+        env:
+          JOC_TEST_MONGODB_URI: mongodb://localhost:27017/?replicaSet=rs0
       - run: pnpm build
 
       # The title becomes the commit message of a squash merge, so it follows the same rules.
