@@ -1050,3 +1050,88 @@ ol.joc-pr-progress { margin: 0; padding: 0; list-style: none; }
 .joc-sstatus__server .joc-sstatus__mono { flex: 1 1 auto; }
 .joc-sstatus__meta { flex: none; font-size: 12px; line-height: 16px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 /* ===== End Session status (#104) ========================================================== */
+
+/* ===== Operations (#111) ===================================================================
+   Claude Design's Operations pass (ops.css), on JOC tokens. One row per piece of work: a 56px
+   grid of link cells at 1280 and up, the stages folded into one pipeline cell from 768 to 1279,
+   one 92px link per row on a phone. Needs-you rows get the 4px rail and soft tint; nothing else
+   on the page is orange. */
+:root {
+  --row-operation: 56px;        /* one row: line 1 (20px) and line 2 (16px) in a 44px cell */
+  --row-operation-phone: 92px;  /* a phone row: title, activity, pipeline */
+}
+.joc-ops { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: var(--bg-raised); box-shadow: var(--shadow-1); }
+.joc-ops__colhead { display: grid; column-gap: var(--space-4); align-items: center; height: var(--row-dense); padding: 0 var(--space-3); border-bottom: 1px solid var(--border); background: var(--bg-raised); font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-tertiary); white-space: nowrap; }
+.joc-ops__colhead > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.joc-ops__colnote { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 12px; margin-left: var(--space-4); }
+.joc-ops__group { display: flex; align-items: center; background: var(--bg-base); border-bottom: 1px solid var(--border-subtle); }
+.joc-ops__group:last-child { border-bottom: 0; }
+.joc-ops__group .joc-rgh { flex: 1; min-width: 0; border-bottom: 0; background: transparent; white-space: nowrap; overflow: hidden; position: static; }
+.joc-ops__group .joc-rgh > svg { flex: none; }
+.joc-ops__group .joc-rgh__name { flex: 0 1 auto; min-width: 0; }
+.joc-ops__group .joc-rgh__count, .joc-ops__group .joc-rgh .joc-sbadge { flex: none; white-space: nowrap; }
+.joc-ops__groupnote { flex: none; padding-right: var(--space-3); font-size: 12px; line-height: 16px; color: var(--text-tertiary); white-space: nowrap; }
+.joc-ops__empty { padding: var(--space-5) var(--space-3); border-bottom: 1px solid var(--border-subtle); font-size: 13px; color: var(--text-tertiary); }
+.joc-ops__none { display: flex; justify-content: center; padding: var(--space-12) var(--space-6); border-bottom: 1px solid var(--border-subtle); }
+.joc-ops__foot { padding: var(--space-2) var(--space-3); font-size: 12px; line-height: 16px; color: var(--text-tertiary); }
+.joc-ops__shipped { border-top: 1px solid var(--border-subtle); }
+
+/* Row */
+.joc-oprow { display: grid; column-gap: var(--space-4); align-items: center; box-sizing: border-box; height: var(--row-operation); padding: 0 var(--space-3); border-bottom: 1px solid var(--border-subtle); background: var(--bg-raised); transition: background-color var(--duration-instant) var(--ease-standard); }
+.joc-oprow:hover { background: var(--bg-hover); }
+.joc-oprow.is-needs, .joc-oprow.is-needs:hover { background: var(--state-needs-soft); box-shadow: inset 4px 0 0 var(--state-needs); }
+.joc-oprow.is-done .joc-oprow__title { color: var(--text-secondary); font-weight: 500; }
+a.joc-oprow { color: inherit; text-decoration: none; }
+.joc-oprow--phone { display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 2px; height: var(--row-operation-phone); padding: 0 var(--space-4); min-width: 0; }
+.joc-oprow--phone > * { min-width: 0; }
+.joc-oprow--phone:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+/* Cell: every reached cell is its own link */
+.joc-opcell { display: flex; flex-direction: column; justify-content: center; min-width: 0; height: 44px; margin: 0 -8px; padding: 0 8px; border-radius: var(--radius-md); color: inherit; text-decoration: none; box-sizing: border-box; transition: background-color var(--duration-instant) var(--ease-standard); }
+.joc-opcell--button { border: 0; background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+a.joc-opcell:hover, .joc-opcell--button:hover { background: var(--bg-selected); }
+a.joc-opcell:focus-visible, .joc-opcell--button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.joc-opcell__l1 { display: flex; align-items: center; gap: 6px; min-width: 0; height: 20px; white-space: nowrap; font-size: 13px; line-height: 20px; }
+.joc-opcell__l2 { display: flex; align-items: center; gap: 6px; min-width: 0; height: 20px; font-size: 12px; line-height: 16px; color: var(--text-tertiary); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.joc-opcell__l1 .joc-sbadge, .joc-opcell__l2 .joc-sbadge { margin-right: 0; flex: none; }
+.joc-oprow__title { flex: 1 1 auto; font-weight: 550; color: var(--text-primary); }
+.joc-op-trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.joc-op-sec { color: var(--text-secondary); }
+.joc-op-ter { color: var(--text-tertiary); }
+.joc-op-pri { color: var(--text-primary); }
+.joc-op-needs { color: var(--state-needs); font-weight: 550; }
+.joc-op-fail { color: var(--ci-fail); }
+.joc-op-link { color: var(--accent); }
+.joc-op-num { font-variant-numeric: tabular-nums; flex: none; }
+.joc-op-mono { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.joc-op-icon { display: inline-flex; flex: none; color: var(--text-secondary); }
+.joc-op-icon.is-muted { color: var(--text-tertiary); }
+.joc-op-avs { display: inline-flex; flex: none; }
+.joc-op-avs .joc-avatar { box-shadow: 0 0 0 2px var(--bg-raised); }
+.joc-op-avs .joc-avatar + .joc-avatar { margin-left: -4px; }
+.joc-op-branch { display: inline-flex; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.joc-op-branch .joc-branch { min-width: 0; }
+.joc-op-branch .joc-branch > span { overflow: hidden; text-overflow: ellipsis; }
+/* The destination, named 500ms after the pointer settles on a cell. */
+.joc-op-tip { position: fixed; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--radius-md); background: var(--bg-overlay); box-shadow: var(--shadow-2); font-size: 12px; line-height: 16px; color: var(--text-primary); white-space: nowrap; z-index: var(--z-popover); pointer-events: none; animation: joc-fade var(--duration-fade) var(--ease-standard) both; }
+
+/* Compact pipeline: the stages on one or two lines; the least important drop behind "+N". */
+.joc-op-pieces { display: flex; align-items: center; gap: 12px; min-width: 0; overflow: hidden; white-space: nowrap; height: 20px; }
+.joc-op-pieces.is-wrap { flex-wrap: wrap; row-gap: 4px; height: auto; max-height: 36px; white-space: normal; }
+.joc-op-piece { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 12px; line-height: 16px; color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.joc-op-piece.is-muted { color: var(--text-tertiary); }
+.joc-op-piece.is-fail { color: var(--ci-fail); }
+.joc-op-tag { display: inline-flex; align-items: center; flex: none; height: 16px; padding: 0 5px; border: 1px solid var(--border); border-radius: var(--radius-sm); font: 500 11px/14px var(--font-mono); color: var(--text-secondary); }
+
+/* First run: GitHub not connected yet */
+.joc-ops-connect { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-raised); }
+.joc-ops-connect__text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.joc-ops-connect__title { font-weight: 550; font-size: 13px; line-height: 20px; color: var(--text-primary); }
+.joc-ops-connect__body { font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+@media (max-width: 767px) {
+  .joc-ops-connect { flex-wrap: wrap; }
+}
+.joc-op-small { font-size: 12px; line-height: 16px; }
+.joc-op-grow { flex: 1 1 0; min-width: 0; }
+.joc-op-span { grid-column: 3 / -1; }
+/* ===== End Operations (#111) ============================================================== */

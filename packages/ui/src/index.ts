@@ -164,6 +164,23 @@ export {
   type ToastStackProps,
 } from './notifications.tsx';
 export {
+  OPERATIONS_MIN_WORK,
+  OperationRow,
+  type OperationRowProps,
+  OperationsConnect,
+  type OperationsConnectProps,
+  OperationsGroup,
+  type OperationsGroupProps,
+  OperationsHead,
+  type OperationsHeadProps,
+  type OperationsLayout,
+  type OpLink,
+  type OpPiece,
+  operationsColumns,
+  operationsFixedWidth,
+} from './operations.tsx';
+export { type FitPiece, fitPieces } from './ops-fit.ts';
+export {
   Card,
   CardNote,
   type CardProps,
