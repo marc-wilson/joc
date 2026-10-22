@@ -31,6 +31,8 @@ export interface NavBarProps {
   userMenu?: MenuItem[];
   /** The notifications bell, first in the right-hand cluster. */
   notifications?: NotificationBellProps;
+  /** An icon link to the project's home, e.g. its GitHub repo; opens in a new tab. */
+  repo?: { href: string; label: string };
 }
 
 export function NavBar({
@@ -41,6 +43,7 @@ export function NavBar({
   user,
   userMenu,
   notifications,
+  repo,
 }: NavBarProps) {
   return (
     <header className="joc-nav">
@@ -85,6 +88,18 @@ export function NavBar({
       </nav>
       <div className="joc-nav__right">
         {notifications ? <NotificationBell {...notifications} /> : null}
+        {repo ? (
+          <a
+            className="joc-nav__icon"
+            href={repo.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={repo.label}
+            title={repo.label}
+          >
+            <Icon name="github" />
+          </a>
+        ) : null}
         {machine ? (
           <span className={cx('joc-nav__machine', machineOffline && 'is-offline')}>
             <span className="joc-nav__link-dot" aria-hidden="true" />
