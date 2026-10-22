@@ -756,6 +756,71 @@ export const ChangesReport = z.object({
 });
 export type ChangesReport = z.infer<typeof ChangesReport>;
 
+/** The most files a pull request's diff lists: GitHub lists no more. */
+export const MAX_PULL_DIFF_FILES = 3000;
+
+/** One file of a pull request's diff, as GitHub lists it. */
+export const PullDiffFile = z.object({
+  path: z.string().max(1000),
+  /** Where a renamed file was. */
+  oldPath: z.string().max(1000).optional(),
+  status: z.enum(['added', 'modified', 'deleted', 'renamed']),
+  additions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+  /**
+   * Its hunks, as `git diff` prints them from the first `@@` on. Left out for a binary file, one
+   * too large for GitHub to show, and the files past MAX_DIFF_BYTES of patches in all.
+   */
+  patch: z.string().max(MAX_DIFF_BYTES).optional(),
+});
+export type PullDiffFile = z.infer<typeof PullDiffFile>;
+
+/**
+ * Why a review session's Changes can't show its pull request's diff: this JOC has no GitHub App
+ * (`no-app`); the App doesn't reach the pull request for its person, or may not show it them
+ * (`not-reached`); GitHub didn't answer (`unreadable`).
+ */
+export const PullDiffMissing = z.enum(['no-app', 'not-reached', 'unreadable']);
+export type PullDiffMissing = z.infer<typeof PullDiffMissing>;
+
+/**
+ * `GET /api/sessions/:id/changes`. A session's own changes, as its plugin reads them with git
+ * (`branch`). A review session shows the pull request it reviews instead, never its folder's
+ * branch: the pull request's files against its base, read through the JOC GitHub App once per
+ * head commit (`pull`), or why they can't be read (`unavailable`).
+ */
+export const SessionChanges = z.discriminatedUnion('source', [
+  z.object({
+    source: z.literal('branch'),
+    /** What the diff is against, e.g. `origin/main`, or `HEAD` for uncommitted changes only. */
+    base: z.string().max(200),
+    diff: z.string().max(MAX_DIFF_BYTES),
+    truncated: z.boolean(),
+    updatedAt: z.iso.datetime(),
+  }),
+  z.object({
+    source: z.literal('pull'),
+    repo: z.string().min(1).max(200),
+    number: z.number().int().positive(),
+    /** The branch it merges into. */
+    base: z.string().max(300),
+    /** The head commit the files are from. */
+    headSha: z.string().regex(/^[0-9a-f]{7,64}$/),
+    files: z.array(PullDiffFile).max(MAX_PULL_DIFF_FILES),
+    /** Some files, or some patches, are left out: past GitHub's or JOC's limits. */
+    truncated: z.boolean(),
+    /** When JOC read them from GitHub. */
+    updatedAt: z.iso.datetime(),
+  }),
+  z.object({
+    source: z.literal('unavailable'),
+    repo: z.string().min(1).max(200),
+    number: z.number().int().positive(),
+    reason: PullDiffMissing,
+  }),
+]);
+export type SessionChanges = z.infer<typeof SessionChanges>;
+
 /** Where a slash command comes from: Claude Code, the repo's `.claude`, `~/.claude`, a plugin. */
 export const CommandSource = z.enum(['builtin', 'project', 'user', 'plugin']);
 export type CommandSource = z.infer<typeof CommandSource>;
