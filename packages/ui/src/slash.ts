@@ -22,6 +22,8 @@ export interface ComposerSuggestion {
   source: SuggestionSource;
   /** A skill's: the project's or the user's. */
   scope?: 'project' | 'user';
+  /** It only opens an interactive panel in the session's terminal; JOC shows nothing of it. */
+  terminal?: boolean;
 }
 
 /** One row of the list. */
