@@ -1067,3 +1067,60 @@
 .app-status-dialog .joc-dialog__panel {
   max-width: calc(var(--sidebar) * 2);
 }
+
+/* Operations (#111): a full-width page; the gutter narrows with the window. */
+.app-ops {
+  padding-bottom: var(--space-12);
+}
+
+.app-ops__synced {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.app-ops .joc-sechead {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
+}
+
+.app-ops .joc-sechead__text {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.app-ops__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.app-ops__search {
+  width: 300px;
+  max-width: 100%;
+}
+
+.app-ops__note {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 1279px) {
+  .app-ops {
+    padding-inline: var(--space-6);
+  }
+}
+
+@media (max-width: 767px) {
+  .app-ops {
+    padding-inline: var(--space-4);
+  }
+
+  .app-ops .joc-sechead__actions {
+    flex-basis: 100%;
+  }
+}

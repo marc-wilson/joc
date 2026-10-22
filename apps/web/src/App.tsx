@@ -345,7 +345,10 @@ export default function App() {
   const liveMates = teamCounts(team).active;
   // The teammate the Team tab shows, per session.
   const [mates, setMates] = useState<Record<string, string>>({});
-  const [tab, setTab] = useState('conversation');
+  // A link like /?session=<id>&tab=changes (from Operations' PR cell) opens its Changes tab.
+  const [tab, setTab] = useState(() =>
+    new URLSearchParams(location.search).get('tab') === 'changes' ? 'changes' : 'conversation',
+  );
   // A background task's call to bring into view in the conversation, once (Design gaps, #92).
   const [reveal, setReveal] = useState<string>();
   const review = useSessionReview(selected);

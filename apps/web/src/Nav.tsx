@@ -1,18 +1,28 @@
 import { NavBar } from '@joc/ui';
 import { reconnect, signOut, useAuth } from './auth.ts';
 import { GitHubConnect } from './GitHubConnect.tsx';
-import { useSessions } from './hooks.ts';
+import { useOperations, useSessions } from './hooks.ts';
 import { useNotificationCenter } from './Notifications.tsx';
+import { opsNeeds as opsNeedsOf } from './operations.ts';
 import { JOC_NEW_ISSUE_URL, JOC_REPO_URL } from './repo.ts';
 import { Updates } from './Updates.tsx';
 
-export type Page = 'sessions' | 'github' | 'history' | 'notifications' | 'machines' | 'settings';
+export type Page =
+  | 'sessions'
+  | 'operations'
+  | 'github'
+  | 'history'
+  | 'notifications'
+  | 'machines'
+  | 'settings';
 
 interface Props {
   page: Page;
   connected?: boolean;
   /** The session on screen, so nothing announces what the person is looking at. */
   viewing?: string;
+  /** Operations' needs-you count, when the page has its rows already. */
+  opsNeeds?: number;
 }
 
 const go = (path: string) => location.assign(path);
@@ -23,10 +33,11 @@ const openInNewTab = (url: string) => window.open(url, '_blank', 'noopener,noref
  * The nav bar every page shares, with the notifications bell. It also raises the toasts,
  * desktop notifications and the tab's title.
  */
-export function Nav({ page, connected, viewing }: Props) {
+export function Nav({ page, connected, viewing, opsNeeds }: Props) {
   const auth = useAuth();
   const live = useSessions();
   const needs = live.sessions.filter((s) => s.state === 'needs').length;
+  const ops = useOperations(opsNeeds === undefined);
   const center = useNotificationCenter(viewing);
   const github = auth.status === 'signedIn' ? auth.github : undefined;
 
@@ -35,6 +46,12 @@ export function Nav({ page, connected, viewing }: Props) {
       <NavBar
         items={[
           { id: 'sessions', label: 'Sessions', href: '/', needs, pulse: center.needsArrivals },
+          {
+            id: 'operations',
+            label: 'Operations',
+            href: '/operations',
+            needs: opsNeeds ?? opsNeedsOf(ops),
+          },
           { id: 'github', label: 'GitHub', href: '/github' },
           { id: 'history', label: 'History', href: '/history' },
           { id: 'machines', label: 'Machines', href: '/link' },

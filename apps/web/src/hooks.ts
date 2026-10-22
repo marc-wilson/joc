@@ -7,6 +7,7 @@ import {
   HistorySession,
   Launch,
   type LaunchRequest,
+  Operations,
   type PromptStatus,
   type PullDiffMissing,
   Resume,
@@ -666,4 +667,41 @@ export async function askDeletes(sessionIds: string[]): Promise<Deletion[] | { e
   } catch {
     return { error: "JOC couldn't reach the server. Try again." };
   }
+}
+
+/** How long a burst of live updates settles before Operations is read again. */
+const OPERATIONS_SETTLE_MS = 400;
+
+/**
+ * The owner's Operations rows, read again shortly after any session or GitHub update, so its
+ * cells change in place as the stream says things moved.
+ */
+export function useOperations(enabled = true): Operations | undefined {
+  const [ops, setOps] = useState<Operations>();
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = () =>
+      apiFetch('/api/operations')
+        .then(async (r) => {
+          if (!r.ok || cancelled) return;
+          const parsed = Operations.safeParse(await r.json());
+          if (parsed.success && !cancelled) setOps(parsed.data);
+        })
+        // Unreachable for now: the next update or reconnect snapshot reads it again.
+        .catch(() => {});
+    const unsubscribe = subscribe((event) => {
+      if (!['snapshot', 'session', 'github', 'deleted'].includes(event.type)) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => void load(), OPERATIONS_SETTLE_MS);
+    });
+    void load();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [enabled]);
+  return ops;
 }
