@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createHmac, createPublicKey, createVerify, generateKeyPairSync } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { closeClient } from '@joc/db';
-import { Alert, GitHubSnapshot, ReviewedPullRequest } from '@joc/protocol';
+import { Alert, GitHubSnapshot, ReviewedPullRequest, SessionChanges } from '@joc/protocol';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { z } from 'zod';
 import { createApp } from './app.ts';
@@ -30,8 +30,13 @@ const SECRET = 'webhook-test-secret';
 
 /** A stand-in for GitHub's API, as the App reads it: by path. */
 const answers = new Map<string, unknown>();
+/** Every path the App read, in order. */
+const asked: string[] = [];
 const api: GitHubAppApi = {
-  get: async (_installation, path) => answers.get(path),
+  get: async (_installation, path) => {
+    asked.push(path);
+    return answers.get(path);
+  },
   about: async () => ({ slug: 'joc-dashboard', name: 'JOC Dashboard' }),
 };
 const webhooks = createWebhooks(SECRET, { api });
@@ -396,6 +401,109 @@ test('a reviewed pull request no event brought is read from GitHub once', async 
   // Not a review session: nothing to show.
   await reviewSession('dana', 'dana-plain', '');
   assert.equal((await get('dana', '/api/sessions/dana-plain/review')).status, 404);
+});
+
+const changesOf = async (who: Who, sessionId: string) => {
+  const res = await get(who, `/api/sessions/${sessionId}/changes`);
+  assert.equal(res.status, 200);
+  return SessionChanges.parse(await res.json());
+};
+
+const filesPage = (number: number, page = 1) =>
+  `/repos/${REPO}/pulls/${number}/files?per_page=100&page=${page}`;
+
+test("a review session's Changes are its pull request's files, read once per head", async () => {
+  const extra = { base: { ref: 'main', repo: { full_name: REPO, private: false } } };
+  await send('pull_request', pullEvent('opened', { number: 34, sha: 'd00d0034', extra }));
+  answers.set(filesPage(34), [
+    {
+      filename: 'src/auth/redirect.ts',
+      status: 'modified',
+      additions: 2,
+      deletions: 1,
+      patch:
+        '@@ -1,3 +1,4 @@\n import { next } from "./next";\n-redirect("/");\n+redirect(next());\n+log("signed in");',
+    },
+    {
+      filename: 'src/auth/session.ts',
+      previous_filename: 'src/session.ts',
+      status: 'renamed',
+      additions: 0,
+      deletions: 0,
+    },
+    { filename: 'public/logo.png', status: 'added', additions: 0, deletions: 0 },
+  ]);
+  await reviewSession('bob', 'bob-review-34', '34');
+  // Bob's folder has another branch checked out; its diff isn't what he reviews.
+  await app.request('/api/changes', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${tokens.get('bob')}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: 'bob-review-34',
+      at: Date.now(),
+      base: 'origin/main',
+      diff: 'diff --git a/other.ts b/other.ts\n',
+      truncated: false,
+    }),
+  });
+
+  asked.length = 0;
+  const changes = await changesOf('bob', 'bob-review-34');
+  assert.equal(changes.source, 'pull');
+  if (changes.source !== 'pull') return;
+  assert.deepEqual(
+    [changes.repo, changes.number, changes.base, changes.headSha, changes.truncated],
+    [REPO, 34, 'main', 'd00d0034', false],
+  );
+  assert.deepEqual(
+    changes.files.map((f) => [f.path, f.oldPath, f.status, f.additions, f.deletions, !!f.patch]),
+    [
+      ['src/auth/redirect.ts', undefined, 'modified', 2, 1, true],
+      ['src/auth/session.ts', 'src/session.ts', 'renamed', 0, 0, false],
+      ['public/logo.png', undefined, 'added', 0, 0, false],
+    ],
+  );
+  assert.deepEqual(asked, [filesPage(34)]);
+
+  // Asked again at the same head: kept, not read again.
+  await changesOf('bob', 'bob-review-34');
+  assert.deepEqual(asked, [filesPage(34)]);
+
+  // A push moves the head: read afresh.
+  answers.set(filesPage(34), [
+    { filename: 'src/auth/redirect.ts', status: 'modified', additions: 1, deletions: 1 },
+  ]);
+  await send('pull_request', pullEvent('synchronize', { number: 34, sha: 'd00d0035', extra }));
+  const pushed = await changesOf('bob', 'bob-review-34');
+  assert.deepEqual(pushed.source === 'pull' && [pushed.headSha, pushed.files.length], [
+    'd00d0035',
+    1,
+  ]);
+  // (The lists' own read of its first files, without patches, aside.)
+  assert.deepEqual(
+    asked.filter((p) => p.includes('&page=')),
+    [filesPage(34), filesPage(34)],
+  );
+});
+
+test("a review session's Changes say why its pull request's diff can't be read", async () => {
+  // A private pull request Dana isn't on: not hers to see, so no diff, and not her folder's.
+  const extra = { base: { ref: 'main', repo: { full_name: REPO, private: true } } };
+  await send('pull_request', pullEvent('opened', { number: 35, sha: 'd00d0036', extra }));
+  await reviewSession('dana', 'dana-review-35', '35');
+  assert.deepEqual(await changesOf('dana', 'dana-review-35'), {
+    source: 'unavailable',
+    repo: REPO,
+    number: 35,
+    reason: 'not-reached',
+  });
+  // Alice wrote it, but GitHub doesn't answer: unreadable, and not asked again straight away.
+  await reviewSession('alice', 'alice-review-35', '35');
+  asked.length = 0;
+  const failed = await changesOf('alice', 'alice-review-35');
+  assert.equal(failed.source === 'unavailable' && failed.reason, 'unreadable');
+  await changesOf('alice', 'alice-review-35');
+  assert.deepEqual(asked, [filesPage(35)]);
 });
 
 test('uninstalling hands GitHub back to the plugins', async () => {
