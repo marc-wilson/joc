@@ -974,6 +974,16 @@ ol.joc-pr-progress { margin: 0; padding: 0; list-style: none; }
 .joc-nav__pages { display: none; }
 .joc-nav__pages .joc-menu__list { left: 0; right: auto; }
 .joc-nav__right { flex: none; }
+/* An icon link in the right-hand cluster (the GitHub repo): drawn like the bell beside it. */
+.joc-nav__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--control-md); height: var(--control-md); border-radius: var(--radius-md);
+  color: var(--text-secondary); text-decoration: none;
+  transition: background-color var(--duration-instant) var(--ease-standard),
+              color var(--duration-instant) var(--ease-standard);
+}
+.joc-nav__icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+.joc-nav__icon:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 @media (max-width: 719px) {
   .joc-nav { gap: var(--space-3); padding: 0 var(--space-3) 0 var(--space-4); }
   .joc-nav__links { display: none; }
