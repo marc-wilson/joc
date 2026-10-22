@@ -3,59 +3,94 @@ import type { Session, SlashCommand } from '@joc/protocol';
 import type { CommandsStatus, ComposerSuggestion } from '@joc/ui/slash';
 
 /**
+ * Claude Code's built-ins that only open an interactive panel in the session's terminal: sent
+ * from JOC they open there, and JOC shows nothing of them.
+ */
+export const TERMINAL_ONLY: ReadonlySet<string> = new Set([
+  'agents',
+  'config',
+  'doctor',
+  'export',
+  'help',
+  'hooks',
+  'ide',
+  'login',
+  'logout',
+  'mcp',
+  'memory',
+  'model',
+  'permissions',
+  'plugin',
+  'resume',
+  'stats',
+  'status',
+  'terminal-setup',
+  'theme',
+  'usage',
+  'vim',
+]);
+
+/** Marks a built-in that only opens in the terminal. */
+function marked(c: ComposerSuggestion): ComposerSuggestion {
+  return c.source === 'builtin' && TERMINAL_ONLY.has(c.name) ? { ...c, terminal: true } : c;
+}
+
+/**
  * Claude Code's own commands, which JOC knows without asking: the composer suggests these while
  * the session's own list is on its way. Once it's in, the session's list replaces them.
  */
-export const BUILTIN_COMMANDS: ComposerSuggestion[] = [
-  { name: 'add-dir', args: '<path>', description: 'Add a working folder', source: 'builtin' },
-  { name: 'clear', description: 'Clear the conversation and start fresh', source: 'builtin' },
-  {
-    name: 'compact',
-    args: '[instructions]',
-    description: 'Summarise the conversation to free up context',
-    source: 'builtin',
-  },
-  { name: 'config', description: 'Open the settings', source: 'builtin' },
-  { name: 'context', description: 'Show what is using the context window', source: 'builtin' },
-  { name: 'doctor', description: 'Check the Claude Code install', source: 'builtin' },
-  { name: 'help', description: 'Show help and the commands', source: 'builtin' },
-  { name: 'init', description: 'Write a CLAUDE.md for this codebase', source: 'builtin' },
-  { name: 'mcp', description: 'Manage MCP servers', source: 'builtin' },
-  { name: 'memory', description: 'Edit the memory files', source: 'builtin' },
-  {
-    name: 'model',
-    args: '[model]',
-    description: 'Switch the model for this session',
-    source: 'builtin',
-  },
-  { name: 'plugin', description: 'Manage plugins', source: 'builtin' },
-  {
-    name: 'reload-plugins',
-    description: 'Reload plugins without restarting the session',
-    source: 'builtin',
-  },
-  { name: 'rename', args: '[name]', description: 'Rename this session', source: 'builtin' },
-  {
-    name: 'resume',
-    args: '[session]',
-    description: 'Resume a previous conversation',
-    source: 'builtin',
-  },
-  { name: 'status', description: 'Show the version, model and account', source: 'builtin' },
-  { name: 'usage', description: 'Show plan usage limits', source: 'builtin' },
-];
+export const BUILTIN_COMMANDS: ComposerSuggestion[] = (
+  [
+    { name: 'add-dir', args: '<path>', description: 'Add a working folder', source: 'builtin' },
+    { name: 'clear', description: 'Clear the conversation and start fresh', source: 'builtin' },
+    {
+      name: 'compact',
+      args: '[instructions]',
+      description: 'Summarise the conversation to free up context',
+      source: 'builtin',
+    },
+    { name: 'config', description: 'Open the settings', source: 'builtin' },
+    { name: 'context', description: 'Show what is using the context window', source: 'builtin' },
+    { name: 'doctor', description: 'Check the Claude Code install', source: 'builtin' },
+    { name: 'help', description: 'Show help and the commands', source: 'builtin' },
+    { name: 'init', description: 'Write a CLAUDE.md for this codebase', source: 'builtin' },
+    { name: 'mcp', description: 'Manage MCP servers', source: 'builtin' },
+    { name: 'memory', description: 'Edit the memory files', source: 'builtin' },
+    {
+      name: 'model',
+      args: '[model]',
+      description: 'Switch the model for this session',
+      source: 'builtin',
+    },
+    { name: 'plugin', description: 'Manage plugins', source: 'builtin' },
+    {
+      name: 'reload-plugins',
+      description: 'Reload plugins without restarting the session',
+      source: 'builtin',
+    },
+    { name: 'rename', args: '[name]', description: 'Rename this session', source: 'builtin' },
+    {
+      name: 'resume',
+      args: '[session]',
+      description: 'Resume a previous conversation',
+      source: 'builtin',
+    },
+    { name: 'status', description: 'Show the version, model and account', source: 'builtin' },
+    { name: 'usage', description: 'Show plan usage limits', source: 'builtin' },
+  ] satisfies ComposerSuggestion[]
+).map(marked);
 
 /** A command as the composer suggests it: a skill shows as one, with whose it is. */
 export function suggestion(c: SlashCommand): ComposerSuggestion {
   const skill = c.skill && (c.source === 'project' || c.source === 'user');
-  return {
+  return marked({
     name: c.name,
     description: c.description,
     ...(c.argumentHint ? { args: c.argumentHint } : {}),
     ...(c.plugin ? { plugin: c.plugin } : {}),
     source: skill ? 'skill' : c.source,
     ...(skill ? { scope: c.source as 'project' | 'user' } : {}),
-  };
+  });
 }
 
 /** The first plugin version that sends its session's commands. */

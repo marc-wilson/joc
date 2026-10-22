@@ -104,6 +104,9 @@ export function CommandList({
                       ) : null}
                     </span>
                     <span className="joc-cmdlist__desc">{row.command.description}</span>
+                    {row.command.terminal ? (
+                      <span className="joc-cmdlist__term">Opens in the terminal</span>
+                    ) : null}
                     <span
                       className={cx(
                         'joc-cmdlist__src',

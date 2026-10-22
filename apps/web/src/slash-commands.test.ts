@@ -22,6 +22,18 @@ test('a reported command becomes a suggestion; a skill says whose it is', () => 
   ]);
 });
 
+test('built-ins that only open a panel in the terminal say so', () => {
+  const terminal = (name: string, source: SlashCommand['source'] = 'builtin') =>
+    suggestion({ name, description: '', source }).terminal;
+  assert.equal(terminal('status'), true);
+  assert.equal(terminal('config'), true);
+  assert.equal(terminal('compact'), undefined);
+  // A project's own command of the same name runs as any other.
+  assert.equal(terminal('status', 'project'), undefined);
+  const fallback = (name: string) => BUILTIN_COMMANDS.find((c) => c.name === name)?.terminal;
+  assert.deepEqual([fallback('usage'), fallback('clear')], [true, undefined]);
+});
+
 test('plugins from 0.11.0 send their commands', () => {
   assert.equal(sendsCommands('0.11.0'), true);
   assert.equal(sendsCommands('1.0.0'), true);
