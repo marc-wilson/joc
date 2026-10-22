@@ -1,5 +1,7 @@
 // Parses `git diff` output into files, hunks and numbered lines.
 
+import type { PullDiffFile } from '@joc/protocol';
+
 export type DiffLineKind = 'add' | 'del' | 'ctx';
 
 export interface DiffLine {
@@ -23,6 +25,8 @@ export interface DiffFile {
   additions: number;
   deletions: number;
   binary: boolean;
+  /** Why a file shows no lines though it changed: GitHub gave no patch for it. */
+  note?: string;
   hunks: DiffHunk[];
 }
 
@@ -117,4 +121,21 @@ export function splitRows(lines: DiffLine[]): SplitRow[] {
     }
   }
   return rows;
+}
+
+/**
+ * A pull request's file, as GitHub lists it, in the same shape: its paths, status and counts are
+ * GitHub's, its lines parsed from the patch.
+ */
+export function pullFile(file: PullDiffFile): DiffFile {
+  const { path, oldPath, status, additions, deletions, patch } = file;
+  const hunks = patch
+    ? (parseDiff(`diff --git a/${path} b/${path}\n${patch}`)[0]?.hunks ?? [])
+    : [];
+  const note = patch
+    ? undefined
+    : status === 'renamed' && !additions && !deletions
+      ? 'Renamed, with no changes inside'
+      : 'No diff to show: binary, or too large to show';
+  return { path, oldPath, status, additions, deletions, binary: false, note, hunks };
 }

@@ -322,7 +322,7 @@ export default function App() {
   const [newIn, setNewIn] = useState<string>();
   useReadWhileViewing(useNoteData().alerts, selected?.id);
   const items = useConversation(selected?.id);
-  const changes = useChanges(selected?.id);
+  const changes = useChanges(selected?.id, !!selected?.review);
   const commands = useCommands(selected?.id);
   const dockRef = useCmdlistMax();
   const toastClear = useToastClearance();
