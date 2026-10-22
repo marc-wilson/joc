@@ -230,6 +230,7 @@ export {
   SessionRow,
   type SessionRowProps,
 } from './session.tsx';
+export { SessionStatusPanel, type SessionStatusPanelProps } from './session-status.tsx';
 export {
   type SaveStatus,
   SettingRow,
@@ -259,6 +260,7 @@ export {
   StateDot,
   type StateDotProps,
 } from './state.tsx';
+export { mcpSummary, type StatusMcpServer } from './status.ts';
 export {
   SessionTeammate,
   type SessionTeammateProps,

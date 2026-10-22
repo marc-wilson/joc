@@ -1034,3 +1034,19 @@ ol.joc-pr-progress { margin: 0; padding: 0; list-style: none; }
 /* Toasts sit above the composer while one is on the page (--toast-clear is its dock's height). */
 .joc-notif-toasts.is-fixed { bottom: calc(var(--toast-clear, 0px) + var(--space-4)); }
 /* ===== End Theme and narrow layouts (#91) ================================================= */
+
+/* ===== Session status (#104) ===============================================================
+   A session's Status view: label and value rows, the MCP servers with a CI mark each. */
+.joc-sstatus { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: var(--space-6); row-gap: var(--space-3); margin: 0; padding: var(--space-4); }
+.joc-sstatus__label { margin: 0; font-size: 12px; line-height: 24px; color: var(--text-tertiary); white-space: nowrap; }
+.joc-sstatus__value { margin: 0; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); font-size: 13px; line-height: 24px; color: var(--text-primary); }
+.joc-sstatus__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.joc-sstatus__line { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
+.joc-sstatus__mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; line-height: 24px; color: var(--text-primary); }
+.joc-sstatus__none { color: var(--text-tertiary); }
+.joc-sstatus__servers { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
+.joc-sstatus__server { display: flex; align-items: center; gap: var(--space-2); min-width: 0; height: var(--row-dense); padding: 0 var(--space-3); }
+.joc-sstatus__server + .joc-sstatus__server { border-top: 1px solid var(--border-subtle); }
+.joc-sstatus__server .joc-sstatus__mono { flex: 1 1 auto; }
+.joc-sstatus__meta { flex: none; font-size: 12px; line-height: 16px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+/* ===== End Session status (#104) ========================================================== */
