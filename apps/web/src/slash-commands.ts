@@ -96,8 +96,8 @@ export function suggestion(c: SlashCommand): ComposerSuggestion {
 /** The first plugin version that sends its session's commands. */
 const SENDS_COMMANDS = [0, 11, 0];
 
-/** Whether a session's plugin sends its commands, by the version it runs. */
-export function sendsCommands(plugin: string | undefined): boolean {
+/** Whether a session's plugin runs `min` or later; false when it doesn't say its version. */
+export function runsAtLeast(plugin: string | undefined, min: readonly number[]): boolean {
   const parts = plugin
     ?.match(/^(\d+)\.(\d+)\.(\d+)/)
     ?.slice(1)
@@ -105,11 +105,14 @@ export function sendsCommands(plugin: string | undefined): boolean {
   if (!parts) return false;
   for (let i = 0; i < 3; i++) {
     const a = parts[i] ?? 0;
-    const b = SENDS_COMMANDS[i] ?? 0;
+    const b = min[i] ?? 0;
     if (a !== b) return a > b;
   }
   return true;
 }
+
+/** Whether a session's plugin sends its commands, by the version it runs. */
+export const sendsCommands = (plugin: string | undefined) => runsAtLeast(plugin, SENDS_COMMANDS);
 
 /** What the composer suggests for a session, and whether its own commands are in yet. */
 export function sessionSuggestions(

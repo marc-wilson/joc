@@ -74,6 +74,7 @@ import { updatePrefs, usePrefs } from './prefs.ts';
 import { useResumeView } from './Resuming.tsx';
 import { ReviewPanel, ReviewTab, ReviewVerdict, useSessionReview } from './ReviewPR.tsx';
 import { reviewGone, reviewRowText } from './review-rows.ts';
+import { SessionStatusDialog } from './SessionStatus.tsx';
 import { isQuiet, keepNote, matchesFilter } from './session-list.ts';
 import {
   activeAt,
@@ -173,17 +174,19 @@ async function uploadImage(file: File): Promise<ImageRef | undefined> {
   return parsed.success ? parsed.data : undefined;
 }
 
-/** The session header's actions: how a delete stands, and the menu with Delete in it. */
+/** The session header's actions: how a delete stands, and the menu with Status and Delete. */
 function SessionActions({
   session,
   line,
   now,
+  onStatus,
   onDelete,
   onResume,
 }: {
   session: Session;
   line?: { text: string; failed: boolean };
   now: number;
+  onStatus: () => void;
   onDelete: () => void;
   /** Resume, for an ended session that can be resumed now. */
   onResume?: () => void;
@@ -204,6 +207,7 @@ function SessionActions({
       <OverflowMenu
         label="Session actions"
         items={[
+          { id: 'status', label: 'Status', icon: 'terminal', onSelect: onStatus },
           {
             id: 'delete',
             label: 'Delete session…',
@@ -284,6 +288,9 @@ export default function App() {
   const deletes = useDeletes();
   // The session whose delete is being confirmed.
   const [deleting, setDeleting] = useState<Session>();
+  // The session whose Status is open, kept current as it updates while live.
+  const [statusOf, setStatusOf] = useState<Session>();
+  const statusSession = statusOf && (sessions.find((s) => s.id === statusOf.id) ?? statusOf);
   const now = useNow();
   // A link like /?session=<id> (from a PR on the GitHub page) opens that session.
   const [selectedId, setSelectedId] = useState(
@@ -790,6 +797,7 @@ export default function App() {
                   session={selected}
                   line={deletingLine(selected)}
                   now={now}
+                  onStatus={() => setStatusOf(selected)}
                   onDelete={() => setDeleting(selected)}
                   onResume={resuming?.canResume ? resuming.resume : undefined}
                 />
@@ -907,6 +915,9 @@ export default function App() {
           )}
         </main>
       </div>
+      {statusSession ? (
+        <SessionStatusDialog session={statusSession} onClose={() => setStatusOf(undefined)} />
+      ) : null}
       {deleting ? (
         <DeleteDialog
           sessions={[deleting]}
