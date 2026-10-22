@@ -217,10 +217,12 @@ test('transcript lines become conversation items', async () => {
       },
     }),
     JSON.stringify({ type: 'ai-title', aiTitle: 'Login loop fix' }),
+    JSON.stringify({ type: 'custom-title', customTitle: 'Auth cleanup', sessionId: 's1' }),
     'not json',
   ];
-  const { items, aiTitle } = parseLines(lines, '/work');
+  const { items, aiTitle, customTitle } = parseLines(lines, '/work');
   assert.equal(aiTitle, 'Login loop fix');
+  assert.equal(customTitle, 'Auth cleanup');
   assert.deepEqual(
     items.map((i) => [
       i.kind,
