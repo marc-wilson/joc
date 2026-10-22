@@ -7,6 +7,7 @@ import { GitHubPage } from './GitHub.tsx';
 import { HistoryPage } from './History.tsx';
 import { LinkPage } from './Link.tsx';
 import { NotificationsPage } from './NotificationHistory.tsx';
+import { OperationsPage } from './Operations.tsx';
 import { PrefsGate } from './PrefsGate.tsx';
 import { PullRequestPage } from './PullRequest.tsx';
 import { SettingsPage } from './Settings.tsx';
@@ -17,6 +18,7 @@ if (!root) throw new Error('Missing #root element');
 
 const pages = new Map([
   ['/github', GitHubPage],
+  ['/operations', OperationsPage],
   ['/history', HistoryPage],
   ['/inbox', NotificationsPage],
   ['/notifications', NotificationsPage],

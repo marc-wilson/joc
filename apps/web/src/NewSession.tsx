@@ -13,15 +13,24 @@ interface Props {
   /** The new session reported: show it. */
   onOpen: (sessionId: string) => void;
   onClose: () => void;
+  /** The first prompt to start from, e.g. to check out a pull request's branch. */
+  prompt?: string;
 }
 
 /**
  * Starts a new Claude Code session on a repo, with a first prompt or none. A session already
  * running there starts it in its folder (`claude --bg`); once the new one reports, it opens.
  */
-export function NewSessionDialog({ repo, candidates, sessions, onOpen, onClose }: Props) {
+export function NewSessionDialog({
+  repo,
+  candidates,
+  sessions,
+  onOpen,
+  onClose,
+  prompt: initial = '',
+}: Props) {
   const from = launchFrom(candidates);
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState(initial);
   const [launchId, setLaunchId] = useState<string>();
   const [error, setError] = useState<string>();
   const [sending, setSending] = useState(false);
@@ -79,6 +88,7 @@ export function NewSessionDialog({ repo, candidates, sessions, onOpen, onClose }
           <TextArea
             label="First prompt"
             placeholder="What should Claude do? Leave it empty to start without one."
+            value={initial || undefined}
             rows={5}
             disabled={busy}
             onChange={setPrompt}
