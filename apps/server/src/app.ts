@@ -107,6 +107,7 @@ import {
 import { findImages, getImage, saveImage } from './images.ts';
 import { claimLaunches, createLaunch, finishLaunch, listLaunches } from './launches.ts';
 import { addMessages, listMessages, movesTeam, teamItems } from './messages.ts';
+import { getOperations } from './operations.ts';
 import { type Owner, ownerFrom } from './owner.ts';
 import { getPrefs, patchPrefs } from './prefs.ts';
 import { listProblems, saveProblems } from './problems.ts';
@@ -517,6 +518,10 @@ export function createApp({
   });
 
   app.get('/api/github', async (c) => c.json(await getGitHub(c.get('owner'))));
+
+  // Every piece of work in flight: the owner's sessions joined to their pull requests (#111).
+  // Its live updates are the session and github events the stream already sends.
+  app.get('/api/operations', async (c) => c.json(await getOperations(c.get('owner'))));
 
   // How the person's GitHub reaches JOC, and what's left to do: reconnect, or install the App.
   app.get('/api/github/connection', async (c) => {

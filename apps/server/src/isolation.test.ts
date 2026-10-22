@@ -24,6 +24,7 @@ import {
   Launch,
   LONG_TURN_MS,
   MachineProblem,
+  Operations,
   Prefs,
   PrefsSnapshot,
   Resume,
@@ -139,6 +140,7 @@ test('every API route needs an owner', async () => {
     ['GET', '/api/history'],
     ['GET', '/api/github'],
     ['GET', '/api/github/connection'],
+    ['GET', '/api/operations'],
     ['POST', '/api/github'],
     ['GET', '/api/problems'],
     ['GET', '/api/version'],
@@ -670,6 +672,31 @@ test('GitHub data stays with its owner', async () => {
   const bob = await read(await call('bob', '/api/github'), GitHubSnapshot);
   assert.deepEqual(alice.state === 'reported' && alice.mine.map((p) => p.title), ['Alice PR']);
   assert.equal(bob.state, 'none');
+});
+
+test('Operations shows each owner only their own sessions and pull requests, joined', async () => {
+  const lists = { at: ++clock, status: 'ok', reviewRequested: [], mine: [pr('Alice ops PR')] };
+  assert.equal((await call('alice', '/api/github', lists)).status, 200);
+  // The same session id and branch for both: only Alice's own pull request joins hers.
+  const on = { branch: 'fix/auth-redirect', title: 'Fix the redirect' };
+  await call('alice', '/api/reports', report('ops-1', on));
+  await call('bob', '/api/reports', report('ops-1', { ...on, state: 'needs' }));
+  const alice = await read(await call('alice', '/api/operations'), Operations);
+  const bob = await read(await call('bob', '/api/operations'), Operations);
+  const mine = alice.rows.find((r) => r.id === 's:ops-1');
+  assert.equal(mine?.pull?.number, 7);
+  assert.equal(mine?.session?.state, 'working');
+  assert.equal(
+    alice.rows.some((r) => r.needs.includes('answer')),
+    false,
+  );
+  const his = bob.rows.find((r) => r.id === 's:ops-1');
+  assert.deepEqual([his?.pull, his?.needs], [undefined, ['answer']]);
+  assert.equal(
+    bob.rows.some((r) => r.title.startsWith('Alice')),
+    false,
+  );
+  assert.equal(bob.github.state, 'none');
 });
 
 test("a review session's pull request is its owner's, from their own plugin's read", async () => {

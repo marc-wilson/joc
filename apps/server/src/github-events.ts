@@ -23,8 +23,10 @@ import {
   MAX_PR_LABELS,
   MAX_PR_REVIEWERS,
   MAX_PR_REVIEWS,
+  OPERATIONS_KEEP_MS,
   PullRequest,
   type PullRequestCheck,
+  type PullRequestDeploy,
   type PullRequestFile,
   PullRequestLabel,
   PullRequestMergeState,
@@ -53,7 +55,11 @@ import type { Owner } from './owner.ts';
 const Account = z.object({ id: z.number(), login: z.string() });
 type Account = z.infer<typeof Account>;
 const Installation = z.object({ id: z.number() });
-const Repository = z.object({ full_name: z.string(), private: z.boolean().optional() });
+const Repository = z.object({
+  full_name: z.string(),
+  private: z.boolean().optional(),
+  default_branch: z.string().optional(),
+});
 const Team = z.object({ slug: z.string(), name: z.string().nullish() });
 /** An account as a pull request names it: with its avatar, and `type` saying `Bot` for a bot. */
 const User = Account.extend({ avatar_url: z.string().nullish(), type: z.string().nullish() });
@@ -92,6 +98,9 @@ const PullPayload = z.object({
   mergeable_state: z.string().nullish(),
   requested_reviewers: z.array(User.or(Team)).optional(),
   requested_teams: z.array(Team).optional(),
+  closed_at: z.string().nullish(),
+  merged_at: z.string().nullish(),
+  merge_commit_sha: z.string().nullish(),
 });
 type PullPayload = z.infer<typeof PullPayload>;
 
@@ -196,7 +205,19 @@ export interface PullDoc {
   log?: ReviewLogDoc[];
   /** When JOC last changed its copy. */
   keptAt?: Date;
+  // Once it closed. Pull requests kept before these existed leave them out.
+  closedAt?: string;
+  mergedAt?: string;
+  /** The commit its merge made on the base branch, which a deploy names. */
+  mergeCommit?: string;
+  /** Its merge commit's deploys, one per environment, the last MAX_DEPLOYS heard of. */
+  deploys?: PullRequestDeploy[];
+  /** When the latest of them was heard of: its repo reports deploys. */
+  deployedAt?: string;
 }
+
+/** The most environments a merged pull request keeps a deploy for. */
+const MAX_DEPLOYS = 10;
 
 const installations = () => getDb().collection<InstallationDoc>('github_installations');
 const pulls = () => getDb().collection<PullDoc>('github_pulls');
@@ -207,6 +228,7 @@ const ensureIndexes = () => {
     pulls().createIndex({ 'author.id': 1, open: 1 }),
     pulls().createIndex({ askedIds: 1, open: 1 }),
     pulls().createIndex({ repo: 1, headSha: 1 }),
+    pulls().createIndex({ repo: 1, mergeCommit: 1 }),
     pulls().createIndex({ installationId: 1 }),
   ]);
   return indexed;
@@ -483,22 +505,70 @@ export function toPullRequest(
       labels: pull.labels,
       milestone: pull.milestone,
       closes: closingIssues(pull.body, pull.repo).slice(0, MAX_PR_CLOSES),
+      closedAt: pull.open ? undefined : iso(pull.closedAt),
+      mergedAt: pull.merged ? iso(pull.mergedAt) : undefined,
+      mergeCommit:
+        pull.merged && pull.mergeCommit && /^[0-9a-f]{7,64}$/.test(pull.mergeCommit)
+          ? pull.mergeCommit
+          : undefined,
+      deploy: pull.merged ? latestDeploy(pull.deploys) : undefined,
     }),
   );
   return parsed.success ? defined(parsed.data) : undefined;
 }
 
+/** The deploy heard of last, of all its environments'. */
+function latestDeploy(deploys: PullRequestDeploy[] | undefined): PullRequestDeploy | undefined {
+  return deploys?.reduce<PullRequestDeploy | undefined>(
+    (latest, d) => (!latest || d.at >= latest.at ? d : latest),
+    undefined,
+  );
+}
+
 const toList = (docs: PullDoc[]) => docs.flatMap((d) => toPullRequest(d) ?? []);
 
-/** Rebuilds one person's lists from the pull requests they wrote or are asked to review. */
+/** How long a closed pull request stays in its author's lists, for Operations. */
+const RECENT_MS = OPERATIONS_KEEP_MS;
+
+/** A repo that reported a deploy this recently still reports them. */
+const DEPLOYS_MS = 30 * 24 * 60 * 60_000;
+
+/**
+ * Rebuilds one person's lists from the pull requests they wrote or are asked to review, the ones
+ * they wrote that closed in the last day, and which of their repos report deploys.
+ */
 async function refresh(person: GitHubPerson): Promise<void> {
   await ensureIndexes();
   const newest = { updatedAt: -1 } as const;
-  const [mine, asked] = await Promise.all([
+  const now = Date.now();
+  const [mine, asked, closed] = await Promise.all([
     pulls().find({ open: true, 'author.id': person.githubId }).sort(newest).limit(100).toArray(),
     pulls().find({ open: true, askedIds: person.githubId }).sort(newest).limit(100).toArray(),
+    pulls()
+      .find({
+        open: false,
+        'author.id': person.githubId,
+        closedAt: { $gte: new Date(now - RECENT_MS).toISOString() },
+      })
+      .sort(newest)
+      .limit(50)
+      .toArray(),
   ]);
-  await saveAppGitHub(person.owner, { reviewRequested: toList(asked), mine: toList(mine) });
+  const repos = [...new Set([...mine, ...asked, ...closed].map((p) => p.repo))];
+  const deployRepos = repos.length
+    ? (
+        (await pulls().distinct('repo', {
+          repo: { $in: repos },
+          deployedAt: { $gte: new Date(now - DEPLOYS_MS).toISOString() },
+        })) as string[]
+      ).sort()
+    : [];
+  await saveAppGitHub(person.owner, {
+    reviewRequested: toList(asked),
+    mine: toList(mine),
+    recent: toList(closed),
+    deployRepos,
+  });
 }
 
 /** The JOC users among these accounts who reach a live installation: the ones to tell. */
@@ -618,6 +688,14 @@ async function savePull(
       // A review's copy doesn't say whether it merged: it stays as last heard.
       merged: open ? undefined : (merged ?? before?.merged),
       log: before?.log,
+      // GitHub always says when; a copy that doesn't is taken as of its own update.
+      closedAt: open ? undefined : (iso(pr.closed_at) ?? before?.closedAt ?? iso(pr.updated_at)),
+      mergedAt: open
+        ? undefined
+        : (iso(pr.merged_at) ?? before?.mergedAt ?? (merged ? iso(pr.updated_at) : undefined)),
+      mergeCommit: open ? undefined : (pr.merge_commit_sha ?? before?.mergeCommit),
+      deploys: before?.deploys,
+      deployedAt: before?.deployedAt,
     }),
     ...details(pr, before, sameHead),
     keptAt: new Date(),
@@ -887,14 +965,36 @@ const WorkflowRunEvent = z.object({
     conclusion: z.string().nullish(),
     run_started_at: z.string().nullish(),
     updated_at: z.string().nullish(),
+    head_branch: z.string().nullish(),
+    event: z.string().nullish(),
+    html_url: z.string().nullish(),
   }),
 });
 
+/** A workflow that deploys, by its name: "Deploy", "Release to production", ... */
+const DEPLOY_WORKFLOW = /\b(deploy|release)/i;
+
 async function onWorkflowRun(payload: unknown) {
   const event = WorkflowRunEvent.safeParse(payload);
-  if (!event.success || event.data.action !== 'completed') return;
+  if (!event.success) return;
   const { repository, workflow_run: run } = event.data;
   const name = run.name || 'Workflow';
+  // A deploy workflow run on the default branch deploys whatever merged into it at its commit.
+  if (
+    DEPLOY_WORKFLOW.test(name) &&
+    run.head_branch &&
+    run.head_branch === repository.default_branch &&
+    run.event !== 'pull_request'
+  ) {
+    await setDeploy(repository.full_name, run.head_sha, {
+      environment: name.slice(0, 100),
+      status:
+        event.data.action === 'completed' ? runStatus('completed', run.conclusion) : 'pending',
+      url: valid(z.url().max(500), run.html_url),
+      at: iso(run.updated_at) ?? new Date().toISOString(),
+    });
+  }
+  if (event.data.action !== 'completed') return;
   await setCheck(
     repository.full_name,
     run.head_sha,
@@ -925,6 +1025,71 @@ async function onStatus(payload: unknown) {
     name: context.slice(0, 200),
     status: commitStatus(state),
     ...detailOf(description),
+  });
+}
+
+// ── Deploys ────────────────────────────────────────────────────────────────
+
+/**
+ * Sets one environment's deploy on the merged pull requests whose merge commit is `sha`, and
+ * tells whom they concern. An older word on an environment than kept is dropped.
+ */
+async function setDeploy(repo: string, sha: string, deploy: PullRequestDeploy) {
+  await ensureIndexes();
+  const found = await pulls().find({ repo, mergeCommit: sha, merged: true }).toArray();
+  const ids: number[] = [];
+  for (const pull of found) {
+    const kept = pull.deploys?.find((d) => d.environment === deploy.environment);
+    if (kept && kept.at > deploy.at) continue;
+    const deploys = [
+      ...(pull.deploys ?? []).filter((d) => d.environment !== deploy.environment),
+      defined(deploy),
+    ].slice(-MAX_DEPLOYS);
+    await pulls().updateOne(
+      { _id: pull._id },
+      { $set: { deploys, deployedAt: deploy.at, keptAt: new Date() } },
+    );
+    ids.push(...concerned(pull));
+  }
+  await tell(ids);
+}
+
+const DEPLOY_STATE = new Map<string, CIStatus>([
+  ['success', 'pass'],
+  ['failure', 'fail'],
+  ['error', 'fail'],
+  ['pending', 'pending'],
+  ['queued', 'pending'],
+  ['in_progress', 'pending'],
+]);
+
+const DeploymentStatusEvent = z.object({
+  repository: Repository,
+  deployment: z.object({ sha: z.string(), environment: z.string().nullish() }),
+  deployment_status: z.object({
+    state: z.string(),
+    environment: z.string().nullish(),
+    log_url: z.string().nullish(),
+    target_url: z.string().nullish(),
+    created_at: z.string().nullish(),
+    updated_at: z.string().nullish(),
+  }),
+});
+
+/** A deployment of a commit moved on: queued, deploying, deployed or failed. */
+async function onDeploymentStatus(payload: unknown) {
+  const event = DeploymentStatusEvent.safeParse(payload);
+  if (!event.success) return;
+  const { repository, deployment, deployment_status: status } = event.data;
+  // `inactive` only says a newer deployment replaced it.
+  const state = DEPLOY_STATE.get(status.state);
+  if (!state) return;
+  const environment = status.environment || deployment.environment || 'Deploy';
+  await setDeploy(repository.full_name, deployment.sha, {
+    environment: environment.slice(0, 100),
+    status: state,
+    url: valid(z.url().max(500), status.log_url || status.target_url),
+    at: iso(status.updated_at ?? status.created_at) ?? new Date().toISOString(),
   });
 }
 
@@ -1252,6 +1417,8 @@ export async function handleEvent(ctx: Context, name: string, payload: unknown):
       return onWorkflowRun(payload);
     case 'status':
       return onStatus(payload);
+    case 'deployment_status':
+      return onDeploymentStatus(payload);
     case 'installation':
     case 'installation_repositories':
       return onInstallation(ctx, name, payload);
