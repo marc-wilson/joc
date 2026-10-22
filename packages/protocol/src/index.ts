@@ -298,6 +298,11 @@ export const SessionReport = z.object({
   title: z.string().max(200).optional(),
   /** Claude Code's own name for the session (a custom name or its generated title). Latest wins. */
   name: z.string().max(200).optional(),
+  /**
+   * The name you gave the session with `/rename` (or `--name`), which Claude Code shows over its
+   * generated title. Latest wins; plugins before 0.14.3 leave it out.
+   */
+  customName: z.string().max(200).optional(),
   activity: z.string().max(500).optional(),
   contextLeft: z.number().min(0).max(100).optional(),
   machine: z.string().max(200).optional(),

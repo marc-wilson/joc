@@ -34,6 +34,8 @@ interface SessionDoc {
   sessionId: string;
   title?: string;
   name?: string;
+  /** Your name for it from `/rename`, which beats Claude Code's generated one. */
+  customName?: string;
   repo: string;
   branch?: string;
   /** The linked worktree it works in; unset in the repo's main checkout. */
@@ -97,6 +99,7 @@ function toSession({
   updatedAt,
   reportedAt,
   name,
+  customName,
   title,
   review: launched,
   reviewOutcome: outcome,
@@ -120,8 +123,8 @@ function toSession({
     id: sessionId,
     ...rest,
     ...(team ? { team } : {}),
-    // Claude Code's own name beats the first-prompt fallback.
-    title: name ?? title,
+    // Claude Code's own name beats the first-prompt fallback; yours beats its generated one.
+    title: customName ?? name ?? title,
     ...(review ? { review: outcome ? { ...review, outcome } : review } : {}),
     startedAt: createdAt.toISOString(),
     updatedAt: updatedAt.toISOString(),
@@ -420,7 +423,7 @@ export async function listStaleSessions(
   const stale = new Map<string, StaleSession[]>();
   for (const d of docs) {
     if (!d.device || !d.plugin || !isBehind(d.plugin, latest)) continue;
-    const title = d.name ?? d.title;
+    const title = d.customName ?? d.name ?? d.title;
     const entry = { id: d.sessionId, title, repo: d.repo, state: d.state, plugin: d.plugin };
     stale.set(d.device, [...(stale.get(d.device) ?? []), entry]);
   }
@@ -451,7 +454,7 @@ export async function deletableSessions(
     .toArray();
   return docs.map((d) => ({
     sessionId: d.sessionId,
-    title: d.name ?? d.title,
+    title: d.customName ?? d.name ?? d.title,
     machine: d.machine,
     device: d.device,
     cwd: d.cwd,
