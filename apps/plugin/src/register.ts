@@ -14,7 +14,8 @@
 //
 // It also tells the server which slash commands this session has (src/commands.ts), so the
 // dashboard's composer can suggest them: when the session starts, and again whenever the list
-// changes, such as after /reload-plugins.
+// changes, such as after /reload-plugins. And what the session runs on, for its Status view
+// (src/session-status.ts): Claude Code's version, the model, the folder and its MCP servers.
 import type { MessagesReport, PromptHandoff } from '@joc/protocol';
 import type { EngineInterface, HttpResponse, ProcessRunResult, Register } from 'claude-code';
 import {
@@ -38,6 +39,13 @@ import {
   responseOutcome,
   STATUS_PATH,
 } from './problems.ts';
+import {
+  type ContextTool,
+  configuredServers,
+  mcpServers,
+  statusKey,
+  statusReport,
+} from './session-status.ts';
 import { LATEST_HEADER, manifestVersion, versionHeader } from './version.ts';
 import {
   ANSWER_POLL_MS,
@@ -106,6 +114,12 @@ const COMMANDS_HTTP_TIMEOUT_MS = 10_000;
 const MAX_SKILL_CHECKS = 200;
 /** How many folders up from the session's a project's `.claude/skills` is looked for. */
 const SKILL_FOLDER_DEPTH = 8;
+/** Where the session's status goes, for its Status view in the dashboard. */
+const STATUS_PATH_API = '/api/status';
+/** MCP servers connect as the session starts: the first status waits for them. */
+const STATUS_FIRST_MS = 20_000;
+const STATUS_MS = 60_000;
+const STATUS_HTTP_TIMEOUT_MS = 10_000;
 /** Describe events kept; a session lists a few hundred commands, each a few times. */
 const MAX_DESCRIBED = 5000;
 
@@ -702,6 +716,96 @@ async function reportCommands($: EngineInterface, note: (outcome: Outcome) => vo
   if (res.ok) commandsSent = sent;
 }
 
+/** Set once the session starts: reports its status a moment from now, if it changed. */
+let statusSoon: (() => void) | undefined;
+
+/** The session and status last sent, so an unchanged status isn't sent again. */
+let statusSent: string | undefined;
+
+/** A settings file as parsed JSON; undefined when it's missing or isn't JSON. */
+async function readJson($: EngineInterface, path: string | undefined): Promise<unknown> {
+  if (!path) return undefined;
+  try {
+    return (await $.fs.exists(path)) ? JSON.parse(await $.fs.read(path)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The MCP servers the session's settings set up, by name. `~/.claude.json` also holds the login;
+ * only server names are taken from it, and nothing else of it is kept or sent.
+ */
+async function configuredMcp($: EngineInterface, root: string): Promise<string[]> {
+  const dir = await $.env.get('CLAUDE_CONFIG_DIR');
+  const config = dir || (await homePath($, '.claude'));
+  const claudeJson = dir ? `${dir}/.claude.json` : await homePath($, '.claude.json');
+  const [user, mcp, project, local, settings] = await Promise.all([
+    readJson($, claudeJson),
+    readJson($, `${root}/.mcp.json`),
+    readJson($, `${root}/.claude/settings.json`),
+    readJson($, `${root}/.claude/settings.local.json`),
+    readJson($, config && `${config}/settings.json`),
+  ]);
+  return configuredServers({
+    claudeJson: user,
+    mcpJson: mcp,
+    settings: [settings, project, local],
+    root,
+  });
+}
+
+/**
+ * Sends what the session runs on unless the server already has it for this session: Claude
+ * Code's version, the model, the folder, and the MCP servers with tools in the context (a
+ * local estimate, no request) beside those its settings set up.
+ */
+async function reportStatus($: EngineInterface, note: (outcome: Outcome) => void) {
+  const sessionId = await $.session.id();
+  const [version, model, cwd, root, usage] = await Promise.all([
+    $.session.version().then(
+      (v) => v.version,
+      () => undefined,
+    ),
+    $.session.model().catch(() => undefined),
+    $.session.cwd().catch(() => undefined),
+    $.session.root().catch(() => undefined),
+    $.session.usage({ breakdown: 'summary' }).catch(() => undefined),
+  ]);
+  const tools: ContextTool[] = usage?.context.breakdown?.mcpTools ?? [];
+  const configured = root ? await configuredMcp($, root) : [];
+  const report = statusReport(sessionId, Date.now(), {
+    version,
+    model,
+    cwd,
+    mcp: mcpServers(tools, configured),
+  });
+  const sent = `${sessionId}\n${statusKey(report)}`;
+  if (sent === statusSent) return;
+  const { url, headers } = await connection($);
+  let res: HttpResponse | undefined;
+  try {
+    res = await fetchWithin($, STATUS_HTTP_TIMEOUT_MS, `${url}${STATUS_PATH_API}`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify(report),
+    });
+  } catch (error) {
+    note({
+      ok: false,
+      kind: 'unreachable',
+      where: url,
+      detail: errorDetail(error),
+      at: Date.now(),
+    });
+    return;
+  }
+  // No answer in time: the next round tries again.
+  if (!res) return;
+  note(responseOutcome({ status: res.status, body: res.text }, STATUS_PATH_API, url, Date.now()));
+  if (res.ok) statusSent = sent;
+}
+
 const shown = (argv: readonly string[]) => argv.join(' ');
 
 /** The last line a command printed, for saying how it went. */
@@ -1141,6 +1245,11 @@ export const register: Register = (on) => {
     commandsSoon = () => $.clock.after(1500, sendCommands);
     $.clock.every(SYNC_MS, sendCommands);
 
+    const sendStatus = oneAtATime(() => reportStatus($, log.note), failedIn('module'));
+    $.clock.after(STATUS_FIRST_MS, sendStatus);
+    statusSoon = () => $.clock.after(3000, sendStatus);
+    $.clock.every(STATUS_MS, sendStatus);
+
     $.clock.every(POLL_MS, oneAtATime(takePrompts, failedIn('module')));
     $.clock.every(LAUNCH_POLL_MS, oneAtATime(takeLaunches, failedIn('module')));
     return result;
@@ -1223,6 +1332,8 @@ export const register: Register = (on) => {
       syncSoon?.();
       // A reload or a /clear changes the list or the session it's for; unchanged, nothing goes.
       commandsSoon?.();
+      // /model, /mcp or a reload may change what the session runs on.
+      statusSoon?.();
     } catch {
       // Reporting is best effort; the command has run either way.
     }
