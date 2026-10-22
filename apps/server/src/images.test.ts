@@ -1,25 +1,20 @@
 // Image uploads: only real PNG, JPEG, GIF and WebP bytes, at most 5 MB, served so a browser
-// never runs them. Runs against an in-memory MongoDB, open local mode.
+// never runs them. Runs against the run's MongoDB, open local mode.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { closeClient } from '@joc/db';
 import { ClaimedPrompt, ImageRef, MAX_IMAGE_BYTES } from '@joc/protocol';
-import { MongoMemoryServer } from 'mongodb-memory-server';
 import { z } from 'zod';
 import { createApp } from './app.ts';
 import { sniffImageType } from './images.ts';
-
-let mongo: MongoMemoryServer;
+import { useTestDb } from './test-db.ts';
 
 before(async () => {
-  mongo = await MongoMemoryServer.create();
-  process.env.MONGODB_URI = mongo.getUri();
-  process.env.MONGODB_DB = 'joc_images_test';
+  await useTestDb('joc_images_test');
 });
 
 after(async () => {
   await closeClient();
-  await mongo.stop();
 });
 
 const app = createApp({ publicUrl: 'http://joc.test', pluginVersion: '1.0.0' });

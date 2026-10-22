@@ -1,5 +1,5 @@
 // Cross-user isolation: two owners share one server and database, and neither may read, change
-// or hear about the other's data through any route. Runs against an in-memory MongoDB replica
+// or hear about the other's data through any route. Runs against the run's MongoDB replica
 // set, which live updates need to reach other server processes.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
@@ -36,7 +36,6 @@ import {
   SessionSettings,
   SessionStatus,
 } from '@joc/protocol';
-import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { z } from 'zod';
 import { createApp } from './app.ts';
 import { bus, createBus } from './bus.ts';
@@ -55,10 +54,10 @@ import { createWebhooks } from './github-webhook.ts';
 import { createDeviceToken, createWebSession, signInGitHubUser } from './identity.ts';
 import type { Owner } from './owner.ts';
 import { claimResumes, listResumes, RESUME_WAIT_MS, requestResume } from './resumes.ts';
+import { useTestDb } from './test-db.ts';
 
 type Who = 'alice' | 'bob';
 
-let mongo: MongoMemoryReplSet;
 /** Stops the live update streams the tests start. */
 const stopBuses = new AbortController();
 const tokens = new Map<Who, string>();
@@ -67,9 +66,7 @@ const cookies = new Map<Who, string>();
 const owners = new Map<Who, Owner>();
 
 before(async () => {
-  mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
-  process.env.MONGODB_URI = mongo.getUri();
-  process.env.MONGODB_DB = 'joc_isolation_test';
+  await useTestDb('joc_isolation_test');
   // Real identities: two GitHub users, each with one linked machine.
   for (const [who, id] of [
     ['alice', 1],
@@ -85,7 +82,6 @@ before(async () => {
 after(async () => {
   stopBuses.abort();
   await closeClient();
-  await mongo.stop();
 });
 
 const github: GitHubAuth = {
