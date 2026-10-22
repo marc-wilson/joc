@@ -861,6 +861,43 @@ export const SessionCommands = z.object({
 });
 export type SessionCommands = z.infer<typeof SessionCommands>;
 
+/** The most MCP servers a session's status lists. */
+export const MAX_MCP_SERVERS = 100;
+
+/**
+ * One of the session's MCP servers: `connected` when its tools are in the session, `failed`
+ * when it's set up in the session's folder or the user's settings but none of its tools are.
+ */
+export const McpServerStatus = z.object({
+  /** As /mcp lists it. */
+  name: z.string().min(1).max(200),
+  state: z.enum(['connected', 'failed']),
+  /** How many tools a connected server brings. */
+  tools: z.number().int().nonnegative().optional(),
+});
+export type McpServerStatus = z.infer<typeof McpServerStatus>;
+
+/**
+ * What the session runs on, as `/status` shows it but never the login or the email: sent when
+ * it starts and whenever it changes. Name, id and folder come with the session itself.
+ */
+export const SessionStatusReport = z.object({
+  sessionId: z.string().min(1),
+  at: z.number().int().positive(),
+  /** Claude Code's version, as `claude --version` prints it. */
+  version: z.string().max(100).optional(),
+  model: z.string().max(100).optional(),
+  cwd: z.string().max(1000).optional(),
+  mcp: z.array(McpServerStatus).max(MAX_MCP_SERVERS),
+});
+export type SessionStatusReport = z.infer<typeof SessionStatusReport>;
+
+/** A session's status as the dashboard reads it. */
+export const SessionStatus = SessionStatusReport.omit({ sessionId: true, at: true }).extend({
+  updatedAt: z.string(),
+});
+export type SessionStatus = z.infer<typeof SessionStatus>;
+
 /** A prompt typed in the dashboard, for the session's plugin to submit: text, images or both. */
 export const PromptRequest = z
   .object({
@@ -1166,6 +1203,8 @@ export type StreamEvent =
   | { type: 'changes'; sessionId: string }
   /** The session's slash commands changed; fetch them from `/api/sessions/:id/commands`. */
   | { type: 'commands'; sessionId: string }
+  /** The session's status changed; fetch it from `/api/sessions/:id/status`. */
+  | { type: 'session-status'; sessionId: string }
   /** New GitHub data; fetch it from `/api/github`. */
   | { type: 'github' }
   /** The person's alerts changed; fetch them from `/api/alerts`. */
