@@ -38,7 +38,8 @@ settings → GitHub Apps → New GitHub App** (for an org: the org's **Settings 
 | Pull requests | Read | Pull requests, reviews, review comments, changed files |
 | Checks | Read | Check runs and suites (CI) |
 | Commit statuses | Read | Commit statuses (CI from other services) |
-| Actions | Read | Workflow runs |
+| Actions | Read | Workflow runs (CI, and deploy workflows on the default branch) |
+| Deployments | Read | Deployment statuses: whether a merge deployed (Operations) |
 | Issues | Read | Comments on pull requests and issues |
 | Metadata | Read | Required by GitHub |
 
@@ -51,8 +52,13 @@ settings → GitHub Apps → New GitHub App** (for an org: the org's **Settings 
 **Account permissions:** none. JOC reads only the public profile at sign-in.
 
 **Subscribe to events:** Pull request, Pull request review, Pull request review comment, Issue
-comment, Check run, Check suite, Workflow run, Status. (Installation events come without
-subscribing.)
+comment, Check run, Check suite, Workflow run, Status, Deployment status. (Installation events
+come without subscribing.)
+
+An App created before Operations lacks **Deployments: Read** and the **Deployment status**
+event: add both on the App's page (**Permissions & events**), and accept the new permission on
+each installation (GitHub asks the account's owner). Until then, Operations shows no Deployed
+stage.
 
 After creating it, on the App's page:
 
@@ -130,5 +136,10 @@ key. Without those, set `JOC_GITHUB_APP_SLUG`.
   either when the pull request closes.
 - When you sign in, or the App is installed where you are, JOC reads your open pull requests
   once through the App. After that only webhooks update them: nothing polls.
+- Operations keeps your pull requests that merged or closed in the last day. A merge's Deployed
+  stage comes from **Deployment status** events for its merge commit (the environment, e.g.
+  `production`), or, for repos that deploy from a workflow, from a **Workflow run** on the
+  default branch whose name contains "deploy" or "release". A repo that reported neither in 30
+  days shows "No deploys reported", and its merges count as shipped once merged.
 - Repositories the App isn't installed on don't appear for people it covers.
 - Uninstalling it hands GitHub back to each machine's plugin and `gh`.
