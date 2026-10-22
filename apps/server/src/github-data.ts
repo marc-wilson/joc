@@ -14,9 +14,16 @@ type GitHubDoc = Omit<GitHubReport, 'at'> & {
   updatedAt: Date;
   /** `app` once the GitHub App keeps it; a plugin's report otherwise. */
   source?: 'app';
+  /** The App's only: the owner's pull requests that closed in the last day, for Operations. */
+  recent?: PullRequest[];
+  /** The App's only: the owner's repos that report deploys. */
+  deployRepos?: string[];
 };
 
 type Lists = Pick<GitHubReport, 'reviewRequested' | 'mine'>;
+
+/** What the App keeps beyond a plugin's lists. */
+type AppLists = Lists & { recent: PullRequest[]; deployRepos: string[] };
 
 const github = () => getDb().collection<GitHubDoc>('github');
 
@@ -120,16 +127,16 @@ export async function saveGitHub(owner: Owner, { at, ...whole }: GitHubReport): 
   return true;
 }
 
-const same = (doc: GitHubDoc | null, lists: Lists) =>
+const same = (doc: GitHubDoc | null, lists: AppLists) =>
   doc?.source === 'app' &&
-  JSON.stringify([doc.reviewRequested, doc.mine]) ===
-    JSON.stringify([lists.reviewRequested, lists.mine]);
+  JSON.stringify([doc.reviewRequested, doc.mine, doc.recent ?? [], doc.deployRepos ?? []]) ===
+    JSON.stringify([lists.reviewRequested, lists.mine, lists.recent, lists.deployRepos]);
 
 /**
  * The owner's lists as the App's webhooks have them now. Their dashboards hear only of a change,
  * and its alerts are raised and resolved as a plugin's read would.
  */
-export async function saveAppGitHub(owner: Owner, lists: Lists): Promise<void> {
+export async function saveAppGitHub(owner: Owner, lists: AppLists): Promise<void> {
   const before = await github().findOneAndUpdate(
     { _id: owner },
     {
@@ -145,7 +152,8 @@ export async function saveAppGitHub(owner: Owner, lists: Lists): Promise<void> {
   );
   if (same(before, lists)) return;
   publish(owner, { type: 'github' });
-  await alertOnGitHub(owner, before, { status: 'ok', ...lists });
+  const { reviewRequested, mine } = lists;
+  await alertOnGitHub(owner, before, { status: 'ok', reviewRequested, mine });
 }
 
 /** The App no longer covers the owner: their plugin's next read starts afresh. */
@@ -163,5 +171,29 @@ export async function getGitHub(owner: Owner): Promise<GitHubSnapshot> {
     reviewRequested: doc.reviewRequested,
     mine: doc.mine,
     updatedAt: doc.updatedAt.toISOString(),
+  };
+}
+
+/** Everything Operations builds its rows from: the lists, and what only the App keeps. */
+export interface GitHubLists {
+  snapshot: GitHubSnapshot;
+  /** The owner's pull requests that closed lately, as the App heard. */
+  recent: PullRequest[];
+  deployRepos: string[];
+}
+
+export async function getGitHubLists(owner: Owner): Promise<GitHubLists> {
+  const doc = await github().findOne({ _id: owner });
+  if (!doc) return { snapshot: { state: 'none' }, recent: [], deployRepos: [] };
+  return {
+    snapshot: {
+      state: 'reported',
+      status: doc.status,
+      reviewRequested: doc.reviewRequested,
+      mine: doc.mine,
+      updatedAt: doc.updatedAt.toISOString(),
+    },
+    recent: doc.source === 'app' ? (doc.recent ?? []) : [],
+    deployRepos: doc.source === 'app' ? (doc.deployRepos ?? []) : [],
   };
 }

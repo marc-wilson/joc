@@ -4,7 +4,13 @@ import assert from 'node:assert/strict';
 import { createHmac, createPublicKey, createVerify, generateKeyPairSync } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { closeClient } from '@joc/db';
-import { Alert, GitHubSnapshot, ReviewedPullRequest, SessionChanges } from '@joc/protocol';
+import {
+  Alert,
+  GitHubSnapshot,
+  Operations,
+  ReviewedPullRequest,
+  SessionChanges,
+} from '@joc/protocol';
 import { z } from 'zod';
 import { createApp } from './app.ts';
 import type { GitHubAuth } from './github.ts';
@@ -242,6 +248,71 @@ test('an older copy of a pull request than the one kept is dropped', async () =>
 test('a merged pull request leaves every list', async () => {
   await send('pull_request', pullEvent('closed', { state: 'closed', merged: true }));
   assert.deepEqual((await lists('alice')).mine, []);
+});
+
+const operations = async (who: Who) =>
+  Operations.parse(await (await get(who, '/api/operations')).json());
+
+test('a merge stays on Operations for its author, and ships once its deploy is reported', async () => {
+  const now = new Date().toISOString();
+  const merge = 'd4e5f6a7b8c9';
+  await send(
+    'pull_request',
+    pullEvent('closed', {
+      number: 8,
+      state: 'closed',
+      merged: true,
+      extra: { closed_at: now, merged_at: now, merge_commit_sha: merge },
+    }),
+  );
+  const row = async () => (await operations('alice')).rows.find((r) => r.id === `pr:${REPO}#8`);
+  // No deploys reported in the repo yet: merged is shipped.
+  assert.deepEqual([(await row())?.pull?.state, (await row())?.shippedAt], ['merged', now]);
+  // Bob isn't on it: nothing of it reaches him.
+  assert.equal(
+    (await operations('bob')).rows.some((r) => r.id === `pr:${REPO}#8`),
+    false,
+  );
+
+  const deployment = (state: string, at: string) => ({
+    ...{ installation: { id: 77 }, repository: { full_name: REPO } },
+    deployment: { sha: merge, environment: 'production' },
+    deployment_status: { state, environment: 'production', created_at: at, updated_at: at },
+  });
+  await send(
+    'deployment_status',
+    deployment('in_progress', new Date(Date.now() + 1000).toISOString()),
+  );
+  assert.deepEqual((await operations('alice')).deployRepos, [REPO]);
+  assert.deepEqual(
+    [(await row())?.pull?.deploy?.status, (await row())?.shippedAt],
+    ['pending', undefined],
+  );
+  const failed = new Date(Date.now() + 2000).toISOString();
+  await send('deployment_status', deployment('failure', failed));
+  assert.deepEqual((await row())?.needs, ['deploy']);
+  // A deploy workflow on the default branch counts as well: it deployed.
+  const done = new Date(Date.now() + 3000).toISOString();
+  await send('workflow_run', {
+    action: 'completed',
+    installation: { id: 77 },
+    repository: { full_name: REPO, default_branch: 'main' },
+    workflow_run: {
+      name: 'Deploy',
+      head_sha: merge,
+      head_branch: 'main',
+      event: 'push',
+      status: 'completed',
+      conclusion: 'success',
+      updated_at: done,
+      html_url: `https://github.com/${REPO}/actions/runs/1`,
+    },
+  });
+  const shipped = await row();
+  assert.deepEqual(
+    [shipped?.pull?.deploy?.environment, shipped?.shippedAt, shipped?.needs],
+    ['Deploy', done, []],
+  );
 });
 
 test('signing in reads the open pull requests once', async () => {
