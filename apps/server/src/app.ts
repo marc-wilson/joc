@@ -995,7 +995,13 @@ export function createApp({
           if (message.type === 'missed') void resend();
           else publish(message);
         });
-        stream.onAbort(unsubscribeAll);
+        // A browser that goes away ends the pause between pings at once, so no timer outlives it.
+        const gone = new AbortController();
+        stream.onAbort(() => {
+          unsubscribeAll();
+          gone.abort();
+        });
+        const quiet = AbortSignal.any([shutdown, gone.signal]);
 
         try {
           await send({ type: 'snapshot', sessions: await listSessions(owner) });
@@ -1007,8 +1013,9 @@ export function createApp({
           // shutdown the stream ends, and the browser reconnects to the server taking over,
           // which starts it with a fresh snapshot.
           while (!stream.aborted && !shutdown.aborted) {
-            // Rejects when the shutdown cuts the pause short; the loop condition handles that.
-            await sleep(15_000, undefined, { signal: shutdown }).catch(() => undefined);
+            // Rejects when the shutdown or the browser leaving cuts the pause short; the loop
+            // condition handles that.
+            await sleep(15_000, undefined, { signal: quiet }).catch(() => undefined);
             if (!stream.aborted && !shutdown.aborted) {
               await stream.writeSSE({ event: 'ping', data: '' });
             }
