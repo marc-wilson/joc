@@ -427,6 +427,17 @@ export async function listDevices(
   }));
 }
 
+/** The owner's linked machines as Operations names them: id, name and when last seen. */
+export async function listLinkedMachines(
+  owner: Owner,
+): Promise<{ id: string; name: string; lastSeenAt: Date }[]> {
+  const docs = await devices()
+    .find({ userId: owner }, { projection: { id: 1, name: 1, lastSeenAt: 1 } })
+    .sort({ createdAt: 1 })
+    .toArray();
+  return docs.map((d) => ({ id: d.id, name: d.name, lastSeenAt: d.lastSeenAt }));
+}
+
 /**
  * Whether a machine needs the update command. What's installed decides when the machine says;
  * an open session that hasn't reloaded doesn't make it behind. A machine whose plugins are too

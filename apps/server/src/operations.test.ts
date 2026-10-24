@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Operations, type PullRequest, type Session } from '@joc/protocol';
 import type { GitHubLists } from './github-data.ts';
-import { buildOperations } from './operations.ts';
+import { buildOperations, type OperationsInput } from './operations.ts';
 
 const NOW = Date.parse('2026-10-21T12:00:00.000Z');
 const at = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOString();
@@ -47,8 +47,8 @@ const lists = (
   ...more,
 });
 
-const build = (sessions: Session[], github: GitHubLists) =>
-  Operations.parse(buildOperations({ sessions, github, now: NOW }));
+const build = (sessions: Session[], github: GitHubLists, more: Partial<OperationsInput> = {}) =>
+  Operations.parse(buildOperations({ sessions, github, now: NOW, ...more }));
 
 test('a pull request joins the session on its repo and branch, one row for both', () => {
   const ops = build(
@@ -157,12 +157,24 @@ test('your pull request needs you when CI fails, it conflicts or changes are req
   assert.deepEqual([review?.review, review?.reviewers], ['changes', [{ login: 'sam' }]]);
 });
 
-test('needs come most pressing first: Claude waiting, then CI, conflicts, review', () => {
+test('needs come most pressing first: a failed deploy, Claude waiting, CI, conflicts, review', () => {
   const ops = build(
     [session('a', { branch: 'feat/1', state: 'needs' })],
     lists([pr(1, { ci: 'fail', mergeable: false, review: 'Changes requested' })]),
   );
   assert.deepEqual(ops.rows[0]?.needs, ['answer', 'ci', 'conflicts', 'review']);
+  const failed = pr(4, {
+    state: 'merged',
+    mergedAt: at(40),
+    closedAt: at(40),
+    deploy: { environment: 'production', status: 'fail', at: at(9) },
+  });
+  const deploy = build(
+    [session('b', { branch: 'feat/4', state: 'needs' })],
+    lists([], [], { recent: [failed], deployRepos: ['harbor-labs/atlas-web'] }),
+  );
+  assert.deepEqual(deploy.rows[0]?.needs, ['deploy', 'answer']);
+  assert.equal(deploy.rows[0]?.needsSince, at(9));
 });
 
 test('a merged pull request ships at once in a repo that reports no deploys', () => {
@@ -272,5 +284,73 @@ test("a quiet session says so: its machine stopped reporting, it didn't end", ()
   assert.deepEqual(
     ops.rows.map((r) => r.session?.quiet),
     [true, undefined],
+  );
+});
+
+test('each row says since when it has needed you, for its most pressing reason', () => {
+  const review = {
+    by: { login: 'sam' },
+    state: 'changes-requested' as const,
+    submittedAt: at(22),
+  };
+  const ops = build(
+    [
+      session('a', { state: 'needs', activeAt: at(2) }),
+      session('b', { branch: 'feat/2', state: 'idle' }),
+      session('c', { branch: 'feat/3', state: 'idle' }),
+      session('d', { state: 'idle' }),
+    ],
+    lists([
+      pr(2, { review: 'Changes requested', reviews: [review], updatedAt: at(10) }),
+      pr(3, { ci: 'fail', updatedAt: at(14) }),
+    ]),
+  );
+  const by = Object.fromEntries(ops.rows.map((r) => [r.id, [r.needs[0], r.needsSince]]));
+  assert.deepEqual(by, {
+    's:a': ['answer', at(2)],
+    's:b': ['review', at(22)],
+    's:c': ['ci', at(14)],
+    's:d': [undefined, undefined],
+  });
+});
+
+test('machines: every linked one, the hosts of sessions none reported, and each session on one', () => {
+  const ops = build(
+    [
+      session('a', { machine: 'rowan-mbp' }),
+      session('b', { machine: 'rowan-mbp', state: 'needs' }),
+      session('c', { machine: 'build-box', state: 'offline', updatedAt: at(180) }),
+      session('d'),
+    ],
+    lists(),
+    {
+      machines: {
+        linked: [
+          { id: 'dev-mbp', name: 'rowan-mbp', lastSeenAt: new Date(NOW - 30_000) },
+          { id: 'dev-studio', name: 'rowan-studio', lastSeenAt: new Date(NOW - 3 * 3_600_000) },
+        ],
+        deviceOf: new Map([
+          ['a', 'dev-mbp'],
+          ['b', 'dev-mbp'],
+        ]),
+      },
+    },
+  );
+  assert.deepEqual(
+    ops.machines.map((m) => [m.id, m.name, m.online]),
+    [
+      ['dev-mbp', 'rowan-mbp', true],
+      ['dev-studio', 'rowan-studio', false],
+      ['host:build-box', 'build-box', false],
+    ],
+  );
+  assert.deepEqual(
+    ops.rows.map((r) => [r.id, r.session?.machine]),
+    [
+      ['s:a', 'dev-mbp'],
+      ['s:b', 'dev-mbp'],
+      ['s:c', 'host:build-box'],
+      ['s:d', undefined],
+    ],
   );
 });

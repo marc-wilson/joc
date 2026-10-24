@@ -19,6 +19,7 @@ import {
   type TeamFolder,
   type Waiting,
 } from '@joc/protocol';
+import { recordActivity, sessionActivity } from './activity.ts';
 import { alertOnSession } from './alerts.ts';
 import { publish } from './bus.ts';
 import { launchedReview } from './launches.ts';
@@ -289,6 +290,8 @@ export async function applyReport(
   const session = toSession(doc);
   publish(owner, { type: 'session', session });
   if (fields.state) {
+    const happened = sessionActivity(doc.previousState, session);
+    if (happened) await recordActivity(owner, [happened]);
     await alertOnSession(owner, doc.previousState, {
       ...session,
       sessionId,
@@ -460,6 +463,35 @@ export async function deletableSessions(
     cwd: d.cwd,
     ended: d.state === 'offline' || now - d.updatedAt.getTime() > QUIET_AFTER_MS,
   }));
+}
+
+/**
+ * When the owner's first session on a repo's branch started, for how long its pull request took
+ * to merge. Review sessions don't count: they didn't write it.
+ */
+export async function firstSessionStart(
+  owner: Owner,
+  repo: string,
+  branch: string,
+): Promise<Date | undefined> {
+  const docs = await sessions()
+    .find({ owner, branch, review: { $exists: false } }, { projection: { repo: 1, createdAt: 1 } })
+    .sort({ createdAt: 1 })
+    .limit(50)
+    .toArray();
+  return docs.find((d) => d.repo.toLowerCase() === repo.toLowerCase())?.createdAt;
+}
+
+/** The linked machine that reported each of the owner's sessions, by session id. */
+export async function sessionDevices(owner: Owner, ids: string[]): Promise<Map<string, string>> {
+  if (!ids.length) return new Map();
+  const docs = await sessions()
+    .find(
+      { _id: { $in: ids.map((id) => sessionKey(owner, id)) }, owner, device: { $exists: true } },
+      { projection: { sessionId: 1, device: 1 } },
+    )
+    .toArray();
+  return new Map(docs.flatMap((d) => (d.device ? [[d.sessionId, d.device] as const] : [])));
 }
 
 /** Deletes one of the owner's sessions from JOC. */
