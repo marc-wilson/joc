@@ -9,8 +9,12 @@
 //   has changes requested, or its merge failed to deploy.
 // - A merged pull request has shipped once it deployed, or at once in a repo that reports no
 //   deploys. Shipped and closed ones stay for a day, the same as ended sessions.
+// - Machines (#114) are the owner's linked machines, and the host names of sessions none of them
+//   reported (open local dev). Each session names the one it runs on.
 import {
   OPERATIONS_KEEP_MS,
+  type OperationMachine,
+  type OperationMerge,
   type OperationNeed,
   type OperationPull,
   type OperationReview,
@@ -22,8 +26,10 @@ import {
   type Session,
 } from '@joc/protocol';
 import { type GitHubLists, getGitHubLists } from './github-data.ts';
+import { listLinkedMachines } from './identity.ts';
+import { listMerges } from './merges.ts';
 import type { Owner } from './owner.ts';
-import { listSessions } from './sessions.ts';
+import { listSessions, sessionDevices } from './sessions.ts';
 
 const UNTITLED = 'New session';
 
@@ -115,18 +121,42 @@ export function toOperationPull(pr: PullRequest, mine: boolean): OperationPull {
   };
 }
 
-/** Why the row needs you, most pressing first. */
+/** Why the row needs you, most pressing first: a failed deploy is live for everyone. */
 export function needsOf(session: Session | undefined, pull: OperationPull | undefined) {
   const needs: OperationNeed[] = [];
+  if (pull?.mine && pull.state === 'merged' && pull.deploy?.status === 'fail') needs.push('deploy');
   if (session?.state === 'needs') needs.push('answer');
   if (pull?.mine) {
     const live = pull.state === 'open' || pull.state === 'draft';
     if (live && pull.ci === 'fail') needs.push('ci');
     if (live && pull.conflicts) needs.push('conflicts');
     if (live && pull.review === 'changes') needs.push('review');
-    if (pull.state === 'merged' && pull.deploy?.status === 'fail') needs.push('deploy');
   }
   return needs;
+}
+
+/** Since when the row has needed you for `need`, as near as JOC knows. */
+export function needsSinceOf(
+  need: OperationNeed | undefined,
+  session: Session | undefined,
+  pr: PullRequest | undefined,
+): string | undefined {
+  switch (need) {
+    case undefined:
+      return undefined;
+    case 'answer':
+      return session ? (session.activeAt ?? session.updatedAt) : undefined;
+    case 'deploy':
+      return pr?.deploy?.at ?? pr?.updatedAt;
+    case 'review': {
+      const asked = (pr?.reviews ?? [])
+        .filter((r) => r.state === 'changes-requested' && r.submittedAt)
+        .at(-1)?.submittedAt;
+      return asked ?? pr?.updatedAt;
+    }
+    default:
+      return pr?.updatedAt;
+  }
 }
 
 /** When it shipped: merged and deployed, or merged in a repo that reports no deploys. */
@@ -139,19 +169,71 @@ function shippedAt(pull: OperationPull | undefined, deploys: boolean): string | 
 const latest = (...isos: (string | undefined)[]) =>
   isos.filter((t): t is string => !!t).reduce((a, b) => (a > b ? a : b));
 
+/** Where the owner's sessions run: their linked machines, and each session's. */
+export interface MachinesInput {
+  linked: { id: string; name: string; lastSeenAt: Date }[];
+  /** By session id: the linked machine that reported it. */
+  deviceOf: ReadonlyMap<string, string>;
+}
+
 export interface OperationsInput {
   sessions: Session[];
   github: GitHubLists;
+  machines?: MachinesInput;
+  merges?: OperationMerge[];
   now?: number;
+}
+
+/** Each session's machine, and every machine: the linked ones, then the hosts of the rest. */
+function machinesOf(sessions: Session[], input: MachinesInput | undefined, now: number) {
+  const linked = new Map((input?.linked ?? []).map((m) => [m.id, m]));
+  const machineOf = new Map<string, string>();
+  const hosts = new Map<string, { online: boolean; lastSeenAt: number }>();
+  for (const s of sessions) {
+    const device = input?.deviceOf.get(s.id);
+    if (device && linked.has(device)) {
+      machineOf.set(s.id, device);
+      continue;
+    }
+    const host = s.machine;
+    if (!host) continue;
+    machineOf.set(s.id, `host:${host}`);
+    const seen = Date.parse(s.updatedAt);
+    const was = hosts.get(host);
+    hosts.set(host, {
+      online: !!was?.online || (s.state !== 'offline' && now - seen <= QUIET_AFTER_MS),
+      lastSeenAt: Math.max(was?.lastSeenAt ?? 0, seen),
+    });
+  }
+  const machines: OperationMachine[] = [
+    ...[...linked.values()].map((m) => ({
+      id: m.id,
+      name: m.name,
+      online: now - m.lastSeenAt.getTime() <= QUIET_AFTER_MS,
+      lastSeenAt: m.lastSeenAt.toISOString(),
+    })),
+    ...[...hosts]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, h]) => ({
+        id: `host:${name}`,
+        name,
+        online: h.online,
+        lastSeenAt: new Date(h.lastSeenAt).toISOString(),
+      })),
+  ];
+  return { machineOf, machines };
 }
 
 /** The owner's rows, oldest first. */
 export function buildOperations({
   sessions,
   github,
+  machines: machinesInput,
+  merges = [],
   now = Date.now(),
 }: OperationsInput): Operations {
   const { snapshot } = github;
+  const { machineOf, machines } = machinesOf(sessions, machinesInput, now);
   const deployRepos = new Set(github.deployRepos.map((r) => r.toLowerCase()));
   const keepFrom = new Date(now - OPERATIONS_KEEP_MS).toISOString();
 
@@ -214,6 +296,9 @@ export function buildOperations({
   ) => {
     const pull = p && toOperationPull(p.pr, p.mine);
     const shipped = shippedAt(pull, deployRepos.has(repo.toLowerCase()));
+    const needs = needsOf(session, pull);
+    const needsSince = needsSinceOf(needs[0], session, p?.pr);
+    const machine = session && machineOf.get(session.id);
     rows.push({
       id,
       repo,
@@ -228,11 +313,13 @@ export function buildOperations({
               state: session.state,
               ...(activityOf(session) ? { activity: activityOf(session) } : {}),
               ...(isQuiet(session, now) ? { quiet: true } : {}),
+              ...(machine ? { machine } : {}),
             },
           }
         : {}),
       ...(pull ? { pull } : {}),
-      needs: needsOf(session, pull),
+      needs,
+      ...(needsSince ? { needsSince } : {}),
       ...(shipped ? { shippedAt: shipped } : {}),
     });
   };
@@ -271,6 +358,8 @@ export function buildOperations({
 
   return {
     rows,
+    machines,
+    merges,
     deployRepos: github.deployRepos,
     github:
       snapshot.state === 'reported'
@@ -281,6 +370,15 @@ export function buildOperations({
 
 /** The owner's Operations, as `GET /api/operations` answers it. */
 export async function getOperations(owner: Owner, now = Date.now()): Promise<Operations> {
-  const [sessions, github] = await Promise.all([listSessions(owner, now), getGitHubLists(owner)]);
-  return buildOperations({ sessions, github, now });
+  const [sessions, github, linked, merges] = await Promise.all([
+    listSessions(owner, now),
+    getGitHubLists(owner),
+    listLinkedMachines(owner),
+    listMerges(owner, now),
+  ]);
+  const deviceOf = await sessionDevices(
+    owner,
+    sessions.map((s) => s.id),
+  );
+  return buildOperations({ sessions, github, machines: { linked, deviceOf }, merges, now });
 }

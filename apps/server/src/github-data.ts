@@ -4,8 +4,10 @@
 // overwritten by a plugin's report.
 import { getDb } from '@joc/db';
 import { type GitHubReport, type GitHubSnapshot, PullRequest } from '@joc/protocol';
+import { githubActivity, recordActivity } from './activity.ts';
 import { alertOnGitHub } from './alerts.ts';
 import { publish } from './bus.ts';
+import { keepMerges } from './merges.ts';
 import type { Owner } from './owner.ts';
 
 type GitHubDoc = Omit<GitHubReport, 'at'> & {
@@ -122,6 +124,7 @@ export async function saveGitHub(owner: Owner, { at, ...whole }: GitHubReport): 
   await keepDetails(owner, before, whole);
   // Only a nudge goes out; each dashboard fetches the snapshot.
   publish(owner, { type: 'github' });
+  await recordActivity(owner, githubActivity(before, report));
   // News against the read before, and what this read resolves.
   await alertOnGitHub(owner, before, report);
   return true;
@@ -152,6 +155,9 @@ export async function saveAppGitHub(owner: Owner, lists: AppLists): Promise<void
   );
   if (same(before, lists)) return;
   publish(owner, { type: 'github' });
+  await keepMerges(owner, lists.recent);
+  // The App's first copy only says how things stand; a plugin's before it isn't comparable.
+  await recordActivity(owner, githubActivity(before?.source === 'app' ? before : null, lists));
   const { reviewRequested, mine } = lists;
   await alertOnGitHub(owner, before, { status: 'ok', reviewRequested, mine });
 }

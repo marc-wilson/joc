@@ -55,6 +55,7 @@ import {
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
+import { listActivity } from './activity.ts';
 import { clearAlerts, listAlerts, readAlerts } from './alerts.ts';
 import { dropAnswer, saveAnswer, waitForAnswer } from './answers.ts';
 import {
@@ -522,6 +523,7 @@ export function createApp({
   // Every piece of work in flight: the owner's sessions joined to their pull requests (#111).
   // Its live updates are the session and github events the stream already sends.
   app.get('/api/operations', async (c) => c.json(await getOperations(c.get('owner'))));
+  app.get('/api/activity', async (c) => c.json({ events: await listActivity(c.get('owner')) }));
 
   // How the person's GitHub reaches JOC, and what's left to do: reconnect, or install the App.
   app.get('/api/github/connection', async (c) => {

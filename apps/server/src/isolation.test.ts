@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { closeClient, getDb } from '@joc/db';
 import {
+  Activity,
   Alert,
   AnswerRefused,
   AuthStatus,
@@ -141,6 +142,7 @@ test('every API route needs an owner', async () => {
     ['GET', '/api/github'],
     ['GET', '/api/github/connection'],
     ['GET', '/api/operations'],
+    ['GET', '/api/activity'],
     ['POST', '/api/github'],
     ['GET', '/api/problems'],
     ['GET', '/api/version'],
@@ -697,6 +699,42 @@ test('Operations shows each owner only their own sessions and pull requests, joi
     false,
   );
   assert.equal(bob.github.state, 'none');
+});
+
+test("Operations' machines, merges and live activity are each owner's own", async () => {
+  // The same session id for both, each going to work and then asking.
+  await call('alice', '/api/reports', report('act-1', { title: 'Alice asks', state: 'idle' }));
+  await call('alice', '/api/reports', report('act-1', { title: 'Alice asks', state: 'needs' }));
+  await call('bob', '/api/reports', report('act-1', { title: 'Bob works', state: 'idle' }));
+  await call('bob', '/api/reports', report('act-1', { title: 'Bob works', state: 'working' }));
+  const alice = await read(await call('alice', '/api/activity'), Activity);
+  const bob = await read(await call('bob', '/api/activity'), Activity);
+  assert.ok(alice.events.some((e) => e.kind === 'asked' && e.title === 'Alice asks'));
+  assert.equal(
+    alice.events.some((e) => e.title.startsWith('Bob')),
+    false,
+  );
+  assert.ok(bob.events.some((e) => e.kind === 'started' && e.title === 'Bob works'));
+  assert.equal(
+    bob.events.some((e) => e.title.startsWith('Alice')),
+    false,
+  );
+
+  // Each sees only their own linked machine, and their own session on it.
+  const aliceOps = await read(await call('alice', '/api/operations'), Operations);
+  const bobOps = await read(await call('bob', '/api/operations'), Operations);
+  assert.deepEqual(
+    aliceOps.machines.map((m) => m.name),
+    ['alice-laptop'],
+  );
+  assert.deepEqual(
+    bobOps.machines.map((m) => m.name),
+    ['bob-laptop'],
+  );
+  const machineOf = (ops: Operations) => ops.rows.find((r) => r.id === 's:act-1')?.session?.machine;
+  assert.equal(machineOf(aliceOps), aliceOps.machines[0]?.id);
+  assert.equal(machineOf(bobOps), bobOps.machines[0]?.id);
+  assert.deepEqual([aliceOps.merges, bobOps.merges], [[], []]);
 });
 
 test("a review session's pull request is its owner's, from their own plugin's read", async () => {
@@ -1988,6 +2026,14 @@ test('a GitHub webhook reaches only the people it concerns, and a forged one nob
     ['review'],
   );
   assert.deepEqual(await alertsFor(carolToken), []);
+  // Only the author's live activity says it opened.
+  const opens = async (token: string | undefined) =>
+    (await read(await as(token, '/api/activity'), Activity)).events
+      .filter((e) => e.number === 42)
+      .map((e) => e.kind);
+  assert.deepEqual(await opens(tokens.get('alice')), ['opened']);
+  assert.deepEqual(await opens(tokens.get('bob')), []);
+  assert.deepEqual(await opens(carolToken), []);
 
   // Covered machines hear the App brings GitHub, and an old plugin's read is taken and dropped.
   assert.equal((await as(tokens.get('alice'), '/api/sessions')).headers.get('x-joc-github'), 'app');
