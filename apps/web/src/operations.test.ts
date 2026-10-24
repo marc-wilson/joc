@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { OperationPull, OperationRow, Operations } from '@joc/protocol';
-import { ciText, opsNeeds, opsView, reviewNote, rowProps } from './operations.ts';
+import { ciText, opsNeeds, opsTable, reviewNote, rowProps } from './operations.ts';
 
 const now = Date.parse('2026-10-21T12:00:00.000Z');
 const at = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
@@ -35,6 +35,8 @@ const row = (id: string, extra: Partial<OperationRow> = {}): OperationRow => ({
 
 const ops = (rows: OperationRow[], deployRepos: string[] = []): Operations => ({
   rows,
+  machines: [],
+  merges: [],
   deployRepos,
   github: { state: 'reported', status: 'ok', updatedAt: at(1) },
 });
@@ -122,66 +124,23 @@ test('conflicts use the needs diamond, and a merge shows its deploy only where r
   assert.equal(rowProps(merged, { now, deployed: false }).deploy, undefined);
 });
 
-test('groups count every row; filters only pick; shipped rows fold apart once allowed', () => {
+test('the table groups rows by repo, keeps their order, and shows Deployed where reported', () => {
   const rows = [
     row('a', { needs: ['answer'], session: { id: 'a', state: 'needs' } }),
     row('b', { repo: 'harbor-labs/billing-api', pull: pull() }),
     row('c', { pull: pull({ state: 'merged', mergedAt: at(30) }), shippedAt: at(30) }),
   ];
-  const order = new Map(rows.map((r, i) => [r.id, i]));
-  const base = { query: '', now, order };
-  const all = opsView(ops(rows), { ...base, filter: 'all', folded: new Set(['c']) });
+  const table = opsTable(rows, []);
   assert.deepEqual(
-    all.groups.map((g) => [g.repo, g.all.length, g.needs]),
+    table.groups.map((g) => [g.repo, g.rows.map((r) => r.id), g.needs]),
     [
-      ['harbor-labs/atlas-web', 1, 1],
-      ['harbor-labs/billing-api', 1, 0],
+      ['harbor-labs/atlas-web', ['a', 'c'], 1],
+      ['harbor-labs/billing-api', ['b'], 0],
     ],
   );
-  assert.deepEqual(all.counts, { all: 2, needs: 1, review: 1, shipped: 1 });
-  assert.deepEqual(
-    all.shipped.map((r) => r.id),
-    ['c'],
-  );
-  const needs = opsView(ops(rows), { ...base, filter: 'needs', folded: new Set(['c']) });
-  assert.deepEqual(
-    needs.groups.map((g) => g.rows.map((r) => r.id)),
-    [['a'], []],
-  );
-  // Not folded yet (the pointer is on the table): it stays in its group.
-  const held = opsView(ops(rows), { ...base, filter: 'all', folded: new Set() });
-  assert.deepEqual(
-    held.groups[0]?.rows.map((r) => r.id),
-    ['a', 'c'],
-  );
-  assert.equal(opsNeeds(ops(rows)), 1);
-});
-
-test('rows keep the order they arrived in, and the text filter matches #numbers', () => {
-  const rows = [row('late', { pull: pull({ number: 12 }) }), row('early')];
-  const order = new Map([
-    ['early', 0],
-    ['late', 1],
-  ]);
-  const v = opsView(ops(rows), { filter: 'all', query: '', now, order, folded: new Set() });
-  assert.deepEqual(
-    v.groups[0]?.rows.map((r) => r.id),
-    ['early', 'late'],
-  );
-  const typed = opsView(ops(rows), { filter: 'all', query: '#12', now, order, folded: new Set() });
-  assert.deepEqual(
-    typed.groups[0]?.rows.map((r) => r.id),
-    ['late'],
-  );
-});
-
-test('the Deployed column shows only when a repo on screen reports deploys', () => {
-  const rows = [row('a'), row('b', { repo: 'harbor-labs/billing-api' })];
-  const order = new Map<string, number>();
-  const view = (filter: 'all' | 'needs', deployRepos: string[]) =>
-    opsView(ops(rows, deployRepos), { filter, query: '', now, order, folded: new Set() });
-  assert.equal(view('all', []).deployed, false);
-  assert.equal(view('all', ['harbor-labs/atlas-web']).deployed, true);
+  assert.equal(table.deployed, false);
+  assert.equal(opsTable(rows, ['Harbor-Labs/billing-api']).deployed, true);
   // Filtered down to nothing from that repo: no column.
-  assert.equal(view('needs', ['harbor-labs/atlas-web']).deployed, false);
+  assert.equal(opsTable(rows.slice(0, 1), ['harbor-labs/billing-api']).deployed, false);
+  assert.equal(opsNeeds(ops(rows)), 1);
 });

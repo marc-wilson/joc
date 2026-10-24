@@ -1068,17 +1068,9 @@
   max-width: calc(var(--sidebar) * 2);
 }
 
-/* Operations (#111): a full-width page; the gutter narrows with the window. */
+/* Operations (#111, #114): a full-width page; the gutter narrows with the window. */
 .app-ops {
   padding-bottom: var(--space-12);
-}
-
-.app-ops__synced {
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--text-tertiary);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 .app-ops .joc-sechead {
@@ -1089,24 +1081,6 @@
 .app-ops .joc-sechead__text {
   flex: 1 1 320px;
   min-width: 0;
-}
-
-.app-ops__filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.app-ops__search {
-  width: 300px;
-  max-width: 100%;
-}
-
-.app-ops__note {
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--text-tertiary);
 }
 
 @media (max-width: 1279px) {
