@@ -1,4 +1,6 @@
 import {
+  Activity,
+  type ActivityEvent,
   type Alert,
   type ConversationItem,
   DeleteRefused,
@@ -23,6 +25,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { apiFetch } from './auth.ts';
+import { mergeEvents } from './dashboard.ts';
 import { type DiffFile, parseDiff, pullFile } from './diff.ts';
 import { readAlerts } from './note-data.ts';
 import { subscribe } from './stream.ts';
@@ -704,4 +707,39 @@ export function useOperations(enabled = true): Operations | undefined {
     };
   }, [enabled]);
   return ops;
+}
+
+/**
+ * The owner's live activity, newest first: read once, then kept up by the stream. `fresh` names
+ * the events that arrived while the page was open, which fade in.
+ */
+export function useActivity(): { events: ActivityEvent[] | undefined; fresh: ReadonlySet<string> } {
+  const [events, setEvents] = useState<ActivityEvent[]>();
+  const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      apiFetch('/api/activity')
+        .then(async (r) => {
+          if (!r.ok || cancelled) return;
+          const parsed = Activity.safeParse(await r.json());
+          if (parsed.success && !cancelled) {
+            setEvents((was) => mergeEvents(was ?? [], parsed.data.events));
+          }
+        })
+        // Unreachable for now: the feed keeps what it shows, and the next activity event adds on.
+        .catch(() => {});
+    const unsubscribe = subscribe((event) => {
+      if (event.type === 'snapshot') void load();
+      if (event.type !== 'activity') return;
+      setEvents((was) => mergeEvents(was ?? [], event.events));
+      setFresh((was) => new Set([...was, ...event.events.map((e) => e.id)]));
+    });
+    void load();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+  return { events, fresh };
 }

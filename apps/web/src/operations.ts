@@ -70,12 +70,8 @@ export const NEED_LABEL: Record<OperationNeed, string> = {
   ci: 'Fix CI',
   conflicts: 'Resolve conflicts',
   review: 'Address review',
-  deploy: 'Fix deploy',
+  deploy: 'Deploy failed',
 };
-
-export const OPS_FILTERS = ['all', 'needs', 'review', 'shipped'] as const;
-export type OpsFilter = (typeof OPS_FILTERS)[number];
-export const isOpsFilter = (id: string): id is OpsFilter => OPS_FILTERS.some((f) => f === id);
 
 const PR_WORD = { open: 'Open', draft: 'Draft', closed: 'Closed', merged: 'Merged' } as const;
 const CI_WORD = { pass: 'passed', fail: 'failed', pending: 'pending', skipped: 'skipped' } as const;
@@ -306,111 +302,34 @@ export function rowProps(row: OperationRow, ctx: RowContext): OperationRowProps 
   return props;
 }
 
-/** Whether the row matches what's typed: its title, branch or #number. */
-export function matchesOps(row: OperationRow, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  const number = row.pull ? `#${row.pull.number}` : '';
-  return [row.title, row.branch, number, row.pull ? String(row.pull.number) : undefined].some((f) =>
-    f?.toLowerCase().includes(q),
-  );
-}
-
-const midnight = (now: number) => {
-  const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-};
-
-export const shippedToday = (row: OperationRow, now: number) =>
-  !!row.shippedAt && Date.parse(row.shippedAt) >= midnight(now);
-
 export interface OpsGroup {
   repo: string;
-  /** Every in-flight row of the repo, whatever the filter: the header counts these. */
-  all: OperationRow[];
-  /** The rows the filter shows. */
   rows: OperationRow[];
   needs: number;
   /** The repo reports deploys. */
   deploys: boolean;
 }
 
-export interface OpsView {
+export interface OpsTable {
   groups: OpsGroup[];
-  /** Shipped rows the filter shows, and how many there are in all. */
-  shipped: OperationRow[];
-  shippedCount: number;
-  counts: Record<OpsFilter, number>;
   /** Some repo on screen reports deploys: the Deployed column shows. */
   deployed: boolean;
 }
 
-/**
- * The groups as shown: in-flight rows by repo, A to Z, each in `order` (the order rows first
- * arrived in, so new ones join the end), and the shipped ones apart. `folded` names the rows
- * shown as shipped: a row that just shipped stays in its group until the pointer leaves.
- */
-export function opsView(
-  ops: Operations,
-  {
-    filter,
-    query,
-    now,
-    order,
-    folded,
-  }: {
-    filter: OpsFilter;
-    query: string;
-    now: number;
-    order: Map<string, number>;
-    folded: ReadonlySet<string>;
-  },
-): OpsView {
-  const place = (r: OperationRow) => order.get(r.id) ?? Number.POSITIVE_INFINITY;
-  const rows = [...ops.rows].sort((a, b) => place(a) - place(b));
-  const deployRepos = new Set(ops.deployRepos.map((r) => r.toLowerCase()));
-  const flying = rows.filter((r) => !folded.has(r.id));
-  const shippedAll = rows.filter((r) => folded.has(r.id));
-  const typed = (r: OperationRow) => matchesOps(r, query);
-  const pick = (r: OperationRow) =>
-    typed(r) &&
-    (filter === 'all' ||
-      (filter === 'needs' ? r.needs.length > 0 : filter === 'review' && inReview(r)));
-
+/** The drill-down's table: its rows by repo, A to Z, each in the order the rows arrived. */
+export function opsTable(rows: OperationRow[], deployRepos: string[]): OpsTable {
+  const deploys = new Set(deployRepos.map((r) => r.toLowerCase()));
   const byRepo = new Map<string, OperationRow[]>();
-  for (const r of flying) byRepo.set(r.repo, [...(byRepo.get(r.repo) ?? []), r]);
+  for (const r of rows) byRepo.set(r.repo, [...(byRepo.get(r.repo) ?? []), r]);
   const groups = [...byRepo]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([repo, all]) => ({
+    .map(([repo, xs]) => ({
       repo,
-      all,
-      rows: filter === 'shipped' ? [] : all.filter(pick),
-      needs: all.filter((r) => r.needs.length).length,
-      deploys: deployRepos.has(repo.toLowerCase()),
+      rows: xs,
+      needs: xs.filter((r) => r.needs.length).length,
+      deploys: deploys.has(repo.toLowerCase()),
     }));
-  const shipped =
-    filter === 'shipped'
-      ? shippedAll.filter((r) => typed(r) && shippedToday(r, now))
-      : filter === 'all'
-        ? shippedAll.filter(typed)
-        : [];
-  const visibleRepos = [
-    ...groups.filter((g) => g.rows.length).map((g) => g.repo),
-    ...shipped.map((r) => r.repo),
-  ];
-  return {
-    groups,
-    shipped,
-    shippedCount: shippedAll.length,
-    counts: {
-      all: flying.length,
-      needs: flying.filter((r) => r.needs.length).length,
-      review: flying.filter(inReview).length,
-      shipped: shippedAll.filter((r) => shippedToday(r, now)).length,
-    },
-    deployed: visibleRepos.some((r) => deployRepos.has(r.toLowerCase())),
-  };
+  return { groups, deployed: groups.some((g) => g.deploys) };
 }
 
 /** How many rows need you, for the nav. */
