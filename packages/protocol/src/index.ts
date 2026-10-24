@@ -1247,7 +1247,9 @@ export type StreamEvent =
   /** A prompt from the dashboard moved on; fetch them from `/api/sessions/:id/prompts`. */
   | { type: 'prompts'; sessionId: string }
   /** The person's preferences changed, maybe in another tab. */
-  | { type: 'prefs'; prefs: Prefs };
+  | { type: 'prefs'; prefs: Prefs }
+  /** New events in the person's live activity, newest first. */
+  | { type: 'activity'; events: ActivityEvent[] };
 
 /** A signed-in person, as the dashboard shows them. */
 export const User = z.object({
@@ -1492,6 +1494,8 @@ export const OperationSession = z.object({
   activity: z.string().optional(),
   /** Its machine stopped reporting without the session ending. */
   quiet: z.boolean().optional(),
+  /** The OperationMachine it runs on, when JOC knows. */
+  machine: z.string().optional(),
 });
 export type OperationSession = z.infer<typeof OperationSession>;
 
@@ -1546,14 +1550,50 @@ export const OperationRow = z.object({
   pull: OperationPull.optional(),
   /** Why it needs you, most pressing first; empty when it doesn't. */
   needs: z.array(OperationNeed),
+  /** Since when it has needed you, for its most pressing reason. */
+  needsSince: z.iso.datetime().optional(),
   /** Merged, and deployed or in a repo that reports no deploys: when it shipped. */
   shippedAt: z.iso.datetime().optional(),
 });
 export type OperationRow = z.infer<typeof OperationRow>;
 
+/**
+ * A machine the owner's sessions run on: a linked machine, or (for sessions no linked machine
+ * reported, as in open local dev) the host name its sessions name.
+ */
+export const OperationMachine = z.object({
+  /** The linked machine's id, or `host:<name>`. */
+  id: z.string(),
+  name: z.string(),
+  /** Heard from within QUIET_AFTER_MS. */
+  online: z.boolean(),
+  /** When it was last heard from, if ever. */
+  lastSeenAt: z.iso.datetime().optional(),
+});
+export type OperationMachine = z.infer<typeof OperationMachine>;
+
+/** One of the owner's pull requests that merged lately, for Operations' throughput. */
+export const OperationMerge = z.object({
+  repo: z.string(),
+  number: z.number().int().positive(),
+  mergedAt: z.iso.datetime(),
+  /** Its first successful deploy. */
+  deployedAt: z.iso.datetime().optional(),
+  /** When the first session on its branch started, for a pull request a session worked on. */
+  sessionStartedAt: z.iso.datetime().optional(),
+});
+export type OperationMerge = z.infer<typeof OperationMerge>;
+
+/** How far back Operations' throughput reaches: seven days, today included, and a day spare. */
+export const MERGES_KEEP_MS = 8 * 24 * 60 * 60_000;
+
 /** `GET /api/operations`: the owner's rows, oldest first, and what GitHub says of their repos. */
 export const Operations = z.object({
   rows: z.array(OperationRow),
+  /** Every machine the owner linked, and the hosts of sessions none of them reported. */
+  machines: z.array(OperationMachine),
+  /** The owner's pull requests that merged within MERGES_KEEP_MS, newest first. */
+  merges: z.array(OperationMerge),
   /** Repos that reported a deploy lately: their rows have a Deployed stage. */
   deployRepos: z.array(z.string()),
   github: z.discriminatedUnion('state', [
@@ -1569,3 +1609,52 @@ export type Operations = z.infer<typeof Operations>;
 
 /** How long a shipped or closed pull request stays on Operations, the same as an ended session. */
 export const OPERATIONS_KEEP_MS = 24 * 60 * 60_000;
+
+// Operations' live activity: what JOC heard happen to the owner's work, newest first. Kept per
+// owner, the last ACTIVITY_KEEP events within ACTIVITY_KEEP_MS.
+
+/**
+ * What happened: a session `started` work, `asked` you, `finished` or went to the `background`;
+ * a pull request was `opened`, its `ci` passed or failed, a `review` came in, it `merged`, or a
+ * `deploy` of its merge passed or failed.
+ */
+export const ActivityKind = z.enum([
+  'started',
+  'asked',
+  'finished',
+  'background',
+  'opened',
+  'ci',
+  'review',
+  'merged',
+  'deploy',
+]);
+export type ActivityKind = z.infer<typeof ActivityKind>;
+
+export const ActivityEvent = z.object({
+  id: z.string(),
+  /** When JOC heard of it. */
+  at: z.iso.datetime(),
+  kind: ActivityKind,
+  repo: z.string().max(200),
+  /** The session's name, or the pull request's title. */
+  title: z.string().max(500),
+  sessionId: z.string().optional(),
+  number: z.number().int().positive().optional(),
+  /** How the CI run or deploy went. */
+  status: CIStatus.optional(),
+  /** The failing checks, the number of checks, or the deploy's environment. */
+  detail: z.string().max(300).optional(),
+  /** Who reviewed. */
+  by: z.string().max(100).optional(),
+  review: z.enum(['approved', 'changes', 'commented']).optional(),
+});
+export type ActivityEvent = z.infer<typeof ActivityEvent>;
+
+/** The most events kept per owner, and for how long. */
+export const ACTIVITY_KEEP = 200;
+export const ACTIVITY_KEEP_MS = 7 * 24 * 60 * 60_000;
+
+/** `GET /api/activity`: the owner's latest events, newest first. */
+export const Activity = z.object({ events: z.array(ActivityEvent).max(ACTIVITY_KEEP) });
+export type Activity = z.infer<typeof Activity>;
