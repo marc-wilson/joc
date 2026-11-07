@@ -8,6 +8,7 @@ export * from './prefs.ts';
 export * from './pull-details.ts';
 export * from './session-review.ts';
 export * from './team.ts';
+export * from './teammate-messages.ts';
 
 export const SessionState = z.enum(['working', 'background', 'needs', 'idle', 'offline']);
 export type SessionState = z.infer<typeof SessionState>;
@@ -164,10 +165,14 @@ export const Session = z.object({
   /** What Claude is doing right now, one line. */
   activity: z.string().optional(),
   /**
-   * The first line of what Claude last said when a turn finished: kept after the session ends,
-   * when `activity` only says it ended. Unset until a turn finished with something said.
+   * The first line of what Claude last said: kept after the session ends, when `activity` only
+   * says it ended. Unset until it said something.
    */
   lastWords: z.string().max(500).optional(),
+  /** When Claude last came back with a reply for you: a turn you started, or all work done. */
+  repliedAt: z.iso.datetime().optional(),
+  /** When you last read it: opened it in the dashboard, or sent it something. */
+  readAt: z.iso.datetime().optional(),
   /** Percent of the context window left, 0–100. */
   contextLeft: z.number().min(0).max(100).optional(),
   machine: z.string().optional(),
@@ -204,6 +209,10 @@ export const Session = z.object({
   activeAt: z.iso.datetime().optional(),
 });
 export type Session = z.infer<typeof Session>;
+
+/** Whether Claude replied since you last read the session. */
+export const isUnread = ({ repliedAt, readAt }: Pick<Session, 'repliedAt' | 'readAt'>) =>
+  !!repliedAt && (!readAt || Date.parse(repliedAt) > Date.parse(readAt));
 
 /** A past session for the History page: a session plus how many messages it has. */
 export const HistorySession = Session.extend({ messages: z.number().int().nonnegative() });

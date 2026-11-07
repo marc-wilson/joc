@@ -1,4 +1,10 @@
-import type { ConversationItem, ImageRef, Session, SessionState } from '@joc/protocol';
+import {
+  type ConversationItem,
+  type ImageRef,
+  type Session,
+  type SessionState,
+  teammateMessages,
+} from '@joc/protocol';
 import {
   Attachment,
   Code,
@@ -30,7 +36,6 @@ import { commandLine } from './commands.ts';
 import type { PendingView } from './pending.ts';
 import { plain } from './plain.ts';
 import { updateSessionPrefs, useSessionPrefs } from './prefs.ts';
-import { teammateMessages } from './teammate.ts';
 import { toggled } from './toggled.ts';
 import { seenIds, unseenCount } from './unseen.ts';
 
