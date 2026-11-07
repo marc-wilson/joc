@@ -1337,3 +1337,33 @@ a.joc-opcell:focus-visible, .joc-opcell--button:focus-visible { outline: 2px sol
   .joc-dash-ph__right > .joc-dash-pc { display: none; }
 }
 /* ===== End Operations dashboard (#114) ===================================================== */
+
+/* ---------- The session list as a message list ---------- */
+/* For the design system: copy these in, then remove them here. What you haven't read leads; what
+   the session is doing is a quiet hint. State marks stay on the header, Team tab and Operations. */
+.joc-srow--working .joc-srow__rail,
+.joc-srow--background .joc-srow__rail,
+.joc-srow--offline .joc-srow__rail { display: none; }
+.joc-srow__title { font-weight: 400; color: var(--text-secondary); }
+.joc-srow.is-selected .joc-srow__title { color: var(--text-primary); }
+.joc-srow.is-unread .joc-srow__title { font-weight: 650; color: var(--text-primary); }
+.joc-srow.is-unread .joc-srow__activity { color: var(--text-primary); }
+.joc-srow:not(.is-unread) .joc-srow__activity { color: var(--text-tertiary); }
+
+.joc-unread { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--text-primary); }
+
+.joc-typing { display: inline-flex; align-items: center; gap: 3px; margin-right: var(--space-2); vertical-align: 1px; }
+.joc-typing i { width: 4px; height: 4px; border-radius: 50%; background: var(--state-working); animation: joc-typing 1.4s ease-in-out infinite; }
+.joc-typing i:nth-child(2) { animation-delay: .2s; }
+.joc-typing i:nth-child(3) { animation-delay: .4s; }
+@keyframes joc-typing { 0%, 70%, 100% { opacity: .35; } 35% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .joc-typing i { animation: none; opacity: .8; }
+}
+
+.joc-rgh__unread { display: inline-flex; align-items: center; gap: var(--space-1); font-family: var(--font-mono); font-weight: 400; letter-spacing: 0; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+
+.joc-ssum { display: flex; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border-subtle); font-size: 12px; line-height: 20px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.joc-ssum span:not([role]) { display: inline-flex; align-items: center; gap: var(--space-2); }
+.joc-ssum strong { font-weight: 500; color: var(--text-secondary); }
+.joc-ssum .joc-typing { margin-right: 0; }

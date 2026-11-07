@@ -1,4 +1,4 @@
-import { channelsOf, type Session } from '@joc/protocol';
+import { channelsOf, isUnread, type Session } from '@joc/protocol';
 import {
   type NotificationBellProps,
   NotificationEmpty,
@@ -368,9 +368,11 @@ export function useNotificationCenter(viewing: string | undefined): {
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const [tests, setTests] = useState(0);
 
+  // Replies count too, each session once: one that needs you is in `counts.needs`.
+  const unread = sessions.filter((s) => s.state !== 'needs' && isUnread(s)).length;
   useEffect(() => {
-    document.title = pageTitle(counts.needs);
-  }, [counts.needs]);
+    document.title = pageTitle(counts.needs + unread);
+  }, [counts.needs, unread]);
 
   useEffect(() => {
     const onTest = () => setTests((n) => n + 1);

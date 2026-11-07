@@ -94,9 +94,17 @@ Full rules are in `CONTRIBUTING.md`. In short:
 - `packages/ui/src/styles/**` (`tokens.css`, `components.css`) mirrors the design system and is excluded from Biome. Don't hand-edit it to diverge: style changes and new component styles go into the JOC design system first, then get copied here.
 - Themes: `data-theme="dark"` (default) or `"light"` on any element. Every token has both values; dark and light are equals.
 
+### Unread
+
+The session list reads like a message list: what you haven't read leads, and what the session is doing is a quiet hint.
+
+- A reply is unread (`isUnread` in `@joc/protocol`) when a turn you started ended, or the last of a session's work did, since you last read it. Claude's turns on a teammate's messages while the rest still runs aren't replies. The server stamps `repliedAt`; opening the session in a focused tab or sending it something stamps `readAt`.
+- `UnreadDot` plus a bold title is the unread mark. It sits beside the state and never replaces it: a session can be running and unread.
+- In a `SessionRow`, only `needs` keeps its dot (the loud form of unread). Running sessions (`working`, `background`) show `TypingDots` on the last line. `idle` shows nothing. `offline` says "Ended" in the time.
+
 ### Session states
 
-Identical everywhere. `StateDot` (used by `StateBadge`, `SessionRow`, `Tabs`, `QuestionCard`, `Toast`) is the only way to draw a state. The enum is `SessionState` in `@joc/protocol`.
+Everywhere but the session list. `StateDot` (used by `StateBadge`, `Tabs`, `QuestionCard`, `Toast`) is the only way to draw a state. The enum is `SessionState` in `@joc/protocol`.
 
 | State | Colour | Dot | Motion | Row rail |
 |---|---|---|---|---|
@@ -108,7 +116,7 @@ Identical everywhere. `StateDot` (used by `StateBadge`, `SessionRow`, `Tabs`, `Q
 
 - States never rely on hue alone: shape, motion, rail pattern and the badge word carry meaning. Under `prefers-reduced-motion` the pulse and spin stop.
 - `needs` orange is the only loud colour. Everything else is neutral surfaces, text levels and hairlines.
-- One meaning per signal: a dot is always a session state; a check/cross is always an outcome; `accent` (indigo) is always interactive/selected, never a state.
+- One meaning per signal: a dot is always a session state, apart from `UnreadDot` and `TypingDots`; a check/cross is always an outcome; `accent` (indigo) is always interactive/selected, never a state.
 
 ### CI marks
 

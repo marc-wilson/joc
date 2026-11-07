@@ -625,6 +625,13 @@ export function useResumes(): Resume[] {
   return resumes;
 }
 
+/** Tells the server you've read a session. A failure only leaves it unread until you're back. */
+export function markRead(sessionId: string): void {
+  void apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/read`, { method: 'POST' }).catch(
+    () => undefined,
+  );
+}
+
 /** Asks for an ended session to be resumed, on its machine or `machine`. The resume, or why not. */
 export async function askResume(
   sessionId: string,
