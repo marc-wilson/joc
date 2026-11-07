@@ -7,7 +7,7 @@ import { Icon } from './Icon.tsx';
 import { Branch, WorktreeTag } from './inline.tsx';
 import { EndedTag } from './resuming.tsx';
 import { ReviewSessionRow, type ReviewSessionRowProps } from './review-session.tsx';
-import { STATE_LABEL, StateBadge, StateDot } from './state.tsx';
+import { STATE_LABEL, StateBadge, StateDot, TypingDots, UnreadDot } from './state.tsx';
 
 export interface SessionRowProps {
   /** Stable key when titles can repeat. */
@@ -23,6 +23,8 @@ export interface SessionRowProps {
   activity?: ReactNode;
   time?: string;
   selected?: boolean;
+  /** Claude replied and you haven't read it. The list leads with this, not with the state. */
+  unread?: boolean;
   needsLabel?: string;
   /** Kept in the Pinned group at the top of the list. */
   pinned?: boolean;
@@ -51,6 +53,7 @@ export function SessionRow({
   activity,
   time,
   selected,
+  unread,
   needsLabel,
   pinned,
   quiet,
@@ -60,6 +63,7 @@ export function SessionRow({
   team,
   teammates,
 }: SessionRowProps) {
+  const running = (state === 'working' || state === 'background') && !quiet;
   return (
     <div
       className={cx(
@@ -68,6 +72,7 @@ export function SessionRow({
         selected && 'is-selected',
         quiet && 'is-quiet',
         removed && 'is-removed',
+        (unread || state === 'needs') && 'is-unread',
       )}
       role="option"
       aria-selected={!!selected}
@@ -84,11 +89,15 @@ export function SessionRow({
     >
       <span className="joc-srow__rail" aria-hidden="true" />
       <span className="joc-srow__glyph">
-        <StateDot
-          state={state}
-          quiet={!!quiet}
-          label={quiet ? `${STATE_LABEL[state]}, ${quiet.toLowerCase()}` : undefined}
-        />
+        {state === 'needs' ? (
+          <StateDot
+            state={state}
+            quiet={!!quiet}
+            label={quiet ? `${STATE_LABEL[state]}, ${quiet.toLowerCase()}` : undefined}
+          />
+        ) : unread ? (
+          <UnreadDot />
+        ) : null}
       </span>
       <span className="joc-srow__main">
         <span className="joc-srow__line1">
@@ -124,6 +133,7 @@ export function SessionRow({
           className="joc-srow__activity joc-fade-in"
           key={typeof activity === 'string' ? activity : undefined}
         >
+          {running ? <TypingDots label={STATE_LABEL[state]} /> : null}
           {activity}
         </span>
       </span>
@@ -170,6 +180,34 @@ function PinGlyph() {
   return <Icon name="pin" size={12} filled className="joc-pin-glyph" />;
 }
 
+/** The list's glance: what needs you, what's unread, what's running. */
+export function SessionSummary({
+  needs,
+  unread,
+  working,
+}: {
+  needs: number;
+  unread: number;
+  working: number;
+}) {
+  return (
+    <div className="joc-ssum">
+      <span>
+        <StateDot state="needs" />
+        <strong>{needs}</strong> {needs === 1 ? 'needs' : 'need'} you
+      </span>
+      <span>
+        <UnreadDot />
+        <strong>{unread}</strong> unread
+      </span>
+      <span>
+        <TypingDots />
+        <strong>{working}</strong> working
+      </span>
+    </div>
+  );
+}
+
 export interface RepoGroupHeaderProps {
   repo: string;
   /** How many it holds: a number, or words such as "7 in flight". */
@@ -177,6 +215,8 @@ export interface RepoGroupHeaderProps {
   needs?: number;
   /** Words for the needs pill in place of the bare number, e.g. "2 needs you". */
   needsLabel?: string;
+  /** Unread sessions a folded group hides. */
+  unread?: number;
   collapsed?: boolean;
   /** Heads the Pinned group: a pin glyph, and it doesn't fold. */
   pinned?: boolean;
@@ -192,6 +232,7 @@ export function RepoGroupHeader({
   count,
   needs,
   needsLabel,
+  unread,
   collapsed,
   pinned,
   kind = 'repo',
@@ -214,6 +255,12 @@ export function RepoGroupHeader({
       <span className="joc-rgh__name">{repo}</span>
       <span className="joc-rgh__count">{count}</span>
       {needs ? <StateBadge state="needs" label={needsLabel ?? String(needs)} /> : null}
+      {unread ? (
+        <span className="joc-rgh__unread">
+          <UnreadDot />
+          {unread}
+        </span>
+      ) : null}
     </>
   );
   if (kind === 'reviews' || action) {

@@ -2,6 +2,7 @@ import {
   arrangeTeam,
   IMAGE_TYPES,
   ImageRef,
+  isUnread,
   MAX_IMAGE_BYTES,
   MAX_IMAGES_PER_MESSAGE,
   MAX_PREF_ITEMS,
@@ -25,6 +26,7 @@ import {
   SessionRail,
   SessionRow,
   type SessionRowProps,
+  SessionSummary,
   SessionTeammate,
   SessionTeammates,
   SortBar,
@@ -44,6 +46,7 @@ import { DeleteDialog } from './DeleteSessions.tsx';
 import { cantDelete, deletionLine, deletionOf, machineLive, removedLine } from './deletes.ts';
 import { useHeldOrder } from './held-order.ts';
 import {
+  markRead,
   useChanges,
   useCmdlistMax,
   useCommands,
@@ -112,6 +115,9 @@ function activityOf(s: Session, now: number, team: Teammate[] = s.team ?? []): s
   const silent = `No word from ${s.machine ?? 'its machine'}`;
   return activity ? `${silent} · last: ${activity}` : silent;
 }
+
+const unread = (s: Session) => s.state !== 'needs' && isUnread(s);
+const isRunning = (s: Session) => s.state === 'working' || s.state === 'background';
 
 /** "Quiet 6m" for a session whose machine stopped reporting, in place of its time. */
 const quietOf = (s: Session, now: number) =>
@@ -324,6 +330,18 @@ export default function App() {
     sessions[0];
   // A deleted session stays where it was in the list, faded; nothing is selected in its place.
   const gone = selected && deleted.has(selected.id) ? selected : undefined;
+  // A reply is read once its session is open in a tab you're looking at.
+  const toRead = selected && !gone && isUnread(selected) ? selected : undefined;
+  const repliedAt = toRead?.repliedAt;
+  useEffect(() => {
+    if (!toRead?.id || !repliedAt) return;
+    const read = () => {
+      if (document.hasFocus()) markRead(toRead.id);
+    };
+    read();
+    window.addEventListener('focus', read);
+    return () => window.removeEventListener('focus', read);
+  }, [toRead?.id, repliedAt]);
   const keep = useSessionSettings();
   // The repo a new session is being started on.
   const [newIn, setNewIn] = useState<string>();
@@ -615,6 +633,11 @@ export default function App() {
                 resort.settles ? `Sessions re-sorted${resort.settles % 2 ? '' : ' '}` : undefined
               }
             />
+            <SessionSummary
+              needs={shown.filter((s) => s.state === 'needs').length}
+              unread={shown.filter(unread).length}
+              working={shown.filter(isRunning).length}
+            />
             <div className="app-side__list" role="listbox" aria-label="Sessions">
               {groups.map((g) => (
                 <Fragment key={g.id}>
@@ -623,6 +646,11 @@ export default function App() {
                     kind={g.id === REVIEWS_GROUP ? 'reviews' : 'repo'}
                     count={g.sessions.length}
                     needs={g.sessions.filter((s) => s.state === 'needs').length}
+                    unread={
+                      g.id !== PINNED_GROUP && folded.includes(g.id)
+                        ? g.sessions.filter(unread).length
+                        : undefined
+                    }
                     pinned={g.id === PINNED_GROUP}
                     collapsed={folded.includes(g.id)}
                     action={
@@ -668,8 +696,11 @@ export default function App() {
                                   branch: s.branch,
                                   worktree: s.worktree,
                                   contextLeft: s.contextLeft,
-                                  activity: activityOf(s, now, teamOf(s)),
-                                  time: timeOf(s, sort, now),
+                                  activity: unread(s)
+                                    ? plain(s.lastWords ?? '') || activityOf(s, now, teamOf(s))
+                                    : activityOf(s, now, teamOf(s)),
+                                  time: `${s.state === 'offline' ? 'Ended ' : ''}${timeOf(s, sort, now)}`,
+                                  unread: unread(s),
                                   quiet: quietOf(s, now),
                                   selected: s.id === selected?.id && !gone,
                                   removed: deleted.has(s.id) ? removedLine(s.machine) : undefined,

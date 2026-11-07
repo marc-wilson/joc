@@ -27,6 +27,22 @@ export function StateDot({ state = 'idle', label, quiet, className }: StateDotPr
   );
 }
 
+/** Claude is at work: the session list's typing indicator, at the start of a row's last line. */
+export function TypingDots({ label = 'Working' }: { label?: string }) {
+  return (
+    <span className="joc-typing" role="img" aria-label={label}>
+      <i />
+      <i />
+      <i />
+    </span>
+  );
+}
+
+/** Something in the session you haven't read. Not a state: it sits beside what the session does. */
+export function UnreadDot() {
+  return <span className="joc-unread" role="img" aria-label="Unread" />;
+}
+
 export interface StateBadgeProps {
   state?: SessionState;
   label?: string;

@@ -283,6 +283,7 @@ export {
   type SessionRailProps,
   SessionRow,
   type SessionRowProps,
+  SessionSummary,
 } from './session.tsx';
 export { SessionStatusPanel, type SessionStatusPanelProps } from './session-status.tsx';
 export {
@@ -313,6 +314,8 @@ export {
   type StateBadgeProps,
   StateDot,
   type StateDotProps,
+  TypingDots,
+  UnreadDot,
 } from './state.tsx';
 export { mcpSummary, type StatusMcpServer } from './status.ts';
 export {

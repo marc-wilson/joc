@@ -428,7 +428,7 @@ export function bellCounts(notes: Note[]): { needs: number; unread: number } {
 }
 
 /** `JOC`, or `(2) JOC` while two sessions need you. */
-export const pageTitle = (needs: number) => (needs ? `(${needs}) JOC` : 'JOC');
+export const pageTitle = (waiting: number) => (waiting ? `(${waiting}) JOC` : 'JOC');
 
 /**
  * Notes that arrived since `seen` (the ids there last time), worth a toast, a sound or a desktop
