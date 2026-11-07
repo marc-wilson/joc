@@ -30,6 +30,7 @@ import { commandLine } from './commands.ts';
 import type { PendingView } from './pending.ts';
 import { plain } from './plain.ts';
 import { updateSessionPrefs, useSessionPrefs } from './prefs.ts';
+import { teammateMessages } from './teammate.ts';
 import { toggled } from './toggled.ts';
 import { seenIds, unseenCount } from './unseen.ts';
 
@@ -232,7 +233,21 @@ export function ThreadItems({
   );
   const rendered = items.map((item) => {
     switch (item.kind) {
-      case 'user':
+      case 'user': {
+        const relayed = teammateMessages(item.text);
+        if (relayed) {
+          return relayed.map((message) => (
+            <Message
+              key={`${item.id}:${message.from}:${message.text}`}
+              from="tool"
+              name={message.from}
+              target={message.summary ?? firstLine(message.text)}
+              status="none"
+            >
+              {message.text}
+            </Message>
+          ));
+        }
         return (
           <UserMessage
             key={item.id}
@@ -244,6 +259,7 @@ export function ThreadItems({
             onOpen={onOpen}
           />
         );
+      }
       case 'command':
         return (
           <Message key={item.id} from="user" time={time(item.at)} fade={!settled?.has(item.id)}>
