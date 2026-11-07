@@ -18,6 +18,7 @@
 // (src/session-status.ts): Claude Code's version, the model, the folder and its MCP servers.
 import type { MessagesReport, PromptHandoff } from '@joc/protocol';
 import type { EngineInterface, HttpResponse, ProcessRunResult, Register } from 'claude-code';
+import { afterOutcome, type Backoff, holdsOff, NOT_WAITING } from './backoff.ts';
 import {
   type DescribedCommand,
   describedKey,
@@ -202,11 +203,12 @@ async function readStatusText($: EngineInterface): Promise<string | undefined> {
  * This module's side of the problem log: outcomes are noted as they happen and written together
  * (`writeOutcomes`) every sync, so a poll every 2s isn't a file write every 2s.
  */
-function problemLog() {
+function problemLog(noted: (outcome: Outcome) => void) {
   let pending: Outcome[] = [];
   return {
     note(outcome: Outcome) {
       pending = [...pending, outcome].slice(-MAX_PENDING);
+      noted(outcome);
     },
     take(): Outcome[] {
       const taken = pending;
@@ -859,7 +861,11 @@ async function update($: EngineInterface): Promise<string> {
 }
 
 export const register: Register = (on) => {
-  const log = problemLog();
+  // Every attempt lands in the log, so the log is what tells how the server is doing.
+  let backoff: Backoff = NOT_WAITING;
+  const log = problemLog((outcome) => {
+    backoff = afterOutcome(backoff, outcome);
+  });
   const failedIn = (where: string) => (error: unknown) =>
     log.note(crash(where, errorDetail(error)));
 
@@ -876,6 +882,15 @@ export const register: Register = (on) => {
       description: 'Update the JOC plugin to the version the server expects',
     });
     const root = pluginRoot($);
+
+    /** Runs a claim every `ms`, skipping turns while the server is down (backoff.ts). */
+    const poll = (ms: number, task: () => Promise<unknown>) =>
+      $.clock.every(
+        ms,
+        oneAtATime(async () => {
+          if (!holdsOff(backoff, Date.now())) await task();
+        }, failedIn('module')),
+      );
 
     // Every session, as the command hooks report every session. hook.ts finds the server and
     // token the same way this module does (src/credentials.ts).
@@ -974,7 +989,7 @@ export const register: Register = (on) => {
         }).catch(() => undefined); // The dashboard then says the machine didn't report back.
       }
     }
-    $.clock.every(DELETE_POLL_MS, oneAtATime(takeDeletes, failedIn('module')));
+    poll(DELETE_POLL_MS, takeDeletes);
 
     /**
      * Resumes the ended sessions the dashboard asked this machine to resume, each with
@@ -1039,7 +1054,7 @@ export const register: Register = (on) => {
         }).catch(() => undefined); // The dashboard then says the machine didn't report back.
       }
     }
-    $.clock.every(RESUME_POLL_MS, oneAtATime(takeResumes, failedIn('module')));
+    poll(RESUME_POLL_MS, takeResumes);
 
     // Nobody reads a -p run's dashboard; only take prompts for sessions a person runs.
     interactive = e.isInteractive;
@@ -1250,8 +1265,8 @@ export const register: Register = (on) => {
     statusSoon = () => $.clock.after(3000, sendStatus);
     $.clock.every(STATUS_MS, sendStatus);
 
-    $.clock.every(POLL_MS, oneAtATime(takePrompts, failedIn('module')));
-    $.clock.every(LAUNCH_POLL_MS, oneAtATime(takeLaunches, failedIn('module')));
+    poll(POLL_MS, takePrompts);
+    poll(LAUNCH_POLL_MS, takeLaunches);
     return result;
   });
 
