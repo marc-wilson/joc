@@ -73,6 +73,7 @@ export function SessionRow({
         quiet && 'is-quiet',
         removed && 'is-removed',
         (unread || state === 'needs') && 'is-unread',
+        running && 'is-running',
       )}
       role="option"
       aria-selected={!!selected}
@@ -110,6 +111,11 @@ export function SessionRow({
               <Icon name="clock" size={12} />
               {quiet}
             </span>
+          ) : running ? (
+            <span className="joc-srow__time joc-srow__working">
+              <TypingDots label="" />
+              Working
+            </span>
           ) : (
             <span className="joc-srow__time">{time}</span>
           )}
@@ -133,7 +139,6 @@ export function SessionRow({
           className="joc-srow__activity joc-fade-in"
           key={typeof activity === 'string' ? activity : undefined}
         >
-          {running ? <TypingDots label={STATE_LABEL[state]} /> : null}
           {activity}
         </span>
       </span>
@@ -192,15 +197,15 @@ export function SessionSummary({
 }) {
   return (
     <div className="joc-ssum">
-      <span>
+      <span className={needs ? undefined : 'is-zero'}>
         <StateDot state="needs" />
         <strong>{needs}</strong> {needs === 1 ? 'needs' : 'need'} you
       </span>
-      <span>
+      <span className={unread ? undefined : 'is-zero'}>
         <UnreadDot />
         <strong>{unread}</strong> unread
       </span>
-      <span>
+      <span className={working ? undefined : 'is-zero'}>
         <TypingDots />
         <strong>{working}</strong> working
       </span>

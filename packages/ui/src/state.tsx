@@ -30,7 +30,10 @@ export function StateDot({ state = 'idle', label, quiet, className }: StateDotPr
 /** Claude is at work: the session list's typing indicator, at the start of a row's last line. */
 export function TypingDots({ label = 'Working' }: { label?: string }) {
   return (
-    <span className="joc-typing" role="img" aria-label={label}>
+    <span
+      className="joc-typing"
+      {...(label ? { role: 'img', 'aria-label': label } : { 'aria-hidden': true })}
+    >
       <i />
       <i />
       <i />

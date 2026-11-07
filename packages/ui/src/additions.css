@@ -1349,6 +1349,10 @@ a.joc-opcell:focus-visible, .joc-opcell--button:focus-visible { outline: 2px sol
 .joc-srow.is-unread .joc-srow__title { font-weight: 650; color: var(--text-primary); }
 .joc-srow.is-unread .joc-srow__activity { color: var(--text-primary); }
 .joc-srow:not(.is-unread) .joc-srow__activity { color: var(--text-tertiary); }
+.joc-srow.is-running .joc-srow__title { color: var(--text-primary); }
+.joc-srow.is-running:not(.is-unread) .joc-srow__activity { color: var(--text-secondary); }
+.joc-srow__working { display: inline-flex; align-items: center; color: var(--state-working); }
+.joc-srow__working .joc-typing { margin-right: var(--space-1); vertical-align: baseline; }
 
 .joc-unread { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--text-primary); }
 
@@ -1367,3 +1371,4 @@ a.joc-opcell:focus-visible, .joc-opcell--button:focus-visible { outline: 2px sol
 .joc-ssum span:not([role]) { display: inline-flex; align-items: center; gap: var(--space-2); }
 .joc-ssum strong { font-weight: 500; color: var(--text-secondary); }
 .joc-ssum .joc-typing { margin-right: 0; }
+.joc-ssum .is-zero > :first-child { filter: grayscale(1); opacity: .4; }

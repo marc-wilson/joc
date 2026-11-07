@@ -100,7 +100,7 @@ The session list reads like a message list: what you haven't read leads, and wha
 
 - A reply is unread (`isUnread` in `@joc/protocol`) when a turn you started ended, or the last of a session's work did, since you last read it. Claude's turns on a teammate's messages while the rest still runs aren't replies. The server stamps `repliedAt`; opening the session in a focused tab or sending it something stamps `readAt`.
 - `UnreadDot` plus a bold title is the unread mark. It sits beside the state and never replaces it: a session can be running and unread.
-- In a `SessionRow`, only `needs` keeps its dot (the loud form of unread). Running sessions (`working`, `background`) show `TypingDots` on the last line. `idle` shows nothing. `offline` says "Ended" in the time.
+- In a `SessionRow`, only `needs` keeps its dot (the loud form of unread). Running sessions (`working`, `background`) show `TypingDots` and "Working" in place of the time, at full brightness. `idle` shows nothing. `offline` says "Ended" in the time.
 
 ### Session states
 
