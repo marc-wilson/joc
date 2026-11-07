@@ -126,7 +126,9 @@ import {
   listHistory,
   listSessions,
   listStaleSessions,
+  markRead,
   markReview,
+  noteTurn,
   setTeam,
   setTeamFolder,
   setWaiting,
@@ -584,6 +586,7 @@ export function createApp({
     const { sessionId, teammate } = parsed.data;
     if (await isDeleted(owner, sessionId)) return ignored(c);
     const fresh = await addMessages(owner, parsed.data);
+    if (fresh.length) await noteTurn(owner, sessionId, fresh);
     if (teammate) await setTeamFolder(owner, sessionId, teammate);
     // New word on a teammate: work its team out again from the conversation.
     if (fresh.some(movesTeam)) {
@@ -595,6 +598,12 @@ export function createApp({
   app.get('/api/sessions/:id/messages', async (c) =>
     c.json(await listMessages(c.get('owner'), c.req.param('id'))),
   );
+
+  // From the dashboard: you've read what the session said.
+  app.post('/api/sessions/:id/read', async (c) => {
+    const found = await markRead(c.get('owner'), c.req.param('id'));
+    return found ? c.json({ ok: true }) : c.json({ error: 'No such session' }, 404);
+  });
 
   // A background subagent's own steps, from its transcript.
   app.get('/api/sessions/:id/tasks/:task/messages', async (c) =>

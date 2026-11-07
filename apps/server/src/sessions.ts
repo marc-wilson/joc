@@ -1,6 +1,7 @@
 import { getDb } from '@joc/db';
 import {
   type AnsweredBy,
+  type ConversationItem,
   DROP_AFTER_MS,
   type DropAfter,
   type HistorySession,
@@ -26,6 +27,7 @@ import { launchedReview } from './launches.ts';
 import { countMessages } from './messages.ts';
 import { type Owner, sessionKey } from './owner.ts';
 import { getSessionSettings } from './settings.ts';
+import { turnNews } from './turns.ts';
 import { isBehind } from './version.ts';
 
 interface SessionDoc {
@@ -73,8 +75,10 @@ interface SessionDoc {
   team?: TeamDraft[];
   /** The folder and branch each teammate works in, as its steps last said. */
   teamFolders?: TeamFolder[];
-  /** The first line of what Claude said when its last turn finished. */
+  /** The first line of what Claude last said. */
   lastWords?: string;
+  /** You sent something and Claude hasn't finished answering: its turn's end is a reply. */
+  awaitingReply?: boolean;
 }
 
 /** What an idle report says when Claude said nothing: not Claude's words. */
@@ -96,6 +100,7 @@ function toSession({
   reportedAt: _r,
   previousState: _p,
   turnStartedAt: _t,
+  awaitingReply: _a,
   device: _d,
   updatedAt,
   reportedAt,
@@ -216,6 +221,14 @@ export async function applyReport(
   const outcome = fields.state === 'idle' ? reviewOutcome(fields.activity) : undefined;
   // Kept for when the session has ended and its activity only says so.
   const lastWords = lastWordsOf(fields);
+  // A reply for you: a turn you started ended, or the last of the work did. Claude's turns on a
+  // teammate's messages while the rest still runs aren't for you.
+  const replied =
+    fields.state === 'idle'
+      ? { $in: ['$state', ['working', 'needs', 'background']] }
+      : fields.state === 'background'
+        ? { $and: [{ $in: ['$state', ['working', 'needs']] }, { $eq: ['$awaitingReply', true] }] }
+        : undefined;
   // $literal keeps reported strings like "$ pnpm test" from being read as field paths. A report
   // that names no plugin version keeps the one stored.
   const set = Object.fromEntries(
@@ -272,6 +285,12 @@ export async function applyReport(
             ...(fields.worktree === '' ? { worktree: '$$REMOVE' } : {}),
             ...(outcome ? { reviewOutcome: { $literal: outcome } } : {}),
             ...(lastWords ? { lastWords: { $literal: lastWords } } : {}),
+            ...(replied
+              ? {
+                  repliedAt: { $cond: [replied, { $literal: now.toISOString() }, '$repliedAt'] },
+                  awaitingReply: { $cond: [replied, false, '$awaitingReply'] },
+                }
+              : {}),
           },
         },
       ],
@@ -299,6 +318,42 @@ export async function applyReport(
     });
   }
   return session;
+}
+
+/** Takes in what new conversation items say about the session's turn. */
+export async function noteTurn(
+  owner: Owner,
+  sessionId: string,
+  items: ConversationItem[],
+): Promise<void> {
+  const _id = sessionKey(owner, sessionId);
+  const doc = await sessions().findOne({ _id, owner }, { projection: { state: 1 } });
+  if (!doc) return;
+  const { words, sent, answered } = turnNews(items, doc.state);
+  const now = new Date().toISOString();
+  const set = {
+    ...(words ? { lastWords: words } : {}),
+    ...(sent ? { readAt: now, awaitingReply: true } : {}),
+    ...(answered && doc.state === 'background' ? { repliedAt: now, awaitingReply: false } : {}),
+  };
+  if (!Object.keys(set).length) return;
+  const updated = await sessions().findOneAndUpdate(
+    { _id, owner },
+    { $set: set },
+    { returnDocument: 'after' },
+  );
+  if (updated) publish(owner, { type: 'session', session: toSession(updated) });
+}
+
+/** Marks the session read, on every dashboard. False when the owner has no such session. */
+export async function markRead(owner: Owner, sessionId: string): Promise<boolean> {
+  const doc = await sessions().findOneAndUpdate(
+    { _id: sessionKey(owner, sessionId), owner },
+    { $set: { readAt: new Date().toISOString() } },
+    { returnDocument: 'after' },
+  );
+  if (doc) publish(owner, { type: 'session', session: toSession(doc) });
+  return !!doc;
 }
 
 /**

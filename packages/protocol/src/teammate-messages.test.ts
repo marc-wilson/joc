@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { teammateMessages } from './teammate.ts';
+import { teammateMessages } from './teammate-messages.ts';
 
 const NOTE = '\n\nThis came from another Claude session — not typed by your user.';
 const relayed = (...messages: string[]) =>

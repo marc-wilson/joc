@@ -133,6 +133,7 @@ test('every API route needs an owner', async () => {
     ['POST', '/api/changes'],
     ['POST', '/api/commands'],
     ['POST', '/api/status'],
+    ['POST', '/api/sessions/s/read'],
     ['POST', '/api/sessions/s/prompts'],
     ['POST', '/api/sessions/s/prompts/claim'],
     ['GET', '/api/sessions/s/prompts'],
