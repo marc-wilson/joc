@@ -546,7 +546,8 @@ export interface ToolCallProps {
   name: string;
   target?: string;
   meta?: string;
-  status?: 'running' | 'done' | 'error';
+  /** `none` is for what isn't an outcome: no mark. */
+  status?: 'running' | 'done' | 'error' | 'none';
   expanded?: boolean;
   children?: ReactNode;
 }
@@ -571,7 +572,7 @@ export function ToolCall({
         <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} />
         {status === 'running' ? (
           <span className="joc-sdot joc-sdot--background" role="img" aria-label="Running" />
-        ) : (
+        ) : status === 'none' ? null : (
           <CIMark status={status === 'error' ? 'fail' : 'pass'} size={12} />
         )}
         <span className="joc-tool__name">{name}</span>
